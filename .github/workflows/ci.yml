@@ -1,0 +1,18 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Set up Python
+        run: uv python install 3.11
+      - name: Install (core + dev)
+        run: uv pip install --system -e ".[dev]"
+      - name: Verdict-bus tests (no AgentVision — sight tests skip)
+        run: python -m pytest -q
