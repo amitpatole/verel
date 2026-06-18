@@ -19,16 +19,25 @@ from .graders import (
     subprocess_runner,
     suite_sha,
 )
+from .heal import HealResult, HealRound, self_heal
 from .hooks import install_precommit, is_installed
 from .medic import Action, Diagnosis, classify_issue, quarantine_severity, triage
-from .pipeline import Stage, StageResult, inner_loop_stage, precommit_stage, run_stage
+from .pipeline import (
+    Stage,
+    StageResult,
+    inner_loop_stage,
+    precommit_stage,
+    premerge_stage,
+    run_stage,
+)
 from .rollback import Decision, RollbackPolicy, RollbackProposal
 
 __all__ = [
     "GraderSpec", "run_grader", "subprocess_runner", "suite_sha",
     "pytest_spec", "ruff_spec", "mypy_spec", "parse_pytest", "parse_ruff", "parse_mypy",
-    "Stage", "StageResult", "run_stage", "inner_loop_stage", "precommit_stage",
+    "Stage", "StageResult", "run_stage", "inner_loop_stage", "precommit_stage", "premerge_stage",
     "Action", "Diagnosis", "classify_issue", "triage", "quarantine_severity",
     "RollbackPolicy", "RollbackProposal", "Decision",
+    "self_heal", "HealResult", "HealRound",
     "install_precommit", "is_installed",
 ]

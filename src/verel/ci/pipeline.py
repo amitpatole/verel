@@ -82,3 +82,16 @@ def precommit_stage(repo: str, *, covers: list[str] | None = None) -> Stage:
 
     return Stage("pre_commit", [pytest_spec(repo, covers), ruff_spec(repo, covers)],
                  required={GraderKind.TEST})
+
+
+def premerge_stage(repo: str, *, covers: list[str] | None = None, with_types: bool = True) -> Stage:
+    """Full suite + lint (+types) — the sandbox-CI gate before a merge is allowed (§7.4).
+    Pair with a regression-guard by passing a ledger to run_stage."""
+    from .graders import mypy_spec, pytest_spec, ruff_spec
+
+    graders = [pytest_spec(repo, covers), ruff_spec(repo, covers)]
+    required = {GraderKind.TEST, GraderKind.LINT}
+    if with_types:
+        graders.append(mypy_spec(repo, covers))
+        required.add(GraderKind.TYPECHECK)
+    return Stage("pre_merge", graders, required)
