@@ -10,6 +10,7 @@ from __future__ import annotations
 from .consolidate import consolidate_failures
 from .failure_ledger import FailureLedger, regression_report
 from .local import LocalMemory
+from .mem0_backend import Mem0Memory, make_ollama_mem0
 from .promotion import (
     EvalCase,
     HeldOutCorpus,
@@ -33,6 +34,8 @@ __all__ = [
     "FailureLedger",
     "regression_report",
     "LocalMemory",
+    "Mem0Memory",
+    "make_ollama_mem0",
     "EvalCase",
     "HeldOutCorpus",
     "PromotionGate",

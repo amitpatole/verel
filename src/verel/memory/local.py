@@ -12,7 +12,6 @@ it in without touching the failure-ledger, consolidation, or the loop.
 from __future__ import annotations
 
 import math
-import re
 import sqlite3
 from pathlib import Path
 
@@ -24,24 +23,9 @@ from .view import (
     make_id,
     make_key,
     rank,
+    relevance as _relevance,
     should_prune,
 )
-
-_WORD = re.compile(r"[a-z0-9]+")
-
-
-def _tokens(s: str) -> set[str]:
-    return set(_WORD.findall(s.lower()))
-
-
-def _relevance(query: str, record: MemoryRecord) -> float:
-    q = _tokens(query)
-    if not q:
-        return 0.0
-    hay = _tokens(f"{record.subject} {record.predicate} {record.text}")
-    if not hay:
-        return 0.0
-    return len(q & hay) / len(q)
 
 
 _COLS = (

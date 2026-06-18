@@ -20,10 +20,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from enum import Enum
 from typing import Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field
+
+_WORD = re.compile(r"[a-z0-9]+")
+
+
+def tokens(s: str) -> set[str]:
+    return set(_WORD.findall(s.lower()))
 
 # Ranking weights (documented; the v2 MMR assembler refines these — §11.2).
 W_REL = 0.5  # lexical relevance to the query
@@ -46,6 +53,7 @@ class MemoryKind(str, Enum):
     FACT = "fact"
     DESIGN_RULE = "design_rule"  # consolidated cross-episode rule (§5.5 step 2b)
     FAILURE = "failure"  # failure-ledger entry (§7.5)
+    SKILL = "skill"  # agent-built tool / skill — procedural memory (§7.6)
 
 
 class MemoryRecord(BaseModel):
@@ -86,6 +94,18 @@ def make_key(subject: str, predicate: str, scope: str) -> str:
 
 def make_id(subj_pred_key: str) -> str:
     return hashlib.blake2s(subj_pred_key.encode()).hexdigest()[:16]
+
+
+def relevance(query: str, record: MemoryRecord) -> float:
+    """Lexical token-overlap relevance (shared by all backends; embeddings are the v2
+    upgrade behind the same interface)."""
+    q = tokens(query)
+    if not q:
+        return 0.0
+    hay = tokens(f"{record.subject} {record.predicate} {record.text}")
+    if not hay:
+        return 0.0
+    return len(q & hay) / len(q)
 
 
 def rank(record: MemoryRecord, relevance: float) -> float:
