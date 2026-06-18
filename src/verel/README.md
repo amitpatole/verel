@@ -22,8 +22,25 @@ memory/          The trust layer Verel owns over a rentable backend (§5, §7.5)
                    interference rule, documented ranking, exact prune rule
   local.py         zero-dep sqlite MemoryView (mem0 is the drop-in behind the same Protocol)
   failure_ledger.py  record failures → mark fixed on PASS → regression-guard gates reintroductions
-  consolidate.py   episodic failures → CANDIDATE semantic DesignRule (Ollama Cloud; never auto-verified)
+  consolidate.py   episodic failures → CANDIDATE `inferred` DesignRule (Ollama Cloud; cluster=evidence)
+  promotion.py     held-out, attested, agent-inaccessible eval gate: inferred→verified; leakage canary
+fleet/           Agents managing agents — the v1-cut control plane (§6)
+  task.py          Task DAG model, roles, retry, budget lease
+  scheduler.py     single-writer scheduler: deps/barriers (all|k_of_n|optional), concurrency,
+                   retry/quarantine, hard budget, WAL resume; gates every node via the verdict bus
+  manager.py       fan-out decision + plane validation (independence/acyclicity/clamp)
+  worker.py        worker adapter — runs ultracode_loop, so a worker can't self-declare done
 loop.py          The single-worker ultracode loop (§7.3, §8.5); FixHook + optional memory ledger
+```
+
+## Demos
+
+```bash
+python examples/demo_overflow_loop.py   # deterministic fix → self-computed pass
+python examples/demo_agent_loop.py       # real LLM agent fixes it (Ollama Cloud)
+python examples/demo_memory_loop.py      # fix → remember → reintroduce → memory blocks it
+python examples/demo_promotion.py        # induce → held-out attested eval → verified (+canary)
+python examples/demo_fleet_loop.py       # manager fans out workers; each gated by its own eyes
 ```
 
 ## Try it

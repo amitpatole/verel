@@ -12,11 +12,14 @@ offline for a mundane reason (batching cost/latency), NOT the neural replay rati
 from __future__ import annotations
 
 import json
+import re
 from collections import defaultdict
 from typing import Callable
 
 from ..agents import llm
 from .view import MemoryKind, MemoryRecord, MemoryView, Trust
+
+_WORD = re.compile(r"[a-z0-9-]+")
 
 # A chat function: (messages) -> text. Injectable so tests run offline.
 ChatFn = Callable[[list[dict]], str]
@@ -63,6 +66,9 @@ def consolidate_failures(
         parsed = _parse(reply)
         if parsed is None:
             continue
+        # keywords ground the rule's matcher for the held-out promotion eval (§7.7) — derived
+        # from the induced rule text, not hand-set, so the gate tests what was actually induced.
+        keywords = sorted({w for w in _WORD.findall(parsed["rule"].lower()) if len(w) > 3})[:12]
         rule = MemoryRecord(
             kind=MemoryKind.DESIGN_RULE,
             subject=parsed["subject"],
@@ -74,7 +80,15 @@ def consolidate_failures(
             trust=Trust.CANDIDATE,  # NEVER auto-verified
             epistemic_confidence=0.5,
             support_count=len(group),
-        ).with_detail(from_kind=kind, cluster_size=len(group))
+        ).with_detail(
+            # §5.5: an induced rule starts `inferred` — its evidence is the CLUSTER, and it
+            # cannot reach `corroborated`/`verified` without a held-out graded eval (§7.7).
+            grounding="inferred",
+            covers_kind=kind,
+            keywords=keywords,
+            from_kind=kind,
+            cluster_size=len(group),
+        )
         written.append(mem.write(rule, ts=ts))
     return written
 
