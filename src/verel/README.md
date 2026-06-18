@@ -24,6 +24,10 @@ memory/          The trust layer Verel owns over a rentable backend (§5, §7.5)
   failure_ledger.py  record failures → mark fixed on PASS → regression-guard gates reintroductions
   consolidate.py   episodic failures → CANDIDATE `inferred` DesignRule (Ollama Cloud; cluster=evidence)
   promotion.py     held-out, attested, agent-inaccessible eval gate: inferred→verified; leakage canary
+  mem0_backend.py  Mem0Memory — the rented mem0 store behind the SAME MemoryView Protocol
+toolsmith/       Agents building their own tools (§7.6)
+  registry.py      signed, versioned tool registry as SKILL records; sandboxed load_callable
+  smith.py         detect → scaffold (LLM) → test (held-out) → register (gated) → reuse
 fleet/           Agents managing agents — the v1-cut control plane (§6)
   task.py          Task DAG model, roles, retry, budget lease
   scheduler.py     single-writer scheduler: deps/barriers (all|k_of_n|optional), concurrency,
@@ -41,6 +45,7 @@ python examples/demo_agent_loop.py       # real LLM agent fixes it (Ollama Cloud
 python examples/demo_memory_loop.py      # fix → remember → reintroduce → memory blocks it
 python examples/demo_promotion.py        # induce → held-out attested eval → verified (+canary)
 python examples/demo_fleet_loop.py       # manager fans out workers; each gated by its own eyes
+python examples/demo_toolsmith.py        # agent scaffolds+verifies a tool, reuses it, gates destructive
 ```
 
 ## Try it
