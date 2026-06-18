@@ -6,9 +6,9 @@ Verel itself computes `pass`. No hand-written fix — the agent does the work, t
 decides done.
 
 Run:  python examples/demo_agent_loop.py
-Needs: pip install -e ".[sight]"  AND an OpenAI key (OPENAI_API_KEY or ~/.config/OpenAI/key).
-Model: VEREL_CODER_MODEL (default gpt-4o-mini). Claude is the production default once a key
-is present — see src/verel/agents/llm.py.
+Needs: pip install -e ".[sight]"  AND an LLM key. Default provider is Ollama Cloud
+(~/.config/ollama/key), default model qwen3-coder:480b. Override with VEREL_LLM_PROVIDER /
+VEREL_CODER_MODEL — see src/verel/agents/llm.py.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ BROKEN = """<!doctype html>
 
 async def main() -> int:
     if not have_key():
-        print("SKIP: no OpenAI key (set OPENAI_API_KEY or ~/.config/OpenAI/key).")
+        print("SKIP: no LLM key (Ollama Cloud: ~/.config/ollama/key or OLLAMA_API_KEY).")
         return 0
 
     with tempfile.TemporaryDirectory() as d:
