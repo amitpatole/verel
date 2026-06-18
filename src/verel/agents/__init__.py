@@ -6,6 +6,7 @@ agents) is v2 per docs/VEREL_DESIGN.md §6.
 
 from __future__ import annotations
 
+from .code_fixer import fix_code
 from .coder import Coder, LLMCoder, make_fix_hook
 
-__all__ = ["Coder", "LLMCoder", "make_fix_hook"]
+__all__ = ["Coder", "LLMCoder", "make_fix_hook", "fix_code"]

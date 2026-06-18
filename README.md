@@ -23,18 +23,36 @@ Senses (AgentVision eyes + logs/tests/metrics) ─┤
 Tool-smith (agent-built tooling) ─┘
 ```
 
-## Phase 0 — walking skeleton (built ✅)
-
-The unified `Report`/`Percept` schema + `gate()` + scrubbed-fingerprint `progressed()`/
-`stuck`, wired to the AgentVision `sight` adapter, driving a single-worker ultracode loop.
-**DoD met: Verel fixes a real UI overflow and the loop terminates on a `pass` verdict it
-computed itself** (and detects `stuck` honestly when a fix doesn't actually work).
+## Install
 
 ```bash
-pip install -e ".[dev]"      # verdict bus + 32 tests
-pip install -e ".[sight]"    # + AgentVision (the eyes)
-python examples/demo_overflow_loop.py
+pip install verel                 # core: the verdict bus + memory + fleet + tool-smith + CI
+pip install "verel[sight]"        # + AgentVision (the eyes)
+pip install "verel[mem0,mcp]"     # + rented memory backend, + MCP server
 ```
 
-Code + module guide: [`src/verel/`](src/verel/README.md). No memory, fleet, or
-consolidation yet — those are Phase v2+ per [the roadmap](docs/VEREL_DESIGN.md) §11.
+```bash
+verel doctor                      # check the environment
+verel heal --repo .               # self-healing CI: failing tests → agent fixes → green
+verel loop dashboard.html         # fix a UI until AgentVision returns a pass verdict
+verel fleet "fix the pages" --artifacts a.html b.html
+```
+
+Default LLM is **Ollama Cloud** (`~/.config/ollama/key`, model `qwen3-coder:480b`); set
+`VEREL_LLM_PROVIDER=openai` to switch. Claude is one branch away in `agents/llm.py`.
+
+## What's built (all five organs, end-to-end)
+
+| Organ | Module | What works |
+|---|---|---|
+| **Verdict bus** | `verel.verdict` | one schema for vision **+ tests + lint + types**; advisory ceiling, grader attestation, scrubbed fingerprints, strict-subset stuck/progress |
+| **Eyes** | `verel.senses` | AgentVision adapter — perception feeds the bus and memory |
+| **Agents** | `verel.agents` | coder (fixes UIs) + code-fixer (patches source); Ollama Cloud |
+| **Brain** | `verel.memory` | trust layer (LocalMemory / mem0), failure ledger + regression guard, consolidation, **held-out attested promotion gate** |
+| **Fleet** | `verel.fleet` | single-writer scheduler (barriers/budget/WAL), **LLM-driven manager**, **isolated git worktrees** |
+| **Tool-smith** | `verel.toolsmith` | detect → scaffold → test → register → reuse; signed registry; sandboxed exec |
+| **Agent-run CI/CD** | `verel.ci` | tests/lint/type graders, inner-loop/pre-commit/pre-merge stages, **self-healing**, ci-medic, deterministic rollback engine, git hook + CLI |
+| **Surfaces** | `verel.cli`, `verel.mcp_server` | `verel` CLI, MCP server, `verel-ci` |
+
+**106 tests, 9 runnable demos.** Code + module guide: [`src/verel/`](src/verel/README.md).
+Design & roadmap: [docs/VEREL_DESIGN.md](docs/VEREL_DESIGN.md). Changelog: [CHANGELOG.md](CHANGELOG.md).
