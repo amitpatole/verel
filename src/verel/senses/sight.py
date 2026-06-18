@@ -91,11 +91,10 @@ def from_agentvision(av_report, *, sense: str = "sight", agent_id: str = "", art
         bbox = getattr(av, "bbox", None)
         locator = None
         if bbox is not None:
-            locator = json.dumps(
-                {"x": bbox.x, "y": bbox.y, "w": bbox.w, "h": bbox.h}
-                if hasattr(bbox, "x")
-                else {}
-            )
+            if hasattr(bbox, "model_dump"):
+                locator = json.dumps(bbox.model_dump(), default=str)
+            elif hasattr(bbox, "__dict__"):
+                locator = json.dumps(vars(bbox), default=str)
         issue = Issue(
             kind=IssueKind(str(getattr(av.kind, "value", av.kind))),
             severity=_sev(av.severity),
