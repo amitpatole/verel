@@ -1,0 +1,196 @@
+"""LocalMemory — a zero-dependency SQLite MemoryView (default backend).
+
+Implements the full trust layer (§5): split epistemic_confidence vs retrieval_strength,
+the interference rule (subj_pred_key supersede), the documented ranking, power-law decay,
+and the exact prune rule. Recall is lexical (token overlap) — embeddings are the v2 upgrade
+behind the same interface; the design explicitly defers the weighted MMR assembler to v2.
+
+mem0 is the rentable alternative behind the SAME `MemoryView` Protocol (see view.py); swap
+it in without touching the failure-ledger, consolidation, or the loop.
+"""
+
+from __future__ import annotations
+
+import math
+import re
+import sqlite3
+from pathlib import Path
+
+from .view import (
+    MemoryKind,
+    MemoryRecord,
+    MemoryView,
+    Trust,
+    make_id,
+    make_key,
+    rank,
+    should_prune,
+)
+
+_WORD = re.compile(r"[a-z0-9]+")
+
+
+def _tokens(s: str) -> set[str]:
+    return set(_WORD.findall(s.lower()))
+
+
+def _relevance(query: str, record: MemoryRecord) -> float:
+    q = _tokens(query)
+    if not q:
+        return 0.0
+    hay = _tokens(f"{record.subject} {record.predicate} {record.text}")
+    if not hay:
+        return 0.0
+    return len(q & hay) / len(q)
+
+
+_COLS = (
+    "id, kind, subject, predicate, text, scope, subj_pred_key, source, provenance, trust, "
+    "epistemic_confidence, retrieval_strength, support_count, created_ts, last_recall_ts, detail_json"
+)
+
+
+class LocalMemory(MemoryView):
+    def __init__(self, path: str | Path = ":memory:"):
+        self.path = str(path)
+        if self.path != ":memory:":
+            Path(self.path).parent.mkdir(parents=True, exist_ok=True)
+        self._db = sqlite3.connect(self.path)
+        self._db.row_factory = sqlite3.Row
+        self._db.execute(
+            f"""CREATE TABLE IF NOT EXISTS memory (
+                id TEXT PRIMARY KEY, kind TEXT, subject TEXT, predicate TEXT, text TEXT,
+                scope TEXT, subj_pred_key TEXT, source TEXT, provenance TEXT, trust TEXT,
+                epistemic_confidence REAL, retrieval_strength REAL, support_count INTEGER,
+                created_ts REAL, last_recall_ts REAL, detail_json TEXT)"""
+        )
+        self._db.commit()
+
+    # ---- serialization ----
+    def _row_to_record(self, row: sqlite3.Row) -> MemoryRecord:
+        d = dict(row)
+        d["provenance"] = d["provenance"].split("\x1f") if d["provenance"] else []
+        d["trust"] = Trust(d["trust"])
+        d["kind"] = MemoryKind(d["kind"])
+        return MemoryRecord(**d)
+
+    def _upsert(self, r: MemoryRecord) -> None:
+        self._db.execute(
+            f"INSERT OR REPLACE INTO memory ({_COLS}) VALUES "
+            "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                r.id, r.kind.value, r.subject, r.predicate, r.text, r.scope, r.subj_pred_key,
+                r.source, "\x1f".join(r.provenance), r.trust.value, r.epistemic_confidence,
+                r.retrieval_strength, r.support_count, r.created_ts, r.last_recall_ts, r.detail_json,
+            ),
+        )
+        self._db.commit()
+
+    # ---- MemoryView API ----
+    def write(self, record: MemoryRecord, *, ts: float = 0.0) -> MemoryRecord:
+        """Write with the interference rule: same (subject, predicate, scope) supersedes,
+        accumulating support_count and corroboration rather than duplicating."""
+        if not record.subj_pred_key:
+            record.subj_pred_key = make_key(record.subject, record.predicate, record.scope)
+        record.id = record.id or make_id(record.subj_pred_key)
+        record.created_ts = record.created_ts or ts
+
+        existing = self.get(record.id)
+        if existing is not None:
+            if existing.text.strip().lower() == record.text.strip().lower():
+                # same claim again -> corroboration (raises confidence + support, resets strength)
+                existing.support_count += 1
+                existing.epistemic_confidence = min(1.0, existing.epistemic_confidence + 0.1)
+                existing.retrieval_strength = 1.0
+                for p in record.provenance:
+                    if p not in existing.provenance:
+                        existing.provenance.append(p)
+                # metadata (status transitions, times_seen, ...) updates to the latest write —
+                # corroboration is about the CLAIM text, not its bookkeeping.
+                incoming = record.detail
+                if incoming:
+                    existing.with_detail(**incoming)
+                self._upsert(existing)
+                return existing
+            # different value for the same key -> supersede (interference), keep history note
+            record.support_count = 1
+            record.retrieval_strength = 1.0
+            record.with_detail(superseded=existing.text)
+        self._upsert(record)
+        return record
+
+    def get(self, record_id: str) -> MemoryRecord | None:
+        row = self._db.execute(f"SELECT {_COLS} FROM memory WHERE id=?", (record_id,)).fetchone()
+        return self._row_to_record(row) if row else None
+
+    def recall(self, query: str, *, scope=None, kind=None, k: int = 5, ts: float = 0.0):
+        rows = self._db.execute(f"SELECT {_COLS} FROM memory").fetchall()
+        cands = [self._row_to_record(r) for r in rows]
+        if scope is not None:
+            cands = [c for c in cands if c.scope == scope or c.scope == "global"]
+        if kind is not None:
+            cands = [c for c in cands if c.kind == kind]
+        cands = [c for c in cands if c.trust != Trust.REJECTED]
+        scored = sorted(cands, key=lambda c: rank(c, _relevance(query, c)), reverse=True)
+        top = [c for c in scored if _relevance(query, c) > 0][:k]
+        # recall reinforces retrieval_strength ONLY (testing effect) — never confidence.
+        for c in top:
+            c.retrieval_strength = min(1.0, c.retrieval_strength + 0.3)
+            c.last_recall_ts = ts or c.last_recall_ts
+            self._upsert(c)
+        return top
+
+    def _adjust(self, record_id: str, *, ec: float = 0.0, support: int = 0,
+                trust: Trust | None = None) -> MemoryRecord | None:
+        r = self.get(record_id)
+        if r is None:
+            return None
+        r.epistemic_confidence = max(0.0, min(1.0, r.epistemic_confidence + ec))
+        r.support_count += support
+        if trust is not None:
+            r.trust = trust
+        self._upsert(r)
+        return r
+
+    def corroborate(self, record_id, *, delta: float = 0.15):
+        return self._adjust(record_id, ec=delta, support=1)
+
+    def contradict(self, record_id, *, delta: float = 0.25):
+        r = self._adjust(record_id, ec=-delta)
+        if r is not None and r.epistemic_confidence < 0.2:
+            r = self._adjust(record_id, trust=Trust.REJECTED)
+        return r
+
+    def promote(self, record_id):
+        return self._adjust(record_id, trust=Trust.VERIFIED)
+
+    def demote(self, record_id):
+        return self._adjust(record_id, trust=Trust.CANDIDATE)
+
+    def decay(self, *, half_life_s: float = 604800.0, now: float = 0.0) -> int:
+        """Apply power-law-ish exponential decay to retrieval_strength by time since last
+        recall, then prune per the exact §5 rule. Confidence is untouched. Returns #pruned."""
+        rows = self._db.execute(f"SELECT {_COLS} FROM memory").fetchall()
+        pruned = 0
+        for row in rows:
+            r = self._row_to_record(row)
+            ref = r.last_recall_ts or r.created_ts
+            if now and ref:
+                elapsed = max(0.0, now - ref)
+                r.retrieval_strength = r.retrieval_strength * math.pow(0.5, elapsed / half_life_s)
+            if should_prune(r):
+                self._db.execute("DELETE FROM memory WHERE id=?", (r.id,))
+                pruned += 1
+            else:
+                self._upsert(r)
+        self._db.commit()
+        return pruned
+
+    def all(self, *, scope=None, kind=None):
+        rows = self._db.execute(f"SELECT {_COLS} FROM memory").fetchall()
+        recs = [self._row_to_record(r) for r in rows]
+        if scope is not None:
+            recs = [r for r in recs if r.scope == scope]
+        if kind is not None:
+            recs = [r for r in recs if r.kind == kind]
+        return recs

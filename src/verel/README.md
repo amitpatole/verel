@@ -14,7 +14,16 @@ senses/          Perception that feeds the bus (§8)
   sight.py         AgentVision adapter — grader identity off Issue.source, split per source,
                    CLASSIC_CAPABILITIES imported from source (drift-proof)
   percept_log.py   Verel-owned episodic log + progressed/stuck (crash-safe, not LoopSession's)
-loop.py          The single-worker ultracode loop (§7.3, §8.5) with a pluggable FixHook
+agents/          The seam where models author work the bus then gates (§11.1 item 5)
+  llm.py           dependency-free provider-agnostic chat (Ollama Cloud default; OpenAI; Claude-ready)
+  coder.py         Coder protocol + LLMCoder + make_fix_hook() — agent sees only grader findings
+memory/          The trust layer Verel owns over a rentable backend (§5, §7.5)
+  view.py          MemoryView protocol + records: split epistemic_confidence vs retrieval_strength,
+                   interference rule, documented ranking, exact prune rule
+  local.py         zero-dep sqlite MemoryView (mem0 is the drop-in behind the same Protocol)
+  failure_ledger.py  record failures → mark fixed on PASS → regression-guard gates reintroductions
+  consolidate.py   episodic failures → CANDIDATE semantic DesignRule (Ollama Cloud; never auto-verified)
+loop.py          The single-worker ultracode loop (§7.3, §8.5); FixHook + optional memory ledger
 ```
 
 ## Try it
