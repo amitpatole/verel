@@ -7,8 +7,10 @@ gates every node through the verdict bus. Worker fencing + git fencing sink are 
 
 from __future__ import annotations
 
+from .llm_manager import decide_fanout
 from .manager import FanOut, Subtask, clamp, plan_over_artifacts, to_tasks, validate_fanout
 from .scheduler import DagError, Scheduler, WorkerFn, WorkerResult
+from .worktree import LeaseHeld, Worktree, WorktreeError, WorktreeManager
 from .task import (
     Barrier,
     BarrierKind,
@@ -19,15 +21,20 @@ from .task import (
     Task,
     TaskState,
 )
-from .worker import ultracode_worker
+from .worker import ultracode_worker, worktree_ultracode_worker
 
 __all__ = [
     "FanOut",
     "Subtask",
     "clamp",
+    "decide_fanout",
     "plan_over_artifacts",
     "to_tasks",
     "validate_fanout",
+    "LeaseHeld",
+    "Worktree",
+    "WorktreeError",
+    "WorktreeManager",
     "DagError",
     "Scheduler",
     "WorkerFn",
@@ -41,4 +48,5 @@ __all__ = [
     "Task",
     "TaskState",
     "ultracode_worker",
+    "worktree_ultracode_worker",
 ]

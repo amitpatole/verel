@@ -33,7 +33,9 @@ fleet/           Agents managing agents — the v1-cut control plane (§6)
   scheduler.py     single-writer scheduler: deps/barriers (all|k_of_n|optional), concurrency,
                    retry/quarantine, hard budget, WAL resume; gates every node via the verdict bus
   manager.py       fan-out decision + plane validation (independence/acyclicity/clamp)
-  worker.py        worker adapter — runs ultracode_loop, so a worker can't self-declare done
+  llm_manager.py   LLM-driven manager (Ollama) — model proposes, plane disposes; safe fallback
+  worktree.py      isolated git worktree per worker + exclusive advisory lease (§6.1/§6.3 v1)
+  worker.py        worker adapters — ultracode_loop, and worktree_ultracode_worker (isolated)
 loop.py          The single-worker ultracode loop (§7.3, §8.5); FixHook + optional memory ledger
 ```
 
@@ -46,6 +48,7 @@ python examples/demo_memory_loop.py      # fix → remember → reintroduce → 
 python examples/demo_promotion.py        # induce → held-out attested eval → verified (+canary)
 python examples/demo_fleet_loop.py       # manager fans out workers; each gated by its own eyes
 python examples/demo_toolsmith.py        # agent scaffolds+verifies a tool, reuses it, gates destructive
+python examples/demo_fleet_worktrees.py  # LLM manager fans out → workers fix pages in isolated worktrees
 ```
 
 ## Try it
