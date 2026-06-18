@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "verel"
+version = "0.0.1"
+description = "The agent framework where nothing is done until a grader returns a verdict — verification + grounded perception (AgentVision eyes). Reserved; under active design."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "Amit Patole", email = "amit.patole@gmail.com" }]
+keywords = ["agents", "llm", "ai-agents", "evals", "verification", "agentvision", "orchestration", "memory"]
+classifiers = [
+  "Development Status :: 1 - Planning",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Software Development :: Libraries",
+]
+
+[project.urls]
+Homepage = "https://github.com/amitpatole/verel"
+Source = "https://github.com/amitpatole/verel"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/verel"]
