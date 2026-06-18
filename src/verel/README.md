@@ -28,6 +28,12 @@ memory/          The trust layer Verel owns over a rentable backend (§5, §7.5)
 toolsmith/       Agents building their own tools (§7.6)
   registry.py      signed, versioned tool registry as SKILL records; sandboxed load_callable
   smith.py         detect → scaffold (LLM) → test (held-out) → register (gated) → reuse
+ci/              Agent-run CI/CD on the verdict bus (§7.4)
+  graders.py       tests/lint/types as senses → attested verdict-bus Reports (pure parsers)
+  pipeline.py      inner-loop + pre-commit stages: gate + failure-memory regression check
+  medic.py         classify failures → retry / regen-lockfile / quarantine-flaky / fix-branch
+  rollback.py      deterministic policy engine — destructive actions never use advisory evidence
+  hooks.py + __main__.py   `python -m verel.ci {check,precommit,install}` for git hooks/agents
 fleet/           Agents managing agents — the v1-cut control plane (§6)
   task.py          Task DAG model, roles, retry, budget lease
   scheduler.py     single-writer scheduler: deps/barriers (all|k_of_n|optional), concurrency,
@@ -49,6 +55,7 @@ python examples/demo_promotion.py        # induce → held-out attested eval →
 python examples/demo_fleet_loop.py       # manager fans out workers; each gated by its own eyes
 python examples/demo_toolsmith.py        # agent scaffolds+verifies a tool, reuses it, gates destructive
 python examples/demo_fleet_worktrees.py  # LLM manager fans out → workers fix pages in isolated worktrees
+python examples/demo_cicd.py             # real pytest grader gates FAIL→PASS; medic + rollback engine
 ```
 
 ## Try it
