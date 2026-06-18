@@ -10,6 +10,13 @@ from __future__ import annotations
 from .consolidate import consolidate_failures
 from .failure_ledger import FailureLedger, regression_report
 from .local import LocalMemory
+from .promotion import (
+    EvalCase,
+    HeldOutCorpus,
+    PromotionGate,
+    PromotionResult,
+    evaluate_rule,
+)
 from .view import (
     MemoryKind,
     MemoryRecord,
@@ -26,6 +33,11 @@ __all__ = [
     "FailureLedger",
     "regression_report",
     "LocalMemory",
+    "EvalCase",
+    "HeldOutCorpus",
+    "PromotionGate",
+    "PromotionResult",
+    "evaluate_rule",
     "MemoryKind",
     "MemoryRecord",
     "MemoryView",
