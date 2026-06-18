@@ -1,0 +1,156 @@
+"""The Verdict-bus data model — the unified Report/Percept contract.
+
+This is an *extension* of AgentVision's `Report` reached through the sight adapter
+(`verel.senses.sight`), NOT a copy. Fields marked COMPUTED are produced by Verel:
+`Issue.fingerprint` (§7.2), `Report.cost_usd`, `Report.errored`, `Report.run_receipt`.
+
+Faithful to docs/VEREL_DESIGN.md §7.1.
+"""
+
+from __future__ import annotations
+
+import json
+from enum import Enum
+
+from pydantic import BaseModel, Field
+
+
+class Verdict(str, Enum):
+    PASS = "pass"
+    WARN = "warn"
+    FAIL = "fail"
+
+
+class Severity(str, Enum):
+    INFO = "info"
+    WARNING = "warning"
+    ERROR = "error"
+    CRITICAL = "critical"
+
+
+class Confidence(str, Enum):
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+class IssueKind(str, Enum):
+    # Mirrors agentvision.models.report.IssueKind so the sight adapter is a pure mapping.
+    LAYOUT = "layout"
+    OVERFLOW = "overflow"
+    CLIPPED = "clipped"
+    CONTRAST = "contrast"
+    MISSING_ELEMENT = "missing_element"
+    BROKEN_IMAGE = "broken_image"
+    OVERLAP = "overlap"
+    BLANK = "blank"
+    ERROR_TEXT = "error_text"
+    TYPO = "typo"
+    OTHER = "other"
+
+
+class GraderKind(str, Enum):
+    # Perception / structural sources (mirror AgentVision Issue.source).
+    VISION = "vision"
+    DOM = "dom"
+    OCR = "ocr"
+    CV = "cv"
+    # Functional / semantic graders.
+    TEST = "test"
+    TYPECHECK = "typecheck"
+    LINT = "lint"
+    LLM_JUDGE = "llm_judge"
+    PERF = "perf"
+    SECURITY = "security"
+    CONTRACT = "contract"
+    COST = "cost"
+    OTHER = "other"
+
+
+class RunReceipt(BaseModel):
+    """Grader-execution attestation (§7.1). Required for graders in the `required` set."""
+
+    suite_sha: str  # which frozen suite actually ran
+    inputs_digest: str  # digest of the artifact/diff the grader saw
+    coverage_assertion: str  # e.g. "scanned files: src/a.py,src/b.py" — must intersect the diff
+    runner_identity: str  # signing identity of the separate-trust-domain runner
+    signature: str  # over (suite_sha, inputs_digest, coverage_assertion, runner_identity)
+
+    def signing_payload(self) -> str:
+        return "|".join(
+            [self.suite_sha, self.inputs_digest, self.coverage_assertion, self.runner_identity]
+        )
+
+
+class Issue(BaseModel):
+    kind: IssueKind
+    severity: Severity
+    message: str
+    locator: str | None = None
+    locator_precise: bool = False
+    confidence: Confidence = Confidence.MEDIUM
+    source: GraderKind = GraderKind.TEST
+    fingerprint: str = ""  # NIRVANA-COMPUTED, REQUIRED once through fingerprint.assign() (§7.2)
+    detail_json: str = "{}"
+
+    @property
+    def detail(self) -> dict:
+        try:
+            return json.loads(self.detail_json)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+
+
+class Report(BaseModel):
+    """EXTENSION of AgentVision's Report via the §8.3 adapter."""
+
+    verdict: Verdict
+    summary: str
+    issues: list[Issue] = Field(default_factory=list)
+    capabilities: list[IssueKind] = Field(default_factory=list)
+    grader: GraderKind = GraderKind.OTHER
+    model: str | None = None
+    cost_usd: float = 0.0
+    elapsed_ms: int = 0
+    errored: bool = False  # ran-and-failed vs did-not-run
+    run_receipt: RunReceipt | None = None  # required for graders in `required` set
+    artifacts: dict[str, str] = Field(default_factory=dict)
+    schema_version: str = "2.0"
+
+
+class Observation(BaseModel):
+    """One percept observation — the per-issue payload of a Percept."""
+
+    kind: IssueKind
+    severity: Severity
+    message: str
+    locator: str | None = None
+    locator_precise: bool = False
+    confidence: Confidence = Confidence.MEDIUM
+    source: GraderKind = GraderKind.OTHER
+    fingerprint: str = ""
+
+
+class Percept(BaseModel):
+    """The senses/perception-bus envelope (§8.3). Sight is one sense among many."""
+
+    sense: str  # "sight" | "logs" | "tests" | "metrics" | "types"
+    verdict: Verdict
+    summary: str
+    observations: list[Observation] = Field(default_factory=list)
+    signature: list[list[str]] = Field(default_factory=list)  # serialized issue_signature
+    ts: str = ""
+    agent_id: str = ""
+    artifact_id: str = ""
+    raw_ref: str | None = None
+    trace_ctx: str | None = None
+    # populated for sense == "sight"
+    viewport: str | None = None
+    device_scale: float | None = None
+    image_path: str | None = None
+
+
+class GateResult(BaseModel):
+    verdict: Verdict
+    reason: str = ""
+    attributions: dict[str, GraderKind] = Field(default_factory=dict)  # fingerprint -> grader

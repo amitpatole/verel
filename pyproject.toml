@@ -12,16 +12,27 @@ license = "MIT"
 authors = [{ name = "Amit Patole", email = "amit.patole@gmail.com" }]
 keywords = ["agents", "llm", "ai-agents", "evals", "verification", "agentvision", "orchestration", "memory"]
 classifiers = [
-  "Development Status :: 1 - Planning",
+  "Development Status :: 2 - Pre-Alpha",
   "Intended Audience :: Developers",
   "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
   "Topic :: Software Development :: Libraries",
 ]
+dependencies = [
+  "pydantic>=2",
+]
+
+[project.optional-dependencies]
+sight = ["agentvision[render]"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23"]
 
 [project.urls]
 Homepage = "https://github.com/amitpatole/verel"
 Source = "https://github.com/amitpatole/verel"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/verel"]

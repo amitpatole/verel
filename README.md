@@ -23,9 +23,18 @@ Senses (AgentVision eyes + logs/tests/metrics) ─┤
 Tool-smith (agent-built tooling) ─┘
 ```
 
-## Smallest first useful thing (Phase 0, ~2–4 weeks)
+## Phase 0 — walking skeleton (built ✅)
 
-Unified `Report`/`Percept` schema + `gate()` + scrubbed-fingerprint `progressed()`,
-wired to the AgentVision `sight` adapter over MCP, driving a single-worker ultracode loop
-on one real repo's UI. **Done = Verel fixes a real UI overflow and the loop terminates on
-a `pass` verdict it computed itself.** No memory, no fleet, no consolidation yet.
+The unified `Report`/`Percept` schema + `gate()` + scrubbed-fingerprint `progressed()`/
+`stuck`, wired to the AgentVision `sight` adapter, driving a single-worker ultracode loop.
+**DoD met: Verel fixes a real UI overflow and the loop terminates on a `pass` verdict it
+computed itself** (and detects `stuck` honestly when a fix doesn't actually work).
+
+```bash
+pip install -e ".[dev]"      # verdict bus + 32 tests
+pip install -e ".[sight]"    # + AgentVision (the eyes)
+python examples/demo_overflow_loop.py
+```
+
+Code + module guide: [`src/verel/`](src/verel/README.md). No memory, fleet, or
+consolidation yet — those are Phase v2+ per [the roadmap](docs/VEREL_DESIGN.md) §11.
