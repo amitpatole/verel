@@ -14,15 +14,16 @@ jobs:
         run: |
           uv venv --python 3.11
           uv pip install -e ".[dev]"
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
       - name: Lint (ruff)
-        run: uv run ruff check src tests examples
+        run: ruff check src tests examples
       - name: Types (mypy)
-        run: uv run mypy src
+        run: mypy src
       - name: Tests (sight/mem0/bwrap tests skip when deps absent)
-        run: uv run python -m pytest -q
+        run: python -m pytest -q
       - name: Dogfood — Verel gates Verel via its own verdict bus
         run: |
-          uv run python - <<'PY'
+          python - <<'PY'
           from verel.ci import premerge_stage, run_stage
           res = run_stage(premerge_stage(".", covers=["src"]), diff_files={"src"})
           print("premerge verdict:", res.verdict.value)
