@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.1 — semantic recall + real tool sandbox
+
+- **Semantic memory recall** (`memory/embed.py`): pluggable `Embedder` (`HashEmbedder` offline,
+  `OpenAIEmbedder` semantic); `LocalMemory(embedder=...)` ranks recall by cosine similarity, so
+  a query with no shared words still finds the right memory. Vectors persist across reinforcement.
+- **Subprocess sandbox for tools** (`toolsmith/sandbox.py`): runs agent-built tool code in an
+  isolated interpreter (`python -I -S`) with CPU/memory/file-size rlimits and a wall-clock
+  timeout — a genuine process boundary, not just a restricted namespace. `ToolSmith(sandbox=True)`
+  evaluates candidates there. Honest about limits (no network/read isolation; that's the §7.7 runner).
+- 116 tests; demo_semantic_recall.py.
+
 ## 0.1.0 — first end-to-end release
 
 The five design organs all have working, tested slices, gated by Verel's own verdict bus.

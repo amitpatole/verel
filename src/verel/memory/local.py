@@ -35,8 +35,9 @@ _COLS = (
 
 
 class LocalMemory(MemoryView):
-    def __init__(self, path: str | Path = ":memory:"):
+    def __init__(self, path: str | Path = ":memory:", *, embedder=None):
         self.path = str(path)
+        self.embedder = embedder  # optional: enables semantic (cosine) recall (§5.6)
         if self.path != ":memory:":
             Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(self.path)
@@ -46,9 +47,34 @@ class LocalMemory(MemoryView):
                 id TEXT PRIMARY KEY, kind TEXT, subject TEXT, predicate TEXT, text TEXT,
                 scope TEXT, subj_pred_key TEXT, source TEXT, provenance TEXT, trust TEXT,
                 epistemic_confidence REAL, retrieval_strength REAL, support_count INTEGER,
-                created_ts REAL, last_recall_ts REAL, detail_json TEXT)"""
+                created_ts REAL, last_recall_ts REAL, detail_json TEXT, vector TEXT DEFAULT '')"""
         )
+        # migrate older dbs that predate the vector column
+        cols = {r[1] for r in self._db.execute("PRAGMA table_info(memory)")}
+        if "vector" not in cols:
+            self._db.execute("ALTER TABLE memory ADD COLUMN vector TEXT DEFAULT ''")
         self._db.commit()
+
+    # ---- embeddings ----
+    def _embed_text(self, r: MemoryRecord) -> str:
+        return f"{r.subject} {r.predicate} {r.text}".strip()
+
+    def _set_vector(self, record_id: str, text: str) -> None:
+        if not self.embedder:
+            return
+        import json as _json
+
+        vec = self.embedder.embed([text])[0]
+        self._db.execute("UPDATE memory SET vector=? WHERE id=?", (_json.dumps(vec), record_id))
+        self._db.commit()
+
+    def _get_vector(self, record_id: str) -> list[float] | None:
+        import json as _json
+
+        row = self._db.execute("SELECT vector FROM memory WHERE id=?", (record_id,)).fetchone()
+        if row and row[0]:
+            return _json.loads(row[0])
+        return None
 
     # ---- serialization ----
     def _row_to_record(self, row: sqlite3.Row) -> MemoryRecord:
@@ -59,13 +85,17 @@ class LocalMemory(MemoryView):
         return MemoryRecord(**d)
 
     def _upsert(self, r: MemoryRecord) -> None:
+        # preserve any existing vector — INSERT OR REPLACE rewrites the whole row
+        row = self._db.execute("SELECT vector FROM memory WHERE id=?", (r.id,)).fetchone()
+        vector = (row[0] if row else "") or ""
         self._db.execute(
-            f"INSERT OR REPLACE INTO memory ({_COLS}) VALUES "
-            "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            f"INSERT OR REPLACE INTO memory ({_COLS}, vector) VALUES "
+            "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 r.id, r.kind.value, r.subject, r.predicate, r.text, r.scope, r.subj_pred_key,
                 r.source, "\x1f".join(r.provenance), r.trust.value, r.epistemic_confidence,
                 r.retrieval_strength, r.support_count, r.created_ts, r.last_recall_ts, r.detail_json,
+                vector,
             ),
         )
         self._db.commit()
@@ -101,6 +131,7 @@ class LocalMemory(MemoryView):
             record.retrieval_strength = 1.0
             record.with_detail(superseded=existing.text)
         self._upsert(record)
+        self._set_vector(record.id, self._embed_text(record))  # no-op without an embedder
         return record
 
     def get(self, record_id: str) -> MemoryRecord | None:
@@ -115,8 +146,20 @@ class LocalMemory(MemoryView):
         if kind is not None:
             cands = [c for c in cands if c.kind == kind]
         cands = [c for c in cands if c.trust != Trust.REJECTED]
-        scored = sorted(cands, key=lambda c: rank(c, _relevance(query, c)), reverse=True)
-        top = [c for c in scored if _relevance(query, c) > 0][:k]
+
+        # Relevance signal: semantic cosine when an embedder is configured, else lexical.
+        if self.embedder is not None and cands:
+            from .embed import cosine
+
+            qv = self.embedder.embed([query])[0]
+            rel = {c.id: cosine(qv, self._get_vector(c.id) or []) for c in cands}
+            relevance_of = lambda c: rel.get(c.id, 0.0)  # noqa: E731
+            threshold = 0.0
+        else:
+            relevance_of = lambda c: _relevance(query, c)  # noqa: E731
+            threshold = 0.0
+        scored = sorted(cands, key=lambda c: rank(c, relevance_of(c)), reverse=True)
+        top = [c for c in scored if relevance_of(c) > threshold][:k]
         # recall reinforces retrieval_strength ONLY (testing effect) — never confidence.
         for c in top:
             c.retrieval_strength = min(1.0, c.retrieval_strength + 0.3)

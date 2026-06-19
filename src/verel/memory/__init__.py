@@ -8,6 +8,7 @@ drop-in behind the same `MemoryView` Protocol.
 from __future__ import annotations
 
 from .consolidate import consolidate_failures
+from .embed import Embedder, HashEmbedder, OpenAIEmbedder, cosine
 from .failure_ledger import FailureLedger, regression_report
 from .local import LocalMemory
 from .mem0_backend import Mem0Memory, make_ollama_mem0
@@ -34,6 +35,10 @@ __all__ = [
     "FailureLedger",
     "regression_report",
     "LocalMemory",
+    "Embedder",
+    "HashEmbedder",
+    "OpenAIEmbedder",
+    "cosine",
     "Mem0Memory",
     "make_ollama_mem0",
     "EvalCase",
