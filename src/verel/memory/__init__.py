@@ -7,7 +7,7 @@ drop-in behind the same `MemoryView` Protocol.
 
 from __future__ import annotations
 
-from .consolidate import consolidate_failures
+from .consolidate import cluster_records, consolidate_failures, induce_schemas
 from .embed import Embedder, HashEmbedder, OpenAIEmbedder, cosine
 from .failure_ledger import FailureLedger, regression_report
 from .local import LocalMemory
@@ -36,6 +36,8 @@ from .view import (
 
 __all__ = [
     "consolidate_failures",
+    "induce_schemas",
+    "cluster_records",
     "FailureLedger",
     "regression_report",
     "LocalMemory",

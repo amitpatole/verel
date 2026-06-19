@@ -48,6 +48,15 @@ PRUNE_SUPPORT = 2
 STALE_AFTER_S = 30 * 24 * 3600.0  # 30 days
 VOLATILE_TTL_S = 24 * 3600.0  # 1 day
 
+# Adaptive decay tuning (§5.5): a memory's EFFECTIVE half-life scales with demonstrated
+# usefulness — corroboration (support_count) and belief (epistemic_confidence) make it decay
+# SLOWER, a weak one-off decays at the base rate. This is tuning of REACHABILITY only; it never
+# touches truth. (Truth still moves solely via corroborate/contradict.)
+HL_BASE_FACTOR = 1.0   # floor multiplier on the base half-life
+HL_MAX_FACTOR = 6.0    # cap: a well-supported, high-confidence memory lasts up to 6x longer
+HL_SUPPORT_GAIN = 0.6  # per log2(1 + support_count)
+HL_CONF_GAIN = 2.0     # per unit of epistemic_confidence above the 0.5 prior
+
 
 class Trust(str, Enum):
     CANDIDATE = "candidate"  # written, not yet promoted
@@ -58,6 +67,7 @@ class Trust(str, Enum):
 class MemoryKind(str, Enum):
     FACT = "fact"
     DESIGN_RULE = "design_rule"  # consolidated cross-episode rule (§5.5 step 2b)
+    SCHEMA = "schema"  # 2nd-order: a principle induced over a cluster of design rules (§5.5)
     FAILURE = "failure"  # failure-ledger entry (§7.5)
     SKILL = "skill"  # agent-built tool / skill — procedural memory (§7.6)
 
@@ -159,6 +169,18 @@ def correction_chain(r: MemoryRecord) -> list[dict]:
     return list(r.detail.get("corrections", []))
 
 
+def effective_half_life(r: MemoryRecord, base_half_life_s: float) -> float:
+    """Per-record half-life: the base, stretched by demonstrated usefulness (support_count +
+    epistemic_confidence), capped at HL_MAX_FACTOR×. A one-off weak memory decays at the base
+    rate; a corroborated, believed one persists much longer. Reachability tuning only."""
+    import math
+
+    support_term = HL_SUPPORT_GAIN * math.log2(1.0 + max(0, r.support_count))
+    conf_term = HL_CONF_GAIN * max(0.0, r.epistemic_confidence - 0.5)
+    factor = min(HL_MAX_FACTOR, HL_BASE_FACTOR + support_term + conf_term)
+    return base_half_life_s * factor
+
+
 def apply_decay(r: MemoryRecord, *, now: float, half_life_s: float,
                 stale_after_s: float, volatile_ttl_s: float) -> bool:
     """Mutate `r` per the decay policy; return True if it should be pruned/deleted.
@@ -174,7 +196,8 @@ def apply_decay(r: MemoryRecord, *, now: float, half_life_s: float,
     # Idleness is measured from the last recall, or from creation if never recalled.
     ref = r.last_recall_ts or r.created_ts
     if now > 0:
-        r.retrieval_strength *= math.pow(0.5, max(0.0, now - ref) / half_life_s)
+        hl = effective_half_life(r, half_life_s)  # adaptive: useful memories decay slower
+        r.retrieval_strength *= math.pow(0.5, max(0.0, now - ref) / hl)
         if (now - ref) > stale_after_s:
             r.with_detail(stale=True)  # context-triggered staleness flag
     return should_prune(r)

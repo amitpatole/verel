@@ -61,13 +61,18 @@ a single `MemoryView` protocol.
 Each record carries **two orthogonal quantities, never collapsed into one**:
 - `epistemic_confidence` — how true we believe it is. Moved **only** by corroboration (+) and
   contradiction (−). Retrieval never touches it.
-- `retrieval_strength` — how reachable it is. Decays with disuse, resets on recall.
+- `retrieval_strength` — how reachable it is. Decays with disuse, resets on recall. The decay is
+  **adaptive**: a memory's effective half-life stretches with demonstrated usefulness
+  (`support_count` + `epistemic_confidence`), so a corroborated rule outlives a one-off — tuning
+  of reachability only, never of truth.
 
 On top of that:
 - **Interference rule** — a new value for the same `(subject, predicate, scope)` supersedes
   rather than silently duplicating.
-- **Consolidation** — an offline pass clusters recurring episodes into candidate `DesignRule`s
-  (they start `inferred`).
+- **Consolidation** — an offline pass clusters recurring failures (by kind, or by **meaning** with
+  an embedder) and induces a candidate **structured** `DesignRule` (`condition → action`,
+  `applies_to`). A second pass clusters the rules themselves into a 2nd-order **`SCHEMA`** — a
+  principle that subsumes a family of rules. All start `inferred`; none auto-verify.
 - **Promotion gate** — a candidate reaches `verified` **only** by passing a held-out,
   agent-inaccessible eval (with a leakage canary). Trust is earned, never asserted.
 - **Failure ledger + regression guard** — past gating failures are remembered; reintroducing
@@ -159,7 +164,7 @@ its own verdict bus in CI.
 
 **Next:**
 - Broaden senses further — Rust/Java toolchains; richer perf harnesses; more SAST backends.
-- Deepen consolidation — richer schema induction and decay tuning.
+- Deepen consolidation further — multi-hop schema hierarchies; consolidation across scopes.
 - Distributed hardening — worker fencing for concurrent managers; multi-repo coordination.
 - A hosted skill registry, once cross-tenant transfer is shown to be worthwhile.
 - Seccomp profile portability across architectures (the learned policy is x86-64-derived today).
