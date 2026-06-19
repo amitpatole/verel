@@ -10,6 +10,7 @@ from __future__ import annotations
 from .container import best_runner, bwrap_available, run_container
 from .registry import SideEffect, ToolRecord, ToolRegistry, load_callable
 from .sandbox import SandboxError, run_sandboxed
+from .seccomp import DENIED_SYSCALLS, build_bpf, seccomp_available
 from .smith import BuildResult, ToolCase, ToolSmith, ToolSpec, eval_tool_cases
 
 __all__ = [
@@ -21,6 +22,9 @@ __all__ = [
     "run_container",
     "best_runner",
     "bwrap_available",
+    "seccomp_available",
+    "build_bpf",
+    "DENIED_SYSCALLS",
     "SandboxError",
     "BuildResult",
     "ToolCase",

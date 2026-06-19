@@ -101,7 +101,8 @@ reuse (semantic when an embedder is present); if missing, an LLM scaffolds a fun
 tested against held-out cases, and it is admitted to procedural memory **only on a passing,
 attested eval**. Read-only/idempotent tools auto-verify; destructive tools require a
 human-review verdict. Tool code is content-signed and executed under isolation
-(`isolation="container"` uses a `bwrap` namespace sandbox with no network and a read-only fs).
+(`isolation="container"` uses a `bwrap` namespace sandbox — no network, read-only fs — plus an
+optional seccomp-bpf syscall denylist via `verel[container]`).
 
 ---
 
@@ -150,14 +151,15 @@ its own verdict bus in CI.
 - Deepen consolidation — richer schema induction and decay tuning.
 - Distributed hardening — worker fencing for concurrent managers; multi-repo coordination.
 - A hosted skill registry, once cross-tenant transfer is shown to be worthwhile.
-- Stronger production isolation for untrusted tool code (seccomp/container profiles).
+- A minimal allow-list seccomp profile (the current container layer is a deny-list).
 
 ---
 
 ## Honest limits
 
 - The in-process tool guard is a guardrail, not a sandbox; real isolation is the container
-  runner, and full network/seccomp containment is a dedicated runner.
+  runner — namespace isolation (no network, read-only fs) plus a seccomp-bpf syscall denylist.
+  The denylist is defense-in-depth around a full CPython payload, not a minimal allow-list jail.
 - Advisory (vision/LLM) findings inform but never gate destructive actions.
 - Vision-model bounding boxes are advisory, not pixel-accurate; LLM outputs are not
   deterministic. Verel is explicit about which signals are precise and which are advisory.
