@@ -31,7 +31,6 @@ from .view import (
     make_id,
     make_key,
     rank,
-    relevance,
     should_prune,
 )
 
@@ -43,10 +42,11 @@ _META_FIELDS = (
 
 
 class Mem0Client(Protocol):
+    # Matches mem0 >= 2.0 (filters= on get_all/search; update(id, data, metadata=)).
     def add(self, messages, *, user_id: str, metadata: dict, infer: bool) -> dict: ...
-    def get_all(self, *, user_id: str) -> dict: ...
-    def search(self, query: str, *, user_id: str, limit: int) -> dict: ...
-    def update(self, memory_id: str, data) -> dict: ...
+    def get_all(self, *, filters: dict) -> dict: ...
+    def search(self, query: str, *, filters: dict, limit: int) -> dict: ...
+    def update(self, memory_id: str, data, metadata: dict | None = None) -> dict: ...
     def delete(self, memory_id: str) -> dict: ...
     def get(self, memory_id: str) -> dict | None: ...
 
@@ -91,7 +91,7 @@ class Mem0Memory(MemoryView):
 
     # ---- internal: find the mem0 row id backing a verel record id ----
     def _rows(self) -> list[dict]:
-        return (self.client.get_all(user_id=self.user_id) or {}).get("results", [])
+        return (self.client.get_all(filters={"user_id": self.user_id}) or {}).get("results", [])
 
     def _mem0_id_for(self, verel_id: str) -> str | None:
         for row in self._rows():
@@ -104,7 +104,7 @@ class Mem0Memory(MemoryView):
             self.client.add([{"role": "user", "content": r.text}], user_id=self.user_id,
                             metadata=_to_metadata(r), infer=False)
         else:
-            self.client.update(mem0_id, {"memory": r.text, "metadata": _to_metadata(r)})
+            self.client.update(mem0_id, data=r.text, metadata=_to_metadata(r))
 
     # ---- MemoryView ----
     def write(self, record: MemoryRecord, *, ts: float = 0.0) -> MemoryRecord:
@@ -140,15 +140,21 @@ class Mem0Memory(MemoryView):
         return None
 
     def recall(self, query: str, *, scope=None, kind=None, k: int = 5, ts: float = 0.0):
-        res = self.client.search(query, user_id=self.user_id, limit=max(k * 4, 20)) or {}
-        cands = [_from_mem0(r) for r in res.get("results", [])]
+        res = self.client.search(query, filters={"user_id": self.user_id}, limit=max(k * 4, 20)) or {}
+        rows = res.get("results", [])
+        # mem0 returns rows already ranked by SEMANTIC similarity (vector search). Use that
+        # order as the relevance signal feeding Verel's documented rank() — do NOT re-filter
+        # by lexical overlap, which would discard semantically-relevant-but-different-worded
+        # hits (the whole point of using a vector store).
+        n = max(1, len(rows))
+        cands = [(_from_mem0(r), 1.0 - i / n) for i, r in enumerate(rows)]
         if scope is not None:
-            cands = [c for c in cands if c.scope == scope or c.scope == "global"]
+            cands = [(c, s) for c, s in cands if c.scope == scope or c.scope == "global"]
         if kind is not None:
-            cands = [c for c in cands if c.kind == kind]
-        cands = [c for c in cands if c.trust != Trust.REJECTED]
-        scored = sorted(cands, key=lambda c: rank(c, relevance(query, c)), reverse=True)
-        top = [c for c in scored if relevance(query, c) > 0][:k]
+            cands = [(c, s) for c, s in cands if c.kind == kind]
+        cands = [(c, s) for c, s in cands if c.trust != Trust.REJECTED]
+        scored = sorted(cands, key=lambda cs: rank(cs[0], cs[1]), reverse=True)
+        top = [c for c, _ in scored][:k]
         for c in top:  # recall reinforces retrieval_strength only (testing effect)
             c.retrieval_strength = min(1.0, c.retrieval_strength + 0.3)
             c.last_recall_ts = ts or c.last_recall_ts
@@ -206,30 +212,25 @@ class Mem0Memory(MemoryView):
         return recs
 
 
-def make_ollama_mem0(*, user_id: str = "verel", embedder: str = "openai",
+def make_ollama_mem0(*, user_id: str = "verel", store_path: str | None = None,
                      vector_store: dict | None = None) -> Mem0Memory:
-    """Build a real mem0-backed MemoryView wired to Ollama Cloud for any LLM use.
-
-    LLM auto-extraction is OFF (`infer=False` on writes), so the LLM is essentially unused;
-    an embedder is still required for vector recall (`openai` by default — uses ~/.config
-    keys via env). Requires the `verel[mem0]` extra.
+    """Build a real mem0 (>=2.0) MemoryView. LLM auto-extraction is OFF (`infer=False`), so
+    the LLM is essentially unused; an OpenAI embedder powers vector recall (Ollama Cloud has
+    no embeddings endpoint). Defaults to a local Chroma store. Requires `verel[mem0]`.
     """
+    import tempfile
     from pathlib import Path
 
     from mem0 import Memory  # lazy: optional dependency
 
     ol_key = (Path.home() / ".config" / "ollama" / "key")
     cfg = {
-        "llm": {
-            "provider": "openai",
-            "config": {
-                "model": "qwen3-coder:480b",
-                "openai_base_url": "https://ollama.com/v1",
-                "api_key": ol_key.read_text().strip() if ol_key.exists() else "ollama",
-            },
-        },
-        "embedder": {"provider": embedder},
+        "llm": {"provider": "openai", "config": {
+            "model": "qwen3-coder:480b", "openai_base_url": "https://ollama.com/v1",
+            "api_key": ol_key.read_text().strip() if ol_key.exists() else "ollama"}},
+        "embedder": {"provider": "openai", "config": {"model": "text-embedding-3-small"}},
+        "vector_store": vector_store or {"provider": "chroma", "config": {
+            "path": store_path or tempfile.mkdtemp(prefix="verel-mem0-"),
+            "collection_name": "verel_memory"}},
     }
-    if vector_store:
-        cfg["vector_store"] = vector_store
     return Mem0Memory(Memory.from_config(cfg), user_id=user_id)

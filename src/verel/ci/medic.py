@@ -47,6 +47,7 @@ class Diagnosis:
     issue: Issue
     action: Action
     rationale: str
+    hint: str = ""  # optional LLM root-cause enrichment (FIX_BRANCH only); never changes `action`
 
 
 def classify_issue(issue: Issue, *, flaky_signatures: set[str] | None = None) -> Diagnosis:
@@ -64,6 +65,33 @@ def classify_issue(issue: Issue, *, flaky_signatures: set[str] | None = None) ->
 
 def triage(report: Report, *, flaky_signatures: set[str] | None = None) -> list[Diagnosis]:
     return [classify_issue(i, flaky_signatures=flaky_signatures) for i in report.issues]
+
+
+_ENRICH_SYSTEM = (
+    "You are a CI triage assistant. Given a single failing test/lint/type message, give a "
+    "ONE-LINE root-cause hypothesis and the likely file/area to fix. You do NOT decide "
+    "whether to retry or fix — that is already decided. Respond with one short line, no JSON."
+)
+
+
+def enrich_diagnoses(diagnoses: list[Diagnosis], *, chat=None) -> list[Diagnosis]:
+    """LLM-enrich ONLY the FIX_BRANCH diagnoses with a root-cause hint. The deterministic
+    classification (`action`) is authoritative and never changed by the model (§7.4)."""
+    if chat is None:
+        from ..agents import llm
+
+        chat = lambda msgs: llm.chat(msgs).content  # noqa: E731
+    for d in diagnoses:
+        if d.action != Action.FIX_BRANCH:
+            continue
+        loc = f" @ {d.issue.locator}" if d.issue.locator else ""
+        try:
+            d.hint = chat([{"role": "system", "content": _ENRICH_SYSTEM},
+                           {"role": "user", "content": f"[{d.issue.source.value}]{loc}: {d.issue.message}"}]
+                          ).strip().splitlines()[0][:200]
+        except Exception:  # noqa: BLE001 — enrichment is best-effort, never fatal
+            d.hint = ""
+    return diagnoses
 
 
 def quarantine_severity(issue: Issue) -> Severity:

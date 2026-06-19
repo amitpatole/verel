@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from ..agents.code_fixer import fix_code
-from .medic import Action, triage
+from .medic import Action, enrich_diagnoses, triage
 from .pipeline import Stage, StageResult, run_stage
 
 # (repo, failing_reports) -> set of changed files
@@ -36,8 +36,8 @@ class HealResult:
 
 
 def self_heal(repo: str, stage: Stage, *, fix: FixFn | None = None, runner=None,
-              ledger=None, max_rounds: int = 3, flaky_signatures=None) -> HealResult:
-    fix = fix or (lambda r, reports: fix_code(r, reports))
+              ledger=None, max_rounds: int = 3, flaky_signatures=None, enrich_chat=None) -> HealResult:
+    default_fix = fix is None
     flaky_signatures = flaky_signatures or set()
     rounds: list[HealRound] = []
     last_sig: frozenset | None = None
@@ -59,7 +59,14 @@ def self_heal(repo: str, stage: Stage, *, fix: FixFn | None = None, runner=None,
         sig = frozenset(i.fingerprint for r in failing for i in r.issues)
         wants_fix = any(d.action == Action.FIX_BRANCH for d in diagnoses)
         if wants_fix:
-            rnd.changed = sorted(fix(repo, failing))
+            if default_fix:
+                hints = []
+                if enrich_chat is not None:
+                    enrich_diagnoses(diagnoses, chat=enrich_chat)
+                    hints = [d.hint for d in diagnoses if d.action == Action.FIX_BRANCH and d.hint]
+                rnd.changed = sorted(fix_code(repo, failing, hints=hints or None))
+            else:
+                rnd.changed = sorted(fix(repo, failing))
             if not rnd.changed:
                 rounds.append(rnd)
                 return HealResult(False, "escalate", rounds, result)  # agent couldn't patch

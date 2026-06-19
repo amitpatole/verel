@@ -27,9 +27,11 @@ memory/          The trust layer Verel owns over a rentable backend (§5, §7.5)
   promotion.py     held-out, attested, agent-inaccessible eval gate: inferred→verified; leakage canary
   mem0_backend.py  Mem0Memory — the rented mem0 store behind the SAME MemoryView Protocol
 toolsmith/       Agents building their own tools (§7.6)
-  registry.py      signed, versioned tool registry as SKILL records; sandboxed load_callable
+  registry.py      signed, versioned tool registry as SKILL records; sandboxed load_callable;
+                   semantic reuse (cosine) when the memory has an embedder
   sandbox.py       subprocess sandbox (isolated interpreter + rlimits + timeout) for tool exec
-  smith.py         detect → scaffold (LLM) → test (held-out, optionally sandboxed) → register → reuse
+  container.py     bwrap namespace sandbox — no network, read-only fs, ephemeral tmp (§7.7)
+  smith.py         detect → scaffold (LLM) → test (isolation: none/subprocess/container) → register → reuse
 ci/              Agent-run CI/CD on the verdict bus (§7.4)
   graders.py       tests/lint/types as senses → attested verdict-bus Reports (pure parsers)
   pipeline.py      inner-loop / pre-commit / pre-merge / post-merge stages: gate + failure-memory

@@ -8,7 +8,7 @@ from verel.memory.mem0_backend import Mem0Memory
 
 
 class FakeMem0:
-    """Minimal in-memory stand-in for mem0.Memory's add/get_all/search/update/delete/get."""
+    """In-memory stand-in for mem0.Memory >= 2.0 (filters=; update(id, data, metadata=))."""
 
     def __init__(self):
         self.rows: dict[str, dict] = {}
@@ -19,16 +19,17 @@ class FakeMem0:
         self.rows[mid] = {"id": mid, "memory": messages[0]["content"], "metadata": dict(metadata)}
         return {"results": [{"id": mid}]}
 
-    def get_all(self, *, user_id):
+    def get_all(self, *, filters):
         return {"results": list(self.rows.values())}
 
-    def search(self, query, *, user_id, limit):
+    def search(self, query, *, filters, limit):
         return {"results": list(self.rows.values())[:limit]}  # adapter re-ranks anyway
 
-    def update(self, memory_id, data):
+    def update(self, memory_id, data, metadata=None):
         if memory_id in self.rows:
-            self.rows[memory_id]["memory"] = data.get("memory", self.rows[memory_id]["memory"])
-            self.rows[memory_id]["metadata"] = data.get("metadata", self.rows[memory_id]["metadata"])
+            self.rows[memory_id]["memory"] = data
+            if metadata is not None:
+                self.rows[memory_id]["metadata"] = metadata
         return {"id": memory_id}
 
     def delete(self, memory_id):
@@ -99,3 +100,28 @@ def test_is_memoryview_compatible():
     from verel.memory.view import MemoryView
 
     assert isinstance(_mem(), MemoryView)
+
+
+# ---- real mem0 live smoke (gated; needs verel[mem0] + OpenAI key + VEREL_MEM0_SMOKE=1) ----
+def test_real_mem0_roundtrip():
+    import os
+
+    if os.environ.get("VEREL_MEM0_SMOKE") != "1":
+        import pytest
+
+        pytest.skip("set VEREL_MEM0_SMOKE=1 (and OPENAI_API_KEY) to run the live mem0 smoke")
+    import tempfile
+
+    from mem0 import Memory  # noqa: F401
+
+    from verel.memory import MemoryKind, MemoryRecord, Trust, make_ollama_mem0
+
+    mem = make_ollama_mem0(user_id="smoke", store_path=tempfile.mkdtemp())
+    r = mem.write(MemoryRecord(kind=MemoryKind.DESIGN_RULE, subject="overflow",
+                               predicate="rule", text="use max-width:100% not fixed px",
+                               scope="repo:x"))
+    assert mem.get(r.id) is not None and mem.get(r.id).trust == Trust.CANDIDATE
+    mem.promote(r.id)
+    assert mem.get(r.id).trust == Trust.VERIFIED
+    hits = mem.recall("element overflows the viewport", scope="repo:x", k=3)
+    assert any("max-width" in h.text for h in hits)  # semantic recall via real vectors
