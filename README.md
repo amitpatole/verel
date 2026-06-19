@@ -60,6 +60,25 @@ Default LLM is **Ollama Cloud** (`~/.config/ollama/key`, model `qwen3-coder:480b
 | 🔧 **Tool-smith** | `verel.toolsmith` | Agents build their own tools: detect → scaffold → test → register → reuse, **sandboxed** (`bwrap`), admitted only on a passing attested eval. |
 | ♻️ **Agent-run CI/CD** | `verel.ci` | Self-healing pipeline (inner-loop → pre-commit → pre-merge → canary) with a deterministic **rollback engine** that never acts on advisory evidence. |
 
+## Eyes & Brain — Verel × AgentVision
+
+Two systems, one nervous system. **[AgentVision](https://github.com/amitpatole/agent-vision)
+is the eyes**; **Verel is the brain.** The eyes perceive a rendered artifact and grade it —
+including *does it match what we set out to build?* — then hand a clean signal up the optic
+nerve. The brain decides with grader attestation, acts, and **only verified work compounds**
+into memory. Then the eyes look again.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/amitpatole/verel/main/media/unified-architecture.png" alt="Eyes & Brain — AgentVision perceives and grades intent; Verel decides and compounds verified work into memory" width="100%">
+</p>
+
+They ship and version independently (`pip install agentvision`, `pip install verel`), but in
+sync: AgentVision's perception maps onto Verel's verdict bus as one grounded sense among many,
+and its **intent conformance** (`matches_intent`) is recorded in the brain's episodic memory
+every iteration. A *full* brain like Verel ingests the rich `Report` and runs its own gate;
+AgentVision's distilled `Handoff` is there for simpler brains. See
+[AgentVision's handoff doc](https://github.com/amitpatole/agent-vision/blob/main/docs/handoff.md).
+
 ## What makes it trustworthy
 
 - **Grader attestation** — a required grader must present a signed `run_receipt` proving it
