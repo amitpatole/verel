@@ -9,16 +9,34 @@ from __future__ import annotations
 
 from .canary import CanaryResult, canary_rollback
 from .graders import (
+    LANGS,
     GraderSpec,
+    LangToolchain,
+    bandit_spec,
+    eslint_spec,
+    gotest_spec,
+    govet_spec,
+    jstest_spec,
     mypy_spec,
+    npm_audit_spec,
+    parse_bandit,
+    parse_eslint,
+    parse_go_test,
+    parse_go_vet,
     parse_mypy,
+    parse_npm_audit,
+    parse_perf,
     parse_pytest,
     parse_ruff,
+    parse_tap,
+    parse_tsc,
+    perf_spec,
     pytest_spec,
     ruff_spec,
     run_grader,
     subprocess_runner,
     suite_sha,
+    tsc_spec,
 )
 from .heal import HealResult, HealRound, self_heal
 from .hooks import install_precommit, is_installed
@@ -43,6 +61,10 @@ from .rollback import (
 __all__ = [
     "GraderSpec", "run_grader", "subprocess_runner", "suite_sha",
     "pytest_spec", "ruff_spec", "mypy_spec", "parse_pytest", "parse_ruff", "parse_mypy",
+    "LANGS", "LangToolchain",
+    "jstest_spec", "eslint_spec", "tsc_spec", "parse_tap", "parse_eslint", "parse_tsc",
+    "gotest_spec", "govet_spec", "parse_go_test", "parse_go_vet",
+    "perf_spec", "parse_perf", "bandit_spec", "npm_audit_spec", "parse_bandit", "parse_npm_audit",
     "Stage", "StageResult", "run_stage", "inner_loop_stage", "precommit_stage", "premerge_stage",
     "postmerge_stage",
     "Action", "Diagnosis", "classify_issue", "triage", "quarantine_severity", "enrich_diagnoses",

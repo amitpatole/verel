@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.8.0 — broadened senses: Python · JS/TS · Go · perf · security on one bus
+
+The verdict bus stops being Python-only. A `GraderSpec` now carries its own parser, so graders
+that share a `GraderKind` but not an output format coexist:
+- **JS/TS**: `jstest_spec` (TAP — node:test/tape/vitest), `eslint_spec` (JSON), `tsc_spec`.
+- **Go**: `gotest_spec` (`go test -json`), `govet_spec`.
+- **Perf** (`perf_spec`): a PRECISE grader — a benchmark metric past an **explicit budget** is a
+  gating ERROR (so a perf regression can drive rollback); within budget is clean. Never inferred.
+- **Security** (`bandit_spec`, `npm_audit_spec`): SAST/dependency audit — HIGH/CRITICAL map to
+  gating ERROR, MEDIUM→WARNING, LOW→INFO, so a low finding advises without blocking.
+- **Language toolchains** (`verel.ci.LANGS`): every stage takes `language="python"|"js"|"go"`;
+  `premerge_stage(..., security=True, perf=spec)` adds the precise senses. Adding a runtime is one
+  `LangToolchain` entry.
+- All ride the existing contract: attested `RunReceipt`, stable fingerprints, one gate, one
+  stuck/progress signal. Parsers are pure, so the matrix is tested offline (no node/go/bandit).
+- `examples/demo_polyglot_ci.py`; 171 offline-CI tests.
+
 ## 0.7.0 — per-capability seccomp jail (a tool earns each syscall by verifying)
 
 The tightest isolation tier, and the one that ties containment to Verel's verification discipline:

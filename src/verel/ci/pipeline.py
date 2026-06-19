@@ -67,49 +67,69 @@ def run_stage(stage: Stage, *, diff_files: set[str] | None = None, runner: Runne
     return StageResult(stage.name, gr.verdict, gr, reports, regressions)
 
 
-# ---- the two v1 stages, as named in the design table ----
-def inner_loop_stage(repo: str, *, covers: list[str] | None = None,
+# ---- the v1 stages, as named in the design table — now language-parametric ----
+def _toolchain(language: str):
+    from .graders import LANGS
+
+    if language not in LANGS:
+        raise ValueError(f"unknown language {language!r}; known: {sorted(LANGS)}")
+    return LANGS[language]
+
+
+def inner_loop_stage(repo: str, *, covers: list[str] | None = None, language: str = "python",
                      with_lint: bool = True, with_types: bool = False) -> Stage:
-    from .graders import mypy_spec, pytest_spec, ruff_spec
-
-    graders = [pytest_spec(repo, covers)]
+    tc = _toolchain(language)
+    graders = [tc.test(repo, covers)]
     required = {GraderKind.TEST}
-    if with_lint:
-        graders.append(ruff_spec(repo, covers))
+    if with_lint and tc.lint:
+        graders.append(tc.lint(repo, covers))
         required.add(GraderKind.LINT)
-    if with_types:
-        graders.append(mypy_spec(repo, covers))
+    if with_types and tc.typecheck:
+        graders.append(tc.typecheck(repo, covers))
         required.add(GraderKind.TYPECHECK)
-    return Stage("inner_loop", graders, required)
+    return Stage(f"inner_loop:{language}", graders, required)
 
 
-def precommit_stage(repo: str, *, covers: list[str] | None = None) -> Stage:
+def precommit_stage(repo: str, *, covers: list[str] | None = None, language: str = "python") -> Stage:
     """Unit + affected tests + lint; the failure-memory fingerprint check is applied by
     run_stage when a ledger is passed."""
-    from .graders import pytest_spec, ruff_spec
-
-    return Stage("pre_commit", [pytest_spec(repo, covers), ruff_spec(repo, covers)],
-                 required={GraderKind.TEST})
+    tc = _toolchain(language)
+    graders = [tc.test(repo, covers)]
+    if tc.lint:
+        graders.append(tc.lint(repo, covers))
+    return Stage(f"pre_commit:{language}", graders, required={GraderKind.TEST})
 
 
 def postmerge_stage(repo: str, *, smoke_paths: list[str] | None = None,
-                    covers: list[str] | None = None) -> Stage:
+                    covers: list[str] | None = None, language: str = "python") -> Stage:
     """Smoke/E2E canary on the merged code (§7.4). A failing canary on PRECISE evidence is
     what the rollback policy engine acts on (canary.py)."""
-    from .graders import pytest_spec
-
-    return Stage("post_merge", [pytest_spec(repo, covers, paths=smoke_paths)],
+    tc = _toolchain(language)
+    return Stage(f"post_merge:{language}", [tc.test(repo, covers, paths=smoke_paths)],
                  required={GraderKind.TEST})
 
 
-def premerge_stage(repo: str, *, covers: list[str] | None = None, with_types: bool = True) -> Stage:
+def premerge_stage(repo: str, *, covers: list[str] | None = None, language: str = "python",
+                   with_types: bool = True, security: bool = False,
+                   perf: GraderSpec | None = None) -> Stage:
     """Full suite + lint (+types) — the sandbox-CI gate before a merge is allowed (§7.4).
-    Pair with a regression-guard by passing a ledger to run_stage."""
-    from .graders import mypy_spec, pytest_spec, ruff_spec
-
-    graders = [pytest_spec(repo, covers), ruff_spec(repo, covers)]
-    required = {GraderKind.TEST, GraderKind.LINT}
-    if with_types:
-        graders.append(mypy_spec(repo, covers))
+    Optionally adds a SECURITY scanner (HIGH/CRITICAL gate) and a PERF budget grader. Pair with a
+    regression-guard by passing a ledger to run_stage."""
+    tc = _toolchain(language)
+    graders = [tc.test(repo, covers)]
+    required = {GraderKind.TEST}
+    if tc.lint:
+        graders.append(tc.lint(repo, covers))
+        required.add(GraderKind.LINT)
+    if with_types and tc.typecheck:
+        graders.append(tc.typecheck(repo, covers))
         required.add(GraderKind.TYPECHECK)
-    return Stage("pre_merge", graders, required)
+    if security:
+        from .graders import bandit_spec, npm_audit_spec
+
+        graders.append({"python": bandit_spec, "js": npm_audit_spec}.get(language, bandit_spec)(repo, covers))
+        required.add(GraderKind.SECURITY)
+    if perf is not None:
+        graders.append(perf)
+        required.add(GraderKind.PERF)
+    return Stage(f"pre_merge:{language}", graders, required)
