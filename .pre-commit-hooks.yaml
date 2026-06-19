@@ -1,0 +1,19 @@
+# Use Verel's verdict gate as a pre-commit check. In your .pre-commit-config.yaml:
+#
+#   - repo: https://github.com/amitpatole/verel
+#     rev: v0.4.5
+#     hooks:
+#       - id: verel-precommit
+#
+# Runs the pre-commit stage (tests + lint + types unified on the verdict bus) and aborts the
+# commit on a FAIL verdict. Note: graders shell out to pytest/ruff/mypy and need your project's
+# deps importable — install them in the env (pre-commit runs hooks in an isolated venv, so for a
+# heavy project prefer the GitHub Action or `verel-ci install`, which wires a native git hook).
+- id: verel-precommit
+  name: Verel (verdict gate)
+  description: Gate the commit on the Verel verdict bus (tests + lint + types).
+  entry: verel-ci precommit --repo .
+  language: python
+  additional_dependencies: ["verel[dev]"]
+  pass_filenames: false
+  always_run: true

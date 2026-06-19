@@ -107,6 +107,42 @@ plays" compounds across builds.
 | **CI CLI / git hook** (`verel-ci`, `python -m verel.ci`) | agent-run CI, pre-commit gates |
 | **MCP server** (`verel-mcp`) | Cursor, Claude, any MCP host |
 
+## Drop it into your workflow & your agents
+
+**CI gate (GitHub Action)** — unify tests + lint + types into one verdict and fail the build:
+
+```yaml
+# .github/workflows/verify.yml
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: amitpatole/verel@v0.4.5
+        with:
+          repo: .
+          install: "-e .[dev]"     # your project deps so its tests import
+```
+
+**pre-commit** (this repo ships `.pre-commit-hooks.yaml`):
+
+```yaml
+- repo: https://github.com/amitpatole/verel
+  rev: v0.4.5
+  hooks: [{ id: verel-precommit }]
+```
+
+**Native git hook / any script:**
+
+```bash
+verel-ci check --repo .       # verdict bus gate; non-zero exit on FAIL
+verel-ci install --repo .     # wire a native pre-commit hook
+```
+
+**In your agents** — `verel-mcp` exposes the verdict bus + memory to any MCP host; the eyes
+(AgentVision) plug in as the `sight` sense. Add `verel[sight]` for visual gating, and
+`verel.senses.watch(...)` to gate on verified playback over time.
+
 ## Try the demos
 
 ```bash
