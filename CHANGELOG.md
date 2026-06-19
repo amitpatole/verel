@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.0 — memory lifecycle (pin / volatile / TTL / staleness / correction chains)
+
+Ideas validated by the r/aiagents memory thread, added to `verel.memory` (both LocalMemory
+and the mem0 adapter, identical behaviour via a shared `apply_decay`):
+- **Pinned** memories ignore decay entirely and are never pruned (`mem.pin(id)`).
+- **Volatile-until-confirmed**: a `volatile` memory is dropped unless corroborated/verified
+  within its window (`VOLATILE_TTL_S`); corroboration/promotion clears the flag.
+- **Hard TTL** (`ttl_s`) for ephemeral environment facts (e.g. "current branch is X").
+- **Context-triggered staleness**: records idle past `STALE_AFTER_S` are flagged `stale`.
+- **Correction chains**: superseding a value keeps the full prior history (`correction_chain(r)`)
+  instead of overwriting it.
+New helpers: `is_pinned/is_volatile/is_expired/correction_chain`, `set_flags/pin/unpin`.
+
 ## 0.3.2 — brand & docs polish
 
 - New README with a hero banner + architecture infographic (matches AgentVision's polish).

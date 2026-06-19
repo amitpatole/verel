@@ -42,6 +42,12 @@ PRUNE_RS = 0.15
 PRUNE_EC = 0.4
 PRUNE_SUPPORT = 2
 
+# Lifecycle defaults (community-validated additions, r/aiagents memory thread):
+# - context-triggered staleness: flag a memory not recalled within this window.
+# - volatile-until-confirmed: an unconfirmed volatile memory expires after this window.
+STALE_AFTER_S = 30 * 24 * 3600.0  # 30 days
+VOLATILE_TTL_S = 24 * 3600.0  # 1 day
+
 
 class Trust(str, Enum):
     CANDIDATE = "candidate"  # written, not yet promoted
@@ -115,12 +121,63 @@ def rank(record: MemoryRecord, relevance: float) -> float:
 
 
 def should_prune(r: MemoryRecord) -> bool:
+    if is_pinned(r):
+        return False  # pinned memories are never pruned (they ignore decay entirely)
     return (
         r.retrieval_strength < PRUNE_RS
         and r.epistemic_confidence < PRUNE_EC
         and r.support_count < PRUNE_SUPPORT
         and r.trust != Trust.VERIFIED
     )
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle flags (stored in detail_json, so they round-trip across backends).
+# ---------------------------------------------------------------------------
+def is_pinned(r: MemoryRecord) -> bool:
+    return bool(r.detail.get("pinned"))
+
+
+def is_volatile(r: MemoryRecord) -> bool:
+    """Volatile-until-confirmed: not retained unless corroborated/verified."""
+    return bool(r.detail.get("volatile"))
+
+
+def ttl_of(r: MemoryRecord) -> float | None:
+    v = r.detail.get("ttl_s")
+    return float(v) if v is not None else None
+
+
+def is_expired(r: MemoryRecord, now: float) -> bool:
+    """Hard TTL — for ephemeral environment facts (e.g. 'current branch is X')."""
+    t = ttl_of(r)
+    return t is not None and now > 0 and (now - r.created_ts) > t and not is_pinned(r)
+
+
+def correction_chain(r: MemoryRecord) -> list[dict]:
+    """The history of values this record superseded (newest supersession last)."""
+    return list(r.detail.get("corrections", []))
+
+
+def apply_decay(r: MemoryRecord, *, now: float, half_life_s: float,
+                stale_after_s: float, volatile_ttl_s: float) -> bool:
+    """Mutate `r` per the decay policy; return True if it should be pruned/deleted.
+    Shared by every backend so lifecycle behaviour is identical across LocalMemory/mem0."""
+    import math
+
+    if is_pinned(r):
+        return False  # pinned: no decay, never pruned
+    if is_expired(r, now):
+        return True  # hard TTL elapsed
+    if is_volatile(r) and now and (now - r.created_ts) > volatile_ttl_s:
+        return True  # volatile and never confirmed within its window
+    # Idleness is measured from the last recall, or from creation if never recalled.
+    ref = r.last_recall_ts or r.created_ts
+    if now > 0:
+        r.retrieval_strength *= math.pow(0.5, max(0.0, now - ref) / half_life_s)
+        if (now - ref) > stale_after_s:
+            r.with_detail(stale=True)  # context-triggered staleness flag
+    return should_prune(r)
 
 
 @runtime_checkable

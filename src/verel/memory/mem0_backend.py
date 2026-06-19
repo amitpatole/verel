@@ -24,14 +24,16 @@ from __future__ import annotations
 from typing import Protocol
 
 from .view import (
+    STALE_AFTER_S,
+    VOLATILE_TTL_S,
     MemoryKind,
     MemoryRecord,
     MemoryView,
     Trust,
+    apply_decay,
     make_id,
     make_key,
     rank,
-    should_prune,
 )
 
 _META_FIELDS = (
@@ -125,11 +127,15 @@ class Mem0Memory(MemoryView):
                         existing.provenance.append(p)
                 if record.detail:
                     existing.with_detail(**record.detail)
+                existing.with_detail(volatile=False)  # re-assertion confirms a volatile memory
                 self._persist(existing, mem0_id)
                 return existing
+            chain = [*existing.detail.get("corrections", []),
+                     {"text": existing.text, "ec": existing.epistemic_confidence,
+                      "ts": existing.created_ts, "superseded_at": ts}]
             record.support_count = 1
             record.retrieval_strength = 1.0
-            record.with_detail(superseded=existing.text)
+            record.with_detail(corrections=chain, superseded=existing.text)
         self._persist(record, mem0_id)
         return record
 
@@ -161,7 +167,7 @@ class Mem0Memory(MemoryView):
             self._persist(c, self._mem0_id_for(c.id))
         return top
 
-    def _adjust(self, record_id, *, ec=0.0, support=0, trust=None):
+    def _adjust(self, record_id, *, ec=0.0, support=0, trust=None, confirm=False):
         r = self.get(record_id)
         if r is None:
             return None
@@ -169,11 +175,13 @@ class Mem0Memory(MemoryView):
         r.support_count += support
         if trust is not None:
             r.trust = trust
+        if confirm:
+            r.with_detail(volatile=False)
         self._persist(r, self._mem0_id_for(record_id))
         return r
 
     def corroborate(self, record_id, *, delta: float = 0.15):
-        return self._adjust(record_id, ec=delta, support=1)
+        return self._adjust(record_id, ec=delta, support=1, confirm=True)
 
     def contradict(self, record_id, *, delta: float = 0.25):
         r = self._adjust(record_id, ec=-delta)
@@ -182,21 +190,39 @@ class Mem0Memory(MemoryView):
         return r
 
     def promote(self, record_id):
-        return self._adjust(record_id, trust=Trust.VERIFIED)
+        return self._adjust(record_id, trust=Trust.VERIFIED, confirm=True)
 
     def demote(self, record_id):
         return self._adjust(record_id, trust=Trust.CANDIDATE)
 
-    def decay(self, *, half_life_s: float = 604800.0, now: float = 0.0) -> int:
-        import math
+    def set_flags(self, record_id, *, pinned=None, volatile=None, ttl_s=None):
+        r = self.get(record_id)
+        if r is None:
+            return None
+        upd = {}
+        if pinned is not None:
+            upd["pinned"] = bool(pinned)
+        if volatile is not None:
+            upd["volatile"] = bool(volatile)
+        if ttl_s is not None:
+            upd["ttl_s"] = ttl_s
+        r.with_detail(**upd)
+        self._persist(r, self._mem0_id_for(record_id))
+        return r
 
+    def pin(self, record_id):
+        return self.set_flags(record_id, pinned=True)
+
+    def unpin(self, record_id):
+        return self.set_flags(record_id, pinned=False)
+
+    def decay(self, *, half_life_s: float = 604800.0, now: float = 0.0,
+              stale_after_s: float = STALE_AFTER_S, volatile_ttl_s: float = VOLATILE_TTL_S) -> int:
         pruned = 0
         for row in self._rows():
             r = _from_mem0(row)
-            ref = r.last_recall_ts or r.created_ts
-            if now and ref:
-                r.retrieval_strength *= math.pow(0.5, max(0.0, now - ref) / half_life_s)
-            if should_prune(r):
+            if apply_decay(r, now=now, half_life_s=half_life_s,
+                           stale_after_s=stale_after_s, volatile_ttl_s=volatile_ttl_s):
                 self.client.delete(row["id"])
                 pruned += 1
             else:
