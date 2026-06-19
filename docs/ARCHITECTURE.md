@@ -73,6 +73,10 @@ On top of that:
 - **Failure ledger + regression guard** — past gating failures are remembered; reintroducing
   a previously-fixed failure fails the gate from memory alone.
 - **Recall** — lexical by default; semantic (cosine) when an embedder is configured.
+- **Lifecycle controls** — `pinned` memories ignore decay and are never pruned; `volatile`
+  memories are kept only if corroborated/verified within a window; a hard `ttl_s` expires
+  ephemeral environment facts; idle records are flagged `stale`; and supersedes keep a
+  queryable **correction chain** instead of overwriting history.
 
 ---
 
