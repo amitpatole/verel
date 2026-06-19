@@ -32,9 +32,11 @@ toolsmith/       Agents building their own tools (§7.6)
   smith.py         detect → scaffold (LLM) → test (held-out, optionally sandboxed) → register → reuse
 ci/              Agent-run CI/CD on the verdict bus (§7.4)
   graders.py       tests/lint/types as senses → attested verdict-bus Reports (pure parsers)
-  pipeline.py      inner-loop + pre-commit stages: gate + failure-memory regression check
+  pipeline.py      inner-loop / pre-commit / pre-merge / post-merge stages: gate + failure-memory
   medic.py         classify failures → retry / regen-lockfile / quarantine-flaky / fix-branch
-  rollback.py      deterministic policy engine — destructive actions never use advisory evidence
+  heal.py          self-healing loop — ci-medic executes FIX_BRANCH via the code-fixer agent
+  rollback.py      policy engine + executor — agent proposes, engine does a safe git revert
+  canary.py        post-merge canary → verdict-driven rollback (precise evidence only)
   hooks.py + __main__.py   `python -m verel.ci {check,precommit,install}` for git hooks/agents
 registry/        Public Skill Registry + the moat experiment (§2.2, §8.7)
   artifact.py      content-addressed, signed, provenance-tagged SkillArtifact
@@ -66,6 +68,7 @@ python examples/demo_cicd.py             # real pytest grader gates FAIL→PASS;
 python examples/demo_selfheal.py         # failing tests → agent patches code → green
 python examples/demo_semantic_recall.py  # recall by meaning, no shared words
 python examples/demo_h2_moat.py          # measure cross-tenant skill transfer → moat decision
+python examples/demo_canary_rollback.py  # bad merge fails canary → safe auto git-revert
 ```
 
 ## Try it

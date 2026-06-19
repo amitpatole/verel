@@ -19,6 +19,7 @@ from .graders import (
     subprocess_runner,
     suite_sha,
 )
+from .canary import CanaryResult, canary_rollback
 from .heal import HealResult, HealRound, self_heal
 from .hooks import install_precommit, is_installed
 from .medic import Action, Diagnosis, classify_issue, quarantine_severity, triage
@@ -26,18 +27,27 @@ from .pipeline import (
     Stage,
     StageResult,
     inner_loop_stage,
+    postmerge_stage,
     precommit_stage,
     premerge_stage,
     run_stage,
 )
-from .rollback import Decision, RollbackPolicy, RollbackProposal
+from .rollback import (
+    Decision,
+    RollbackExecutor,
+    RollbackOutcome,
+    RollbackPolicy,
+    RollbackProposal,
+)
 
 __all__ = [
     "GraderSpec", "run_grader", "subprocess_runner", "suite_sha",
     "pytest_spec", "ruff_spec", "mypy_spec", "parse_pytest", "parse_ruff", "parse_mypy",
     "Stage", "StageResult", "run_stage", "inner_loop_stage", "precommit_stage", "premerge_stage",
+    "postmerge_stage",
     "Action", "Diagnosis", "classify_issue", "triage", "quarantine_severity",
-    "RollbackPolicy", "RollbackProposal", "Decision",
+    "RollbackPolicy", "RollbackProposal", "Decision", "RollbackExecutor", "RollbackOutcome",
+    "canary_rollback", "CanaryResult",
     "self_heal", "HealResult", "HealRound",
     "install_precommit", "is_installed",
 ]
