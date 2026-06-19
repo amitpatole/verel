@@ -10,8 +10,9 @@ process group on overrun.
 Honest scope: this stops CPU/memory runaways and process-local crashes, isolates interpreter
 state, and (via RLIMIT_FSIZE=0) prevents persisting file CONTENT to disk — though an empty
 file can still be created and a buffered, never-flushed write won't error. It does NOT block
-network egress or filesystem READS. True containment (network namespace / seccomp / container
-/ VM) is the production §7.7 runner. This is a strong, dependency-free middle tier.
+network egress or filesystem READS. True containment (network namespace + seccomp syscall
+filter) is the §7.7 container runner in container.py. This is a strong, dependency-free middle
+tier.
 """
 
 from __future__ import annotations
@@ -72,15 +73,17 @@ def run_sandboxed(tool: ToolRecord, args=None, kwargs=None, *, timeout_s: float 
 
 
 def exec_child(cmd: list[str], tool: ToolRecord, args=None, kwargs=None, *,
-               timeout_s: float = 3.0, env=None, start_new_session: bool = False):
+               timeout_s: float = 3.0, env=None, start_new_session: bool = False,
+               pass_fds: tuple[int, ...] = ()):
     """Run a prepared sandbox `cmd` (a python child reading the request on stdin) and parse
-    the JSON result. Shared by the rlimit subprocess sandbox and the bwrap container runner."""
+    the JSON result. Shared by the rlimit subprocess sandbox and the bwrap container runner.
+    `pass_fds` keeps extra inheritable fds open in the child (e.g. bwrap's --seccomp program)."""
     payload = json.dumps({"code": tool.code, "func": tool.name,
                           "args": list(args or []), "kwargs": dict(kwargs or {})})
     try:
         proc = subprocess.run(
             cmd, input=payload, capture_output=True, text=True, timeout=timeout_s,
-            start_new_session=start_new_session, env=env,
+            start_new_session=start_new_session, env=env, pass_fds=pass_fds,
         )
     except subprocess.TimeoutExpired as e:
         raise SandboxError(f"tool {tool.name!r} exceeded {timeout_s}s wall-clock") from e

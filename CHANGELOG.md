@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.5.0 — seccomp on the §7.7 container runner (closing the last sandbox overclaim)
+
+The container tool runner promised "seccomp containment" in its docstring but only did namespace
+isolation. Now it's real:
+- **seccomp-bpf syscall filter** (`toolsmith/seccomp.py`): a deny-list filter (default ALLOW,
+  EPERM on a curated set — ptrace, mount, raw `socket`, unshare/setns/clone3, bpf, kexec, module
+  loading, keyring, chroot/pivot_root, device-node creation, cross-process memory peek) compiled
+  via libseccomp and handed to `bwrap --seccomp`. Optional defense-in-depth: needs the `seccomp`
+  or `pyseccomp` binding (new `verel[container]` extra); without it the namespace sandbox still
+  applies and `seccomp_available()` reports False.
+- `run_container(..., seccomp=True)` is the default; `exec_child` gained `pass_fds` to hand the
+  compiled BPF program to the sandboxed child.
+- Verified live: under seccomp a tool calling `socket()` is denied with EPERM, while the SAME
+  tool succeeds with `seccomp=False` — proving the network namespace blocks `connect()`, not
+  `socket()`, and seccomp is the layer that does. Normal pure tools run unaffected.
+- Fixed a committed version drift: `verel.__version__` was stuck at 0.4.2 while the package was
+  0.4.5; both now track the real version.
+- 153 offline-CI tests (+1 always-on; the live containment checks skip where bwrap/libseccomp
+  are absent).
+
 ## 0.4.5 — developer adoption (CI gate Action + pre-commit), in sync with the eyes
 
 Symmetric adoption polish so the brain drops into a workflow as easily as the eyes:
