@@ -112,14 +112,21 @@ refused at the kernel).
 
 ## Agent-run CI/CD (`verel.ci`)
 
-Tests, lint, and types are first-class senses on the same bus. The staged pipeline:
+Tests, lint, and types are first-class senses on the same bus — across **Python, JS/TS, and Go**
+(`language=` on each stage), plus **perf** and **security** senses. A `GraderSpec` carries its own
+parser, so `pytest`, `go test -json`, and a TAP runner — all `GraderKind.TEST` — parse by their own
+format while sharing one schema, one gate, and one stuck/progress signal. The staged pipeline:
 
 | Stage | What runs |
 |---|---|
-| **inner-loop** | lint / typecheck / fast unit on the working tree |
+| **inner-loop** | lint / typecheck / fast unit on the working tree (per language) |
 | **pre-commit** | unit + affected tests + a failure-memory regression check |
-| **pre-merge** | full suite + lint + types |
+| **pre-merge** | full suite + lint + types, optionally **security** (SAST/audit) and a **perf** budget |
 | **post-merge / canary** | smoke/E2E; on a precise-evidence failure, an automated rollback |
+
+Perf and security are **precise** graders: a perf regression past an explicit budget, or a
+HIGH/CRITICAL security finding, gates (and can drive rollback) — sub-threshold findings only
+advise. Language toolchains live in `verel.ci.LANGS`; adding a runtime is one `LangToolchain` entry.
 
 - **Self-healing** — on failure the ci-medic classifies each issue (retry / regen-lockfile /
   quarantine-flaky / fix-branch) and, for genuine regressions, invokes the code-fixer agent,
@@ -151,7 +158,7 @@ The project is lint/type-clean, ships type information, and gates its own develo
 its own verdict bus in CI.
 
 **Next:**
-- Broaden senses — graders for more languages and runtimes (JS/Go/…), perf and security.
+- Broaden senses further — Rust/Java toolchains; richer perf harnesses; more SAST backends.
 - Deepen consolidation — richer schema induction and decay tuning.
 - Distributed hardening — worker fencing for concurrent managers; multi-repo coordination.
 - A hosted skill registry, once cross-tenant transfer is shown to be worthwhile.

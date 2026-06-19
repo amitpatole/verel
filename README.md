@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://pypi.org/project/verel/"><img src="https://img.shields.io/pypi/v/verel?color=8b7cff&label=pip%20install%20verel" alt="PyPI"></a>
-  <img src="https://img.shields.io/badge/tests-156%20passing-46d39a" alt="tests">
+  <img src="https://img.shields.io/badge/tests-171%20passing-46d39a" alt="tests">
   <img src="https://img.shields.io/badge/ruff%20%2B%20mypy-clean-5ad1e6" alt="lint">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT">
   <img src="https://img.shields.io/badge/LLM-Ollama%20Cloud%20%C2%B7%20OpenAI-8b7cff" alt="LLM">
@@ -58,7 +58,7 @@ Default LLM is **Ollama Cloud** (`~/.config/ollama/key`, model `qwen3-coder:480b
 | ⚖️ **Verdict bus** | `verel.verdict` | One schema for every sense, with an advisory **ceiling clamp**, **grader attestation**, scrubbed fingerprints, and strict-subset **stuck/progress** detection. |
 | 🚁 **Fleet** | `verel.fleet` | Agents managing agents — an **LLM manager** fans out, a single-writer scheduler runs workers in **isolated git worktrees** under budget, each gated by the bus. |
 | 🔧 **Tool-smith** | `verel.toolsmith` | Agents build their own tools: detect → scaffold → test → register → reuse, **sandboxed** (`bwrap`), admitted only on a passing attested eval. |
-| ♻️ **Agent-run CI/CD** | `verel.ci` | Self-healing pipeline (inner-loop → pre-commit → pre-merge → canary) with a deterministic **rollback engine** that never acts on advisory evidence. |
+| ♻️ **Agent-run CI/CD** | `verel.ci` | Self-healing pipeline (inner-loop → pre-commit → pre-merge → canary) with a deterministic **rollback engine** that never acts on advisory evidence. Graders span **Python / JS-TS / Go** (tests · lint · types) plus **perf** (budget) and **security** (SAST/audit) senses — all on one bus, one gate. |
 
 ## Eyes & Brain — Verel × AgentVision
 
@@ -152,6 +152,7 @@ python examples/demo_fleet_worktrees.py  # LLM manager fans out → isolated-wor
 python examples/demo_h2_moat.py          # measure cross-tenant skill transfer → moat decision
 python examples/demo_canary_rollback.py  # bad merge fails canary → safe auto git-revert
 python examples/demo_capability_jail.py  # learn a tool's syscalls → deny everything it didn't earn
+python examples/demo_polyglot_ci.py      # Python/JS/Go + perf + security graders on one bus
 ```
 
 ## Honesty (what we do **not** claim)

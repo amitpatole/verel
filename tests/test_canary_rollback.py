@@ -87,4 +87,4 @@ def test_canary_failure_triggers_rollback(repo):
 
 def test_postmerge_stage_shape(repo):
     stage = postmerge_stage(str(repo), smoke_paths=["test_smoke.py"])
-    assert stage.name == "post_merge" and GraderKind.TEST in stage.required
+    assert stage.name.startswith("post_merge") and GraderKind.TEST in stage.required
