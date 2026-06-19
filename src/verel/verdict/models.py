@@ -46,6 +46,7 @@ class IssueKind(str, Enum):
     BLANK = "blank"
     ERROR_TEXT = "error_text"
     TYPO = "typo"
+    INTENT_MISMATCH = "intent_mismatch"
     OTHER = "other"
 
 
@@ -148,6 +149,11 @@ class Percept(BaseModel):
     viewport: str | None = None
     device_scale: float | None = None
     image_path: str | None = None
+    # intent conformance (populated when the eyes graded against a brief; None otherwise).
+    # Lets the brain record "did the artifact match what we set out to build" over iterations.
+    matches_intent: bool | None = None
+    intent_satisfied: int | None = None
+    intent_total: int | None = None
 
 
 class GateResult(BaseModel):

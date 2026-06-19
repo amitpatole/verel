@@ -49,6 +49,9 @@ class PerceptLog:
             "ssim": ssim,
             "changed_ratio": changed_ratio,
             "image_path": percept.image_path,
+            "matches_intent": percept.matches_intent,
+            "intent_satisfied": percept.intent_satisfied,
+            "intent_total": percept.intent_total,
         }
         with self.path.open("a") as f:
             f.write(json.dumps(record) + "\n")
