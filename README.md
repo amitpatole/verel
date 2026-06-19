@@ -104,8 +104,8 @@ python examples/demo_canary_rollback.py  # bad merge fails canary → safe auto 
 
 ## Documentation
 
-- [Design & roadmap](docs/VEREL_DESIGN.md) · [Module guide](src/verel/README.md) ·
-  [Changelog](CHANGELOG.md) · [Critic-loop record](docs/CRITIC_CONVERGENCE.md)
+- [Architecture & roadmap](docs/ARCHITECTURE.md) · [Module guide](src/verel/README.md) ·
+  [Changelog](CHANGELOG.md)
 
 ## License
 
