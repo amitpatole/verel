@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.2 — docs sync
+
+- README, Hugging Face landing, and module guide updated for the 0.4.x memory lifecycle
+  (pin / volatile / TTL / staleness / correction chains); test count refreshed (148);
+  the HF "Design & plan" link now points to the public ARCHITECTURE.md (not the internal
+  strategy doc).
+
 ## 0.4.1 — failure-ledger × lifecycle (self-cleaning, permanent-where-it-matters)
 
 - The ci-medic's **transient (retry) and flaky** failures are now written `volatile` to

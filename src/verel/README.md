@@ -19,7 +19,8 @@ agents/          The seam where models author work the bus then gates (§11.1 it
   coder.py         Coder protocol + LLMCoder + make_fix_hook() — agent sees only grader findings
 memory/          The trust layer Verel owns over a rentable backend (§5, §7.5)
   view.py          MemoryView protocol + records: split epistemic_confidence vs retrieval_strength,
-                   interference rule, documented ranking, exact prune rule
+                   interference rule, documented ranking, exact prune rule, lifecycle
+                   (pin / volatile-until-confirmed / TTL / staleness / correction chains)
   embed.py         embedders (HashEmbedder offline / OpenAIEmbedder semantic) for cosine recall
   local.py         zero-dep sqlite MemoryView, optional semantic recall (mem0 is the drop-in)
   failure_ledger.py  record failures → mark fixed on PASS → regression-guard gates reintroductions
@@ -76,7 +77,7 @@ python examples/demo_canary_rollback.py  # bad merge fails canary → safe auto 
 ## Try it
 
 ```bash
-pip install -e ".[dev]"          # verdict bus + tests (32 tests, sight tests skip)
+pip install -e ".[dev]"          # core + 148 tests (sight/mem0 tests skip without extras)
 pip install -e ".[sight]"        # + AgentVision for the real perception path
 python examples/demo_overflow_loop.py
 ```
