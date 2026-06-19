@@ -20,14 +20,16 @@ agents/          The seam where models author work the bus then gates (§11.1 it
 memory/          The trust layer Verel owns over a rentable backend (§5, §7.5)
   view.py          MemoryView protocol + records: split epistemic_confidence vs retrieval_strength,
                    interference rule, documented ranking, exact prune rule
-  local.py         zero-dep sqlite MemoryView (mem0 is the drop-in behind the same Protocol)
+  embed.py         embedders (HashEmbedder offline / OpenAIEmbedder semantic) for cosine recall
+  local.py         zero-dep sqlite MemoryView, optional semantic recall (mem0 is the drop-in)
   failure_ledger.py  record failures → mark fixed on PASS → regression-guard gates reintroductions
   consolidate.py   episodic failures → CANDIDATE `inferred` DesignRule (Ollama Cloud; cluster=evidence)
   promotion.py     held-out, attested, agent-inaccessible eval gate: inferred→verified; leakage canary
   mem0_backend.py  Mem0Memory — the rented mem0 store behind the SAME MemoryView Protocol
 toolsmith/       Agents building their own tools (§7.6)
   registry.py      signed, versioned tool registry as SKILL records; sandboxed load_callable
-  smith.py         detect → scaffold (LLM) → test (held-out) → register (gated) → reuse
+  sandbox.py       subprocess sandbox (isolated interpreter + rlimits + timeout) for tool exec
+  smith.py         detect → scaffold (LLM) → test (held-out, optionally sandboxed) → register → reuse
 ci/              Agent-run CI/CD on the verdict bus (§7.4)
   graders.py       tests/lint/types as senses → attested verdict-bus Reports (pure parsers)
   pipeline.py      inner-loop + pre-commit stages: gate + failure-memory regression check

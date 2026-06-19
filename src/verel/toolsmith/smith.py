@@ -75,10 +75,11 @@ def _extract(reply: str) -> str:
 
 class ToolSmith:
     def __init__(self, registry: ToolRegistry, *, chat: ChatFn | None = None,
-                 runner_identity: str = "toolsmith-runner"):
+                 runner_identity: str = "toolsmith-runner", sandbox: bool = False):
         self.registry = registry
         self.chat = chat or _default_chat
         self.runner_identity = runner_identity
+        self.sandbox = sandbox  # evaluate candidate tools in a subprocess sandbox (§7.7)
 
     # ---- detect ----
     def detect(self, spec: ToolSpec) -> ToolRecord | None:
@@ -99,17 +100,30 @@ class ToolSmith:
     # ---- test ----
     def evaluate(self, code: str, spec: ToolSpec) -> tuple[bool, float, str]:
         probe = ToolRecord(name=spec.name, code=code, side_effect=spec.side_effect).sign()
-        try:
-            fn = load_callable(probe)
-        except Exception as e:  # noqa: BLE001
-            return False, 0.0, f"load failed: {e}"
         if not spec.cases:
             return False, 0.0, "no held-out cases"
+
+        if self.sandbox:
+            from .sandbox import SandboxError, run_sandboxed
+
+            def call(c):
+                return run_sandboxed(probe, c.args, c.kwargs)
+            err_types = (SandboxError,)
+        else:
+            try:
+                fn = load_callable(probe)
+            except Exception as e:  # noqa: BLE001
+                return False, 0.0, f"load failed: {e}"
+
+            def call(c):
+                return fn(*c.args, **c.kwargs)
+            err_types = (Exception,)
+
         passed = 0
         for c in spec.cases:
             try:
-                got = fn(*c.args, **c.kwargs)
-            except Exception as e:  # noqa: BLE001
+                got = call(c)
+            except err_types as e:  # noqa: BLE001
                 return False, passed / len(spec.cases), f"case raised: {e}"
             if got == c.expected:
                 passed += 1
