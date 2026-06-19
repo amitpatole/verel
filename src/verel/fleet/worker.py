@@ -7,7 +7,7 @@ scheduler's "done" is never the worker's self-assertion.
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from ..agents import make_fix_hook
 from ..loop import ultracode_loop

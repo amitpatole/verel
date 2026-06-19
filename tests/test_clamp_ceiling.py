@@ -7,7 +7,7 @@ semantics so a refactor to min-by-key fails loudly.
 
 from verel.verdict import Severity, clamp_ceiling
 
-C, E, W, I = Severity.CRITICAL, Severity.ERROR, Severity.WARNING, Severity.INFO
+C, E, W, INFO = Severity.CRITICAL, Severity.ERROR, Severity.WARNING, Severity.INFO
 
 
 def test_advisory_critical_clamps_to_warning():
@@ -19,7 +19,7 @@ def test_advisory_error_clamps_to_warning():
 
 
 def test_info_not_raised_to_warning():
-    assert clamp_ceiling(I, W) == I
+    assert clamp_ceiling(INFO, W) == INFO
 
 
 def test_precise_critical_not_clamped():

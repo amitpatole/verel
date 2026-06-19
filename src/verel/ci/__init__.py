@@ -7,6 +7,7 @@ and a deterministic rollback policy engine keeps destructive actions off advisor
 
 from __future__ import annotations
 
+from .canary import CanaryResult, canary_rollback
 from .graders import (
     GraderSpec,
     mypy_spec,
@@ -19,7 +20,6 @@ from .graders import (
     subprocess_runner,
     suite_sha,
 )
-from .canary import CanaryResult, canary_rollback
 from .heal import HealResult, HealRound, self_heal
 from .hooks import install_precommit, is_installed
 from .medic import Action, Diagnosis, classify_issue, enrich_diagnoses, quarantine_severity, triage

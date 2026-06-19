@@ -16,7 +16,14 @@ import tempfile
 from pathlib import Path
 
 from verel.agents.llm import have_key
-from verel.fleet import BudgetLease, RetryPolicy, Scheduler, plan_over_artifacts, to_tasks, ultracode_worker
+from verel.fleet import (
+    BudgetLease,
+    RetryPolicy,
+    Scheduler,
+    plan_over_artifacts,
+    to_tasks,
+    ultracode_worker,
+)
 from verel.fleet.manager import validate_fanout
 from verel.memory import FailureLedger, LocalMemory
 

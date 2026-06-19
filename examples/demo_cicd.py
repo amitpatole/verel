@@ -10,7 +10,6 @@ Run:  python examples/demo_cicd.py     (uses your current python+pytest; no API 
 
 from __future__ import annotations
 
-import subprocess
 import sys
 import tempfile
 from pathlib import Path

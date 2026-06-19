@@ -8,8 +8,8 @@ proposes patches; the graders decide done, every round.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable
 
 from ..agents.code_fixer import fix_code
 from .medic import Action, enrich_diagnoses, triage
@@ -66,6 +66,7 @@ def self_heal(repo: str, stage: Stage, *, fix: FixFn | None = None, runner=None,
                     hints = [d.hint for d in diagnoses if d.action == Action.FIX_BRANCH and d.hint]
                 rnd.changed = sorted(fix_code(repo, failing, hints=hints or None))
             else:
+                assert fix is not None  # non-default path: a custom fix was provided
                 rnd.changed = sorted(fix(repo, failing))
             if not rnd.changed:
                 rounds.append(rnd)

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "verel"
-version = "0.3.0"
+version = "0.3.1"
 description = "The agent framework where nothing is done until a grader returns a verdict — verification + grounded perception (AgentVision eyes), compounding memory, a fleet, agent-built tooling, and agent-run CI/CD."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -12,7 +12,7 @@ license = "MIT"
 authors = [{ name = "Amit Patole", email = "amit.patole@gmail.com" }]
 keywords = ["agents", "llm", "ai-agents", "evals", "verification", "agentvision", "orchestration", "memory"]
 classifiers = [
-  "Development Status :: 2 - Pre-Alpha",
+  "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
   "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
@@ -26,7 +26,7 @@ dependencies = [
 sight = ["agentvision[render]"]
 mem0 = ["mem0ai>=2.0", "chromadb>=0.5"]
 mcp = ["mcp>=1.0", "anyio>=4"]
-dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.6", "mypy>=1.10"]
 
 [project.scripts]
 verel = "verel.cli:main"
@@ -40,6 +40,27 @@ Source = "https://github.com/amitpatole/verel"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B", "C4", "SIM"]
+ignore = ["E731", "B008", "SIM105"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests embed code-sample literals and use bare asserts; E501 on those is noise.
+"tests/*" = ["E402", "B017", "SIM117", "E501"]
+# Demos favour compact, readable setup (semicolon git helpers, long illustrative strings).
+"examples/*" = ["E402", "E501", "E702"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+check_untyped_defs = false
+warn_unused_ignores = false
+exclude = ["tests/", "examples/"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/verel"]

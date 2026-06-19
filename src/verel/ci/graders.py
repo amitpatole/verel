@@ -15,14 +15,13 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from hashlib import blake2s
-from typing import Callable
 
 from ..verdict.fingerprint import assign
 from ..verdict.gate import sign_receipt
 from ..verdict.models import (
-    Confidence,
     GraderKind,
     Issue,
     IssueKind,
@@ -88,7 +87,7 @@ def parse_pytest(out: str, err: str = "") -> list[Issue]:
 
 def parse_ruff(out: str, err: str = "") -> list[Issue]:
     issues = []
-    for path, line, col, code, msg in _RUFF.findall(out):
+    for path, line, _col, code, msg in _RUFF.findall(out):
         issues.append(Issue(
             kind=IssueKind.OTHER, severity=Severity.ERROR, source=GraderKind.LINT,
             message=f"{code} {msg}", locator=f"{path}:{line}",

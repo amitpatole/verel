@@ -37,7 +37,7 @@ class SkillArtifact(BaseModel):
     def _payload(self) -> str:
         return f"{self.content_hash}|{self.name}|{self.origin}"
 
-    def finalize(self) -> "SkillArtifact":
+    def finalize(self) -> SkillArtifact:
         self.content_hash = content_hash(self.code)
         self.signature = hmac.new(_SECRET, self._payload().encode(), hashlib.sha256).hexdigest()
         return self

@@ -14,5 +14,17 @@ jobs:
         run: uv python install 3.11
       - name: Install (core + dev)
         run: uv pip install --system -e ".[dev]"
-      - name: Verdict-bus tests (no AgentVision — sight tests skip)
+      - name: Lint (ruff)
+        run: ruff check src tests examples
+      - name: Types (mypy)
+        run: mypy src
+      - name: Tests (sight tests skip without AgentVision)
         run: python -m pytest -q
+      - name: Dogfood — Verel gates Verel via its own verdict bus
+        run: |
+          python - <<'PY'
+          from verel.ci import premerge_stage, run_stage
+          res = run_stage(premerge_stage(".", covers=["src"]), diff_files={"src"})
+          print("premerge verdict:", res.verdict.value)
+          assert res.verdict.value == "pass", "Verel's own verdict bus rejected this change"
+          PY

@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import re
 from collections import defaultdict
-from typing import Callable
+from collections.abc import Callable
 
 from ..agents import llm
 from .view import MemoryKind, MemoryRecord, MemoryView, Trust
@@ -47,7 +47,7 @@ def consolidate_failures(
     """Cluster FAILURE records by kind within `scope`; synthesize a candidate DesignRule per
     cluster of size >= `min_cluster`. Returns the written DesignRule records."""
     chat = chat or _default_chat
-    failures = [r for r in mem.all(scope=scope, kind=MemoryKind.FAILURE)]
+    failures = list(mem.all(scope=scope, kind=MemoryKind.FAILURE))
     clusters: dict[str, list[MemoryRecord]] = defaultdict(list)
     for r in failures:
         clusters[r.detail.get("kind", "other")].append(r)

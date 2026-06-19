@@ -11,9 +11,9 @@ scrubbed fingerprints, progressed/stuck, termination — is real.
 from __future__ import annotations
 
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Awaitable, Callable
 
 from .senses.percept_log import PerceptLog
 from .senses.sight import perceive

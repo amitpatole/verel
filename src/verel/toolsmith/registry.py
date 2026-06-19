@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import json
 import os
 import signal
 from enum import Enum
@@ -51,7 +50,7 @@ class ToolRecord(BaseModel):
     def signing_payload(self) -> str:
         return f"{self.name}|{self.version}|{self.code}"
 
-    def sign(self) -> "ToolRecord":
+    def sign(self) -> ToolRecord:
         self.signature = hmac.new(_SECRET, self.signing_payload().encode(), hashlib.sha256).hexdigest()
         return self
 

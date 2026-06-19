@@ -1,10 +1,9 @@
 """Public Skill Registry + cross-tenant transfer + the H2 experiment (§2.2, §8.7). Offline."""
 
-from verel.memory import LocalMemory, Trust
+from verel.memory import LocalMemory
 from verel.registry import (
     KILL_LINE,
     PublicRegistry,
-    SkillArtifact,
     content_hash,
     export_skill,
     import_skill,
@@ -40,18 +39,17 @@ def test_registry_publish_get_search(tmp_path):
     a = reg.publish(export_skill(_tool("slugify", SLUG, "convert title to url slug"), origin="A"))
     assert reg.get(a.content_hash).name == "slugify"
     assert reg.search("url slug")[0].name == "slugify"
-    assert len(reg.list()) == 1
+    assert len(reg.all()) == 1
 
 
 def test_registry_refuses_tampered(tmp_path):
     reg = PublicRegistry(tmp_path / "pub")
+    import pytest
+
     a = export_skill(_tool("x", SLUG, "c"), origin="A")
     a.code += "# evil"
-    try:
+    with pytest.raises(ValueError):
         reg.publish(a)
-        assert False
-    except ValueError:
-        pass
 
 
 # ---- transfer: trust does NOT travel ----

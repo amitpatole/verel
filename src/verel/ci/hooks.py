@@ -6,7 +6,6 @@ the commit. This is the local safety gate every worker (human or agent) passes t
 
 from __future__ import annotations
 
-import os
 import stat
 from pathlib import Path
 

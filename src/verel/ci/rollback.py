@@ -13,7 +13,7 @@ import subprocess
 from dataclasses import dataclass, field
 
 from ..verdict.constants import ADVISORY_GRADERS, GATING_SEVERITY, SEV_ORDER
-from ..verdict.models import GraderKind, Report, Severity
+from ..verdict.models import GraderKind, Report
 
 
 @dataclass

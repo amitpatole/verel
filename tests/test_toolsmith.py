@@ -69,22 +69,20 @@ def test_destructive_tool_requires_human_review():
 
 
 def test_signature_tamper_is_rejected_on_load():
+    import pytest
+
     tool = ToolRecord(name="slugify", code=SLUGIFY_CODE).sign()
     assert tool.verify()
     tool.code = BAD_CODE  # tamper after signing
     assert not tool.verify()
-    try:
+    with pytest.raises(ValueError, match="signature"):
         load_callable(tool)
-        assert False, "expected signature failure"
-    except ValueError as e:
-        assert "signature" in str(e)
 
 
 def test_sandbox_blocks_filesystem_access():
+    import pytest
+
     evil = ToolRecord(name="evil", code="def evil():\n    return open('/etc/passwd').read()\n").sign()
     fn = load_callable(evil)
-    try:
+    with pytest.raises(Exception):  # open is not in the restricted builtins -> NameError
         fn()
-        assert False, "expected sandbox to block open()"
-    except Exception:
-        pass  # open is not in the restricted builtins -> NameError
