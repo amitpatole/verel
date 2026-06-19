@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://pypi.org/project/verel/"><img src="https://img.shields.io/pypi/v/verel?color=8b7cff&label=pip%20install%20verel" alt="PyPI"></a>
-  <img src="https://img.shields.io/badge/tests-153%20passing-46d39a" alt="tests">
+  <img src="https://img.shields.io/badge/tests-154%20passing-46d39a" alt="tests">
   <img src="https://img.shields.io/badge/ruff%20%2B%20mypy-clean-5ad1e6" alt="lint">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT">
   <img src="https://img.shields.io/badge/LLM-Ollama%20Cloud%20%C2%B7%20OpenAI-8b7cff" alt="LLM">
@@ -157,9 +157,11 @@ python examples/demo_canary_rollback.py  # bad merge fails canary → safe auto 
 
 - The in-process tool guard is a guardrail, not a sandbox — real isolation is the `bwrap`
   container runner (`isolation="container"`): no network, read-only system-only fs, ephemeral
-  tmp, cleared env, **and a seccomp-bpf syscall denylist** (`verel[container]`) so even native
-  code can't reach ptrace/mount/raw-socket/namespace syscalls. It is a denylist, not a minimal
-  allow-list jail — honest defense-in-depth around a full CPython payload.
+  tmp, cleared env, **and a seccomp-bpf syscall filter** (`verel[container]`). Two profiles: the
+  default **denylist** (defense-in-depth — EPERM on ptrace/mount/raw-socket/namespace/module/bpf
+  syscalls, safe for arbitrary tools) and an opt-in **allowlist** jail (`seccomp_profile=
+  "allowlist"`) — default-deny, allowing only the syscalls a pure-compute CPython payload needs,
+  so an untrusted tool gets **no network, no subprocess, and no threads** at the kernel boundary.
 - The moat (a public verified-skill registry) is a **bet**, not a given — `verel.registry`
   ships the **H2 experiment** to *measure* whether skills transfer across tenants before you
   build it.

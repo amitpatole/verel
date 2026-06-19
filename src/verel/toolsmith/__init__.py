@@ -10,7 +10,14 @@ from __future__ import annotations
 from .container import best_runner, bwrap_available, run_container
 from .registry import SideEffect, ToolRecord, ToolRegistry, load_callable
 from .sandbox import SandboxError, run_sandboxed
-from .seccomp import DENIED_SYSCALLS, build_bpf, seccomp_available
+from .seccomp import (
+    ALLOWED_SYSCALLS,
+    DENIED_SYSCALLS,
+    PROFILE_ALLOWLIST,
+    PROFILE_DENYLIST,
+    build_bpf,
+    seccomp_available,
+)
 from .smith import BuildResult, ToolCase, ToolSmith, ToolSpec, eval_tool_cases
 
 __all__ = [
@@ -25,6 +32,9 @@ __all__ = [
     "seccomp_available",
     "build_bpf",
     "DENIED_SYSCALLS",
+    "ALLOWED_SYSCALLS",
+    "PROFILE_DENYLIST",
+    "PROFILE_ALLOWLIST",
     "SandboxError",
     "BuildResult",
     "ToolCase",
