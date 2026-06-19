@@ -93,6 +93,26 @@ def test_no_brief_means_no_conformance_facts():
     assert res.percept.intent_total is None
 
 
+def test_temporal_signal_reaches_the_percept():
+    # a watch() Report rides its temporal signal on an issue's detail.temporal
+    signal = {"moving": True, "stabilized": True, "videos": [{"playing": True}]}
+    av = _av_report([_av_issue("other", "info", "cv", detail={"temporal": signal})],
+                    verdict="pass")
+    res = from_agentvision(av)
+    assert res.percept.playing is True
+    assert res.percept.live is True
+    assert res.percept.stabilized is True
+
+
+def test_stalled_video_gates_to_fail():
+    # deterministic stall is DOM-sourced (precise) -> not clamped -> FAILs the bus
+    av = _av_report([_av_issue("other", "error", "dom",
+                               message="Video '#v' is not playing — stalled",
+                               detail={"temporal": "stall"})])
+    res = from_agentvision(av)
+    assert gate(res.reports).verdict == Verdict.FAIL
+
+
 def test_mixed_sources_split_into_separate_reports():
     av = _av_report([
         _av_issue("overflow", "error", "dom"),

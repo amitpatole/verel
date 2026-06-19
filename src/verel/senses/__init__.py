@@ -7,6 +7,7 @@ senses (logs/tests/metrics/types) share the same `Percept` envelope (§8.3).
 from __future__ import annotations
 
 from .percept_log import PerceptLog
-from .sight import SightResult, classic_capabilities, from_agentvision, perceive
+from .sight import SightResult, classic_capabilities, from_agentvision, perceive, watch
 
-__all__ = ["PerceptLog", "SightResult", "classic_capabilities", "from_agentvision", "perceive"]
+__all__ = ["PerceptLog", "SightResult", "classic_capabilities", "from_agentvision",
+           "perceive", "watch"]

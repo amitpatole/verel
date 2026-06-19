@@ -154,6 +154,11 @@ class Percept(BaseModel):
     matches_intent: bool | None = None
     intent_satisfied: int | None = None
     intent_total: int | None = None
+    # temporal signal (populated by a `watch` capture; None for a single-frame glance).
+    # Lets the brain gate on / compound "playback actually worked" over iterations.
+    playing: bool | None = None
+    live: bool | None = None
+    stabilized: bool | None = None
 
 
 class GateResult(BaseModel):

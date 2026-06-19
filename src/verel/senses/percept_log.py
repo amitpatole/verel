@@ -52,6 +52,9 @@ class PerceptLog:
             "matches_intent": percept.matches_intent,
             "intent_satisfied": percept.intent_satisfied,
             "intent_total": percept.intent_total,
+            "playing": percept.playing,
+            "live": percept.live,
+            "stabilized": percept.stabilized,
         }
         with self.path.open("a") as f:
             f.write(json.dumps(record) + "\n")
