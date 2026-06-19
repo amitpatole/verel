@@ -15,7 +15,7 @@ Every tool returns the same verdict-shaped truth the rest of Verel speaks.
 from __future__ import annotations
 
 import json
-from typing import Any, Callable
+from typing import Any
 
 # ---- tool implementations (pure-ish; importable without `mcp`) ----
 
@@ -73,7 +73,8 @@ TOOLS: dict[str, dict[str, Any]] = {
     "verel_gate": {"fn": _tool_gate, "description": "Gate a list of verdict-bus Reports → verdict."},
     "verel_ci_check": {"fn": _tool_ci_check, "description": "Run the inner-loop CI stage on a repo."},
     "verel_recall": {"fn": _tool_recall, "description": "Recall records from a memory store."},
-    "verel_build_tool": {"fn": _tool_build_tool, "description": "Build+verify+register a tool (needs LLM key)."},
+    "verel_build_tool": {"fn": _tool_build_tool,
+                         "description": "Build+verify+register a tool (needs LLM key)."},
 }
 
 

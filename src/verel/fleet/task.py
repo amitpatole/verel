@@ -46,7 +46,7 @@ class Barrier(BaseModel):
 
 class RetryPolicy(BaseModel):
     max: int = 3
-    backoff_s: list[float] = Field(default_factory=lambda: [5, 30, 120])
+    backoff_s: list[float] = Field(default_factory=lambda: [5.0, 30.0, 120.0])
     on_fail: str = "quarantine"  # "quarantine" | "escalate"
 
 

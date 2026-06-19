@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 
 from ..verdict.gate import gate, sign_receipt
 from ..verdict.models import GraderKind, Report, RunReceipt, Verdict
-from .view import MemoryRecord, MemoryView, Trust
+from .view import MemoryRecord, MemoryView
 
 PROMOTE_F1 = 0.8  # held-out F1 threshold to promote candidate -> verified
 
@@ -157,4 +157,5 @@ class PromotionGate:
                 updated.with_detail(grounding="verified", promotion_f1=round(f1, 3))
                 self.mem.write(updated)
             return PromotionResult(True, f1, Verdict.PASS, "passed held-out attested eval", report)
-        return PromotionResult(False, f1, gr.verdict, gr.reason or f"F1 {f1:.2f} < {self.f1_threshold}", report)
+        return PromotionResult(False, f1, gr.verdict,
+                               gr.reason or f"F1 {f1:.2f} < {self.f1_threshold}", report)

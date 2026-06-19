@@ -31,13 +31,13 @@ class PublicRegistry:
         p = self.root / f"{content_hash}.json"
         return SkillArtifact(**json.loads(p.read_text())) if p.exists() else None
 
-    def list(self) -> list[SkillArtifact]:
+    def all(self) -> list[SkillArtifact]:
         return [SkillArtifact(**json.loads(p.read_text())) for p in sorted(self.root.glob("*.json"))]
 
     def search(self, capability: str) -> list[SkillArtifact]:
         q = set(capability.lower().split())
         scored = []
-        for a in self.list():
+        for a in self.all():
             hay = set(f"{a.name} {a.capability}".lower().split())
             overlap = len(q & hay)
             if overlap:

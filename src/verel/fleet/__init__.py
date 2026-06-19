@@ -10,18 +10,18 @@ from __future__ import annotations
 from .llm_manager import decide_fanout
 from .manager import FanOut, Subtask, clamp, plan_over_artifacts, to_tasks, validate_fanout
 from .scheduler import DagError, Scheduler, WorkerFn, WorkerResult
-from .worktree import LeaseHeld, Worktree, WorktreeError, WorktreeManager
 from .task import (
+    ROLE_DEFAULTS,
     Barrier,
     BarrierKind,
     BudgetLease,
-    ROLE_DEFAULTS,
     RetryPolicy,
     Role,
     Task,
     TaskState,
 )
 from .worker import ultracode_worker, worktree_ultracode_worker
+from .worktree import LeaseHeld, Worktree, WorktreeError, WorktreeManager
 
 __all__ = [
     "FanOut",

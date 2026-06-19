@@ -10,7 +10,7 @@ from verel.memory import (
     regression_report,
     should_prune,
 )
-from verel.memory.view import make_key, rank
+from verel.memory.view import rank
 from verel.verdict import GraderKind, Issue, IssueKind, Report, Severity, Verdict, assign
 
 

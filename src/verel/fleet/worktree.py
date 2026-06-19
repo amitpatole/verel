@@ -38,7 +38,7 @@ class Worktree:
     task_id: str
     path: Path
     branch: str
-    _manager: "WorktreeManager"
+    _manager: WorktreeManager
 
     def write(self, rel: str, content: str) -> Path:
         p = self.path / rel

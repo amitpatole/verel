@@ -14,7 +14,7 @@ from __future__ import annotations
 from verel.agents.llm import have_key
 from verel.memory import LocalMemory
 from verel.registry import export_skill, measure_transfer
-from verel.toolsmith import SideEffect, ToolCase, ToolRegistry, ToolSmith, ToolSpec
+from verel.toolsmith import ToolCase, ToolRegistry, ToolSmith, ToolSpec
 
 # Tenant A's skills. `slugify` is universal; `tax_total` encodes A's tax rate (8%) — a
 # tenant-specific rule that should NOT transfer to tenants with different rates.

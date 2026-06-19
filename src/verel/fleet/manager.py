@@ -48,7 +48,8 @@ def validate_fanout(fo: FanOut) -> tuple[bool, str]:
     # design admits dep-carrying DAGs too, but the *fan-out independence* rule is: a batch
     # admitted as parallel work must be mutually independent.
     if any(s.deps for s in fo.subtasks):
-        return False, "fan_out subtasks are not independent (deps present) — emit a DAG via deps only when serial"
+        return False, ("fan_out subtasks are not independent (deps present) — "
+                       "emit a DAG via deps only when serial")
     return True, "ok"
 
 

@@ -23,10 +23,11 @@ from .view import (
     make_id,
     make_key,
     rank,
-    relevance as _relevance,
     should_prune,
 )
-
+from .view import (
+    relevance as _relevance,
+)
 
 _COLS = (
     "id, kind, subject, predicate, text, scope, subj_pred_key, source, provenance, trust, "
@@ -43,7 +44,7 @@ class LocalMemory(MemoryView):
         self._db = sqlite3.connect(self.path)
         self._db.row_factory = sqlite3.Row
         self._db.execute(
-            f"""CREATE TABLE IF NOT EXISTS memory (
+            """CREATE TABLE IF NOT EXISTS memory (
                 id TEXT PRIMARY KEY, kind TEXT, subject TEXT, predicate TEXT, text TEXT,
                 scope TEXT, subj_pred_key TEXT, source TEXT, provenance TEXT, trust TEXT,
                 epistemic_confidence REAL, retrieval_strength REAL, support_count INTEGER,

@@ -48,7 +48,6 @@ def test_toolsmith_container_isolation_builds_verified():
 
 # ---- embeddings-backed tool reuse ----
 def _register(reg, name, code, capability, trust):
-    from verel.memory import Trust
 
     reg.register(ToolRecord(name=name, code=code, capability=capability,
                             side_effect=SideEffect.READ_ONLY, eval_score=1.0).sign(), trust=trust)

@@ -19,9 +19,9 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Awaitable, Callable
 
 from ..verdict.models import Report, Verdict
 from .task import TERMINAL, Barrier, BarrierKind, BudgetLease, Task, TaskState
@@ -84,7 +84,7 @@ class Scheduler:
                     raise DagError(f"task {t.id!r} depends on unknown {d!r}")
         # cycle check (DFS)
         WHITE, GREY, BLACK = 0, 1, 2
-        color = {tid: WHITE for tid in by_id}
+        color = dict.fromkeys(by_id, WHITE)
 
         def visit(tid: str):
             color[tid] = GREY
@@ -149,7 +149,7 @@ class Scheduler:
     # ---- run ----
     async def run(self, tasks: list[Task]) -> dict[str, TaskState]:
         by_id = self.validate(tasks)
-        state = {tid: TaskState.PENDING for tid in by_id}
+        state = dict.fromkeys(by_id, TaskState.PENDING)
         budget = _Budget(self.budget or BudgetLease(), started=self._clock())
 
         for tid in self._resume_passed():

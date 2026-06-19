@@ -9,12 +9,11 @@ files it changed (empty => gave up).
 from __future__ import annotations
 
 import json
-import re
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
-from . import llm
 from ..verdict.models import Report
+from . import llm
 
 ChatFn = Callable[[list[dict]], str]
 

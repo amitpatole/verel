@@ -17,8 +17,6 @@ network egress or filesystem READS. True containment (network namespace / seccom
 from __future__ import annotations
 
 import json
-import os
-import signal
 import subprocess
 import sys
 import textwrap

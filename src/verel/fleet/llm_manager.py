@@ -10,7 +10,7 @@ the fleet degrades safely, never crashes on a bad decision.
 from __future__ import annotations
 
 import json
-from typing import Callable
+from collections.abc import Callable
 
 from ..agents import llm
 from .manager import FanOut, Subtask, clamp, plan_over_artifacts, validate_fanout

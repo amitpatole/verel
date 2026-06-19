@@ -96,9 +96,7 @@ def gate(
     for r in reports:
         for i in r.issues:
             sev = i.severity
-            if r.grader in ADVISORY_GRADERS:
-                sev = clamp_ceiling(sev, ADVISORY_CEIL)
-            elif i.confidence == Confidence.LOW:
+            if r.grader in ADVISORY_GRADERS or i.confidence == Confidence.LOW:
                 sev = clamp_ceiling(sev, ADVISORY_CEIL)
             gating.append((sev, i))
             if i.fingerprint:

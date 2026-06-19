@@ -3,7 +3,6 @@ Offline: the command runner is injected with canned tool output."""
 
 from verel.ci import (
     Action,
-    GraderSpec,
     RollbackPolicy,
     RollbackProposal,
     Stage,
@@ -14,13 +13,12 @@ from verel.ci import (
     parse_ruff,
     pytest_spec,
     quarantine_severity,
+    ruff_spec,
     run_grader,
     run_stage,
-    ruff_spec,
-    triage,
 )
 from verel.memory import FailureLedger, LocalMemory
-from verel.verdict import Confidence, GraderKind, Issue, IssueKind, Report, Severity, Verdict, assign
+from verel.verdict import GraderKind, Issue, IssueKind, Report, Severity, Verdict, assign
 
 PYTEST_OUT = """\
 F.F

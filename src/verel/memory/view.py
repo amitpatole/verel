@@ -81,7 +81,7 @@ class MemoryRecord(BaseModel):
         except (json.JSONDecodeError, TypeError):
             return {}
 
-    def with_detail(self, **kv) -> "MemoryRecord":
+    def with_detail(self, **kv) -> MemoryRecord:
         d = self.detail
         d.update(kv)
         self.detail_json = json.dumps(d)

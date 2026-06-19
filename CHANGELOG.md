@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.1 — polish pass (lint/types clean, typed, dogfooded)
+
+- **ruff + mypy clean** across `src/` (config in pyproject); ruff passes on tests/examples too.
+- **Ships type information** (`py.typed`, PEP 561) — downstream users get Verel's types.
+- **Dogfooding invariant enforced in CI**: a step runs Verel's own pre-merge verdict bus
+  (pytest + ruff + mypy graders, attested) over Verel and asserts `pass` — Verel gates Verel.
+- Tests modernized (`pytest.raises` over `assert False`); `PublicRegistry.list()` → `all()`
+  (consistency with `MemoryView.all()`, removes builtin shadowing). Dev status → Alpha.
+
 ## 0.3.0 — refinements: real mem0, container sandbox, semantic reuse, enriched medic
 
 - **Real mem0 backend** (`memory/mem0_backend.py`): updated to the mem0 **2.x** API

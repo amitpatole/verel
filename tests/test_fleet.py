@@ -53,20 +53,18 @@ def run(sched, tasks):
 
 # ---- DAG validation ----
 def test_cycle_rejected():
+    import pytest
+
     tasks = [_task("a", deps=["b"]), _task("b", deps=["a"])]
-    try:
+    with pytest.raises(DagError):
         Scheduler.validate(tasks)
-        assert False, "expected DagError"
-    except DagError:
-        pass
 
 
 def test_unknown_dep_rejected():
-    try:
+    import pytest
+
+    with pytest.raises(DagError):
         Scheduler.validate([_task("a", deps=["ghost"])])
-        assert False
-    except DagError:
-        pass
 
 
 # ---- ordering & barriers ----
