@@ -83,8 +83,12 @@ class ToolSmith:
 
     # ---- detect ----
     def detect(self, spec: ToolSpec) -> ToolRecord | None:
-        for t in self.registry.find(spec.capability, verified_only=True, k=3):
-            return t  # a verified tool already covers this capability -> reuse
+        # Reuse only on a STRONG capability match (or same name); weak lexical overlap must
+        # not reuse the wrong tool.
+        for t in self.registry.find(spec.capability, verified_only=True, k=3, min_relevance=0.5):
+            return t
+        for t in self.registry.find(spec.name, verified_only=True, k=1, min_relevance=0.5):
+            return t
         return None
 
     # ---- scaffold ----
@@ -99,36 +103,8 @@ class ToolSmith:
 
     # ---- test ----
     def evaluate(self, code: str, spec: ToolSpec) -> tuple[bool, float, str]:
-        probe = ToolRecord(name=spec.name, code=code, side_effect=spec.side_effect).sign()
-        if not spec.cases:
-            return False, 0.0, "no held-out cases"
-
-        if self.sandbox:
-            from .sandbox import SandboxError, run_sandboxed
-
-            def call(c):
-                return run_sandboxed(probe, c.args, c.kwargs)
-            err_types = (SandboxError,)
-        else:
-            try:
-                fn = load_callable(probe)
-            except Exception as e:  # noqa: BLE001
-                return False, 0.0, f"load failed: {e}"
-
-            def call(c):
-                return fn(*c.args, **c.kwargs)
-            err_types = (Exception,)
-
-        passed = 0
-        for c in spec.cases:
-            try:
-                got = call(c)
-            except err_types as e:  # noqa: BLE001
-                return False, passed / len(spec.cases), f"case raised: {e}"
-            if got == c.expected:
-                passed += 1
-        score = passed / len(spec.cases)
-        return score >= PASS_THRESHOLD, score, f"{passed}/{len(spec.cases)} cases"
+        return eval_tool_cases(code, spec.name, spec.cases, side_effect=spec.side_effect,
+                               sandbox=self.sandbox)
 
     def _receipt(self, spec: ToolSpec) -> RunReceipt:
         rr = RunReceipt(
@@ -174,3 +150,40 @@ class ToolSmith:
                                    "destructive: registered candidate, awaiting human review")
         self.registry.register(tool, trust=Trust.VERIFIED, ts=ts)
         return BuildResult(tool, False, True, score, Trust.VERIFIED, True, "verified + registered")
+
+
+def eval_tool_cases(code: str, name: str, cases: list[ToolCase], *,
+                    side_effect: SideEffect = SideEffect.READ_ONLY,
+                    sandbox: bool = False) -> tuple[bool, float, str]:
+    """Run `code`'s `name` function against held-out cases. Shared by the smith and the
+    cross-tenant registry import (§8.7) so transfer is judged the SAME way as local build."""
+    probe = ToolRecord(name=name, code=code, side_effect=side_effect).sign()
+    if not cases:
+        return False, 0.0, "no held-out cases"
+
+    if sandbox:
+        from .sandbox import SandboxError, run_sandboxed
+
+        def call(c):
+            return run_sandboxed(probe, c.args, c.kwargs)
+        err_types = (SandboxError,)
+    else:
+        try:
+            fn = load_callable(probe)
+        except Exception as e:  # noqa: BLE001
+            return False, 0.0, f"load failed: {e}"
+
+        def call(c):
+            return fn(*c.args, **c.kwargs)
+        err_types = (Exception,)
+
+    passed = 0
+    for c in cases:
+        try:
+            got = call(c)
+        except err_types as e:  # noqa: BLE001
+            return False, passed / len(cases), f"case raised: {e}"
+        if got == c.expected:
+            passed += 1
+    score = passed / len(cases)
+    return score >= PASS_THRESHOLD, score, f"{passed}/{len(cases)} cases"

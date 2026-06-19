@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from .registry import SideEffect, ToolRecord, ToolRegistry, load_callable
 from .sandbox import SandboxError, run_sandboxed
-from .smith import BuildResult, ToolCase, ToolSmith, ToolSpec
+from .smith import BuildResult, ToolCase, ToolSmith, ToolSpec, eval_tool_cases
 
 __all__ = [
     "SideEffect",
@@ -22,4 +22,5 @@ __all__ = [
     "ToolCase",
     "ToolSmith",
     "ToolSpec",
+    "eval_tool_cases",
 ]

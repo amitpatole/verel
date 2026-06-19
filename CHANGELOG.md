@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.0 — public Skill Registry + the H2 corpus-transfer experiment (the moat gate)
+
+- **Public Skill Registry** (`verel.registry`): content-addressed, signed, provenance-tagged
+  `SkillArtifact`s in a `PublicRegistry`. Export a verified tool, publish it, search/fetch it.
+- **Cross-tenant transfer with re-verification** (`registry/transfer.py`): trust does NOT
+  travel — an imported skill enters as `candidate` and only becomes `verified` if it passes
+  the importing tenant's OWN held-out eval.
+- **H2 experiment** (`registry/h2.py`): `measure_transfer()` measures the cross-tenant
+  re-verification rate and returns the design's gating decision (≥20% → build the registry;
+  <20% → pivot to per-tenant lock-in). Honest: skills a target can't evaluate aren't counted.
+- Fixed a tool-smith `detect()` bug: weak lexical capability overlap could reuse the wrong
+  tool; reuse now requires a strong match (`min_relevance`).
+- 125 tests; demo_h2_moat.py (live): builds skills on Ollama, measures real fungibility.
+
 ## 0.1.1 — semantic recall + real tool sandbox
 
 - **Semantic memory recall** (`memory/embed.py`): pluggable `Embedder` (`HashEmbedder` offline,
