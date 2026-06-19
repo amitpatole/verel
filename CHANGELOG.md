@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.9.0 — deepened consolidation: adaptive decay, semantic clustering, structured + 2nd-order rules
+
+The Brain's "episodic → semantic" step gets richer and its decay gets smarter.
+- **Adaptive decay** (`effective_half_life`): a memory's half-life now stretches with demonstrated
+  usefulness — `support_count` (log) + `epistemic_confidence` above the prior — capped at 6×. A
+  corroborated rule outlives a one-off. Reachability tuning only; truth still moves solely via
+  corroborate/contradict. Wired into the shared `apply_decay`, so LocalMemory and mem0 match.
+- **Semantic clustering** (`cluster_records`): consolidation buckets failures by kind first (a
+  strong prior — distinct kinds never merge), then, with `semantic=True` and a real embedder,
+  refines each bucket by MEANING (cosine single-link) into finer sub-patterns.
+- **Structured induction**: an induced `DesignRule` now carries `condition` / `action` /
+  `applies_to` slots (not just a one-liner), so its matcher and the held-out gate test something
+  specific. Back-compatible with the old `{subject, rule}` form.
+- **2nd-order schemas** (`induce_schemas`, new `MemoryKind.SCHEMA`): clusters the DesignRules
+  themselves and induces a higher-level principle that subsumes a family of rules. Guards against
+  re-consolidating schemas. Candidate + inferred — earns trust the same way.
+- `examples/demo_consolidation.py`; 181 offline-CI tests. The LLM is Ollama Cloud (OpenAI
+  fallback); the chat fn is injectable so the whole module is tested offline.
+
 ## 0.8.0 — broadened senses: Python · JS/TS · Go · perf · security on one bus
 
 The verdict bus stops being Python-only. A `GraderSpec` now carries its own parser, so graders

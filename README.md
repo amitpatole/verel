@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://pypi.org/project/verel/"><img src="https://img.shields.io/pypi/v/verel?color=8b7cff&label=pip%20install%20verel" alt="PyPI"></a>
-  <img src="https://img.shields.io/badge/tests-171%20passing-46d39a" alt="tests">
+  <img src="https://img.shields.io/badge/tests-181%20passing-46d39a" alt="tests">
   <img src="https://img.shields.io/badge/ruff%20%2B%20mypy-clean-5ad1e6" alt="lint">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT">
   <img src="https://img.shields.io/badge/LLM-Ollama%20Cloud%20%C2%B7%20OpenAI-8b7cff" alt="LLM">
@@ -53,7 +53,7 @@ Default LLM is **Ollama Cloud** (`~/.config/ollama/key`, model `qwen3-coder:480b
 
 | Organ | Module | What it does |
 |---|---|---|
-| 🧠 **Brain** | `verel.memory` | Memory that compounds — trust + provenance, consolidation, and a **held-out, attested promotion gate**. Only verified facts/skills graduate. Lifecycle controls (**pin** / **volatile-until-confirmed** / **TTL** / **correction chains**) keep it from becoming a junk drawer. Backends: zero-dep `LocalMemory` or rented `mem0`; semantic recall via embeddings. |
+| 🧠 **Brain** | `verel.memory` | Memory that compounds — trust + provenance, consolidation, and a **held-out, attested promotion gate**. Only verified facts/skills graduate. Lifecycle controls (**pin** / **volatile-until-confirmed** / **TTL** / **correction chains** / **adaptive decay** — useful memories decay slower) keep it from becoming a junk drawer. Consolidation induces **structured rules** (condition→action) and **2nd-order schemas**. Backends: zero-dep `LocalMemory` or rented `mem0`; semantic recall + clustering via embeddings. |
 | 👁️ **Eyes** | `verel.senses` | **AgentVision** as a perception organ (DOM/contrast/OCR grounded) feeding both the verdict bus and the brain as one of many senses. |
 | ⚖️ **Verdict bus** | `verel.verdict` | One schema for every sense, with an advisory **ceiling clamp**, **grader attestation**, scrubbed fingerprints, and strict-subset **stuck/progress** detection. |
 | 🚁 **Fleet** | `verel.fleet` | Agents managing agents — an **LLM manager** fans out, a single-writer scheduler runs workers in **isolated git worktrees** under budget, each gated by the bus. |
@@ -153,6 +153,7 @@ python examples/demo_h2_moat.py          # measure cross-tenant skill transfer �
 python examples/demo_canary_rollback.py  # bad merge fails canary → safe auto git-revert
 python examples/demo_capability_jail.py  # learn a tool's syscalls → deny everything it didn't earn
 python examples/demo_polyglot_ci.py      # Python/JS/Go + perf + security graders on one bus
+python examples/demo_consolidation.py    # failures → structured rules → a 2nd-order schema
 ```
 
 ## Honesty (what we do **not** claim)
