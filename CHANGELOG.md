@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.2 — brand & docs polish
+
+- New README with a hero banner + architecture infographic (matches AgentVision's polish).
+- Brand graphics generated with OpenAI **gpt-image-2** (hero, key-visual, eval-loop); the
+  architecture **infographic is rendered & verified by AgentVision** (the eyes Verel ships).
+- Hugging Face Space landing redesigned (`media/space_index.html`). Image URLs are absolute
+  so the banner renders on GitHub and PyPI alike. Heavy media excluded from the sdist.
+
 ## 0.3.1 — polish pass (lint/types clean, typed, dogfooded)
 
 - **ruff + mypy clean** across `src/` (config in pyproject); ruff passes on tests/examples too.

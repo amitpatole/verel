@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "verel"
-version = "0.3.1"
+version = "0.3.2"
 description = "The agent framework where nothing is done until a grader returns a verdict — verification + grounded perception (AgentVision eyes), compounding memory, a fleet, agent-built tooling, and agent-run CI/CD."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -52,15 +52,19 @@ ignore = ["E731", "B008", "SIM105"]
 [tool.ruff.lint.per-file-ignores]
 # Tests embed code-sample literals and use bare asserts; E501 on those is noise.
 "tests/*" = ["E402", "B017", "SIM117", "E501"]
-# Demos favour compact, readable setup (semicolon git helpers, long illustrative strings).
+# Demos & media scripts favour compact setup (semicolon helpers, long illustrative strings).
 "examples/*" = ["E402", "E501", "E702"]
+"media/*" = ["E402", "E501", "E702"]
 
 [tool.mypy]
 python_version = "3.10"
 ignore_missing_imports = true
 check_untyped_defs = false
 warn_unused_ignores = false
-exclude = ["tests/", "examples/"]
+exclude = ["tests/", "examples/", "media/"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/verel"]
+
+[tool.hatch.build.targets.sdist]
+exclude = ["media/*.png", ".github", ".venv"]

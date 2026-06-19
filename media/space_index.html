@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Verel — Verified Agents</title>
+<link rel="icon" href="keyvisual.png"/>
+<style>
+  :root{--bg:#0a0a11;--card:#14141f;--card2:#171724;--line:#262633;--fg:#eceaf7;
+        --mut:#a6a6c4;--acc:#8b7cff;--acc2:#5ad1e6;--good:#46d39a}
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;line-height:1.55}
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:1180px;margin:0 auto;padding:0 24px}
+  /* nav */
+  nav{position:sticky;top:0;z-index:20;backdrop-filter:blur(12px);background:rgba(10,10,17,.72);border-bottom:1px solid var(--line)}
+  nav .wrap{display:flex;align-items:center;justify-content:space-between;height:64px}
+  .brand{display:flex;align-items:center;gap:11px;font-weight:800;font-size:20px;letter-spacing:-.4px}
+  .brand img{width:34px;height:34px;border-radius:9px}
+  .nlinks{display:flex;gap:26px;font-size:15px;color:var(--mut)}
+  .nlinks a:hover{color:#fff}
+  .pill{background:linear-gradient(90deg,#7c6bff,#9a7cff);color:#0a0a11!important;padding:8px 16px;border-radius:10px;font-weight:700;font-size:14px}
+  /* hero */
+  .hero{position:relative;overflow:hidden;border-bottom:1px solid var(--line)}
+  .hero::before{content:"";position:absolute;inset:0;background:radial-gradient(900px 460px at 72% 30%,#241a52 0%,transparent 60%)}
+  .hero .wrap{position:relative;display:grid;grid-template-columns:1.05fr .95fr;gap:36px;align-items:center;padding:70px 24px 64px}
+  .eyebrow{letter-spacing:.3em;text-transform:uppercase;font-size:12.5px;color:var(--acc);font-weight:800}
+  h1{font-size:84px;line-height:.98;letter-spacing:-3px;margin:14px 0 8px;font-weight:850;
+     background:linear-gradient(92deg,#e2ddff,#8b7cff 55%,#5ad1e6);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .lede{font-size:21px;color:#d3d2ea;max-width:560px}
+  .lede b{color:#fff}
+  .cmd{margin:26px 0 14px;display:inline-flex;align-items:center;gap:12px;background:#0e0e18;border:1px solid #2a2a3c;border-radius:12px;padding:13px 18px;font-family:ui-monospace,Menlo,monospace;font-size:17px}
+  .cmd .dollar{color:var(--acc)}
+  .btns{display:flex;gap:12px;flex-wrap:wrap;margin-top:8px}
+  .btn{padding:12px 20px;border-radius:11px;font-weight:700;font-size:15px;border:1px solid #2a2a3c;background:#15151f}
+  .btn:hover{border-color:var(--acc)}
+  .btn.primary{background:linear-gradient(90deg,#7c6bff,#9a7cff);color:#0a0a11;border:none}
+  .hero img.art{width:100%;border-radius:18px;border:1px solid #2a2540;box-shadow:0 30px 80px -30px #6f5cff66}
+  .badges{display:flex;gap:8px;flex-wrap:wrap;margin-top:22px}
+  .badge{font-size:12.5px;color:var(--mut);background:#13131d;border:1px solid var(--line);border-radius:999px;padding:5px 12px}
+  .badge b{color:var(--good)}
+  /* sections */
+  section{padding:64px 0;border-bottom:1px solid var(--line)}
+  .sech{text-align:center;margin-bottom:36px}
+  .sech .k{letter-spacing:.22em;text-transform:uppercase;font-size:12.5px;color:var(--acc);font-weight:800}
+  .sech h2{font-size:38px;letter-spacing:-1px;margin-top:8px}
+  .sech p{color:var(--mut);font-size:17px;max-width:680px;margin:10px auto 0}
+  /* loop */
+  .loopart{width:100%;border-radius:16px;border:1px solid #241f3a;margin-bottom:26px}
+  .steps{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+  .step{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 12px;text-align:center}
+  .step .ic{font-size:26px}.step .t{font-weight:700;margin-top:7px}.step .s{font-size:13px;color:var(--mut);margin-top:3px}
+  .step.win{background:linear-gradient(135deg,#16271f,#12211b);border-color:#2c5c46}.step.win .t{color:var(--good)}
+  /* organs */
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+  .organ{background:var(--card2);border:1px solid var(--line);border-radius:16px;padding:24px;transition:transform .15s,border-color .15s}
+  .organ:hover{transform:translateY(-3px);border-color:#3a3358}
+  .organ .ic{font-size:30px}.organ h3{font-size:20px;margin:10px 0 7px}
+  .organ p{font-size:14.5px;color:var(--mut)}
+  .organ code{display:inline-block;margin-top:12px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:var(--acc2)}
+  /* infographic */
+  .info img{width:100%;border-radius:18px;border:1px solid #241f3a;box-shadow:0 30px 80px -40px #6f5cff55}
+  /* stats */
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:24px;text-align:center}
+  .stat .n{font-size:40px;font-weight:850;background:linear-gradient(90deg,#cfc8ff,#8b7cff);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .stat .l{font-size:13.5px;color:var(--mut);margin-top:4px}
+  footer{padding:40px 0;text-align:center;color:#9494b6;font-size:14px}
+  @media(max-width:880px){.hero .wrap{grid-template-columns:1fr}.steps,.grid,.stats{grid-template-columns:1fr 1fr}h1{font-size:60px}.nlinks{display:none}}
+</style></head>
+<body>
+<nav><div class="wrap">
+  <a class="brand" href="#top"><img src="keyvisual.png" alt="">Verel</a>
+  <div class="nlinks">
+    <a href="#loop">The loop</a><a href="#organs">Organs</a><a href="#arch">Architecture</a>
+    <a href="https://github.com/amitpatole/verel">GitHub</a>
+    <a class="pill" href="https://pypi.org/project/verel/">pip install verel</a>
+  </div>
+</div></nav>
+
+<header class="hero" id="top"><div class="wrap">
+  <div>
+    <div class="eyebrow">👁️🧠 Verified Agents Framework</div>
+    <h1>Verel</h1>
+    <p class="lede">The agent framework where nothing is <b>“done”</b> until a grader returns a
+       <b>verdict</b> — checked by real senses including <b>eyes</b> — and only <b>verified</b>
+       work compounds into the fleet’s shared memory.</p>
+    <div class="cmd"><span class="dollar">$</span> pip install verel</div>
+    <div class="btns">
+      <a class="btn primary" href="https://github.com/amitpatole/verel">GitHub ↗</a>
+      <a class="btn" href="https://pypi.org/project/verel/">PyPI</a>
+      <a class="btn" href="https://github.com/amitpatole/verel/blob/main/docs/VEREL_DESIGN.md">Design &amp; plan</a>
+    </div>
+    <div class="badges">
+      <span class="badge"><b>135</b> tests passing</span>
+      <span class="badge">ruff + mypy <b>clean</b></span>
+      <span class="badge">MIT</span>
+      <span class="badge">Ollama Cloud · OpenAI</span>
+    </div>
+  </div>
+  <img class="art" src="hero.png" alt="A glowing brain with an eye, and verified work passing through a verdict gate"/>
+</div></header>
+
+<section id="loop"><div class="wrap">
+  <div class="sech"><div class="k">Eval-driven by design</div><h2>The loop is the whole point</h2>
+    <p>Every agent action is a hypothesis. One verdict bus unifies vision + tests + lint + types
+       into a single <b>pass / warn / fail</b> — with attestation, so a hollow check can’t mint green.</p></div>
+  <img class="loopart" src="flow.png" alt="An eval-driven loop of five connected nodes"/>
+  <div class="steps">
+    <div class="step"><div class="ic">✍️</div><div class="t">Write</div><div class="s">agent acts</div></div>
+    <div class="step"><div class="ic">👁️</div><div class="t">Perceive</div><div class="s">senses → percepts</div></div>
+    <div class="step"><div class="ic">⚖️</div><div class="t">Gate</div><div class="s">verdict bus</div></div>
+    <div class="step"><div class="ic">🛠️</div><div class="t">Fix</div><div class="s">agent patches</div></div>
+    <div class="step win"><div class="ic">✅</div><div class="t">Pass</div><div class="s">self-computed</div></div>
+  </div>
+</div></section>
+
+<section id="organs"><div class="wrap">
+  <div class="sech"><div class="k">One framework</div><h2>Five organs</h2>
+    <p>A brain, eyes, a verdict bus, a fleet, and agents that build their own tools — each gated by the bus.</p></div>
+  <div class="grid">
+    <div class="organ"><div class="ic">🧠</div><h3>Brain</h3><p>Memory that compounds — trust + provenance, consolidation, and a held-out attested promotion gate. Only verified work graduates.</p><code>verel.memory</code></div>
+    <div class="organ"><div class="ic">👁️</div><h3>Eyes</h3><p>AgentVision as a perception organ (DOM / contrast / OCR grounded), feeding the verdict bus and the brain.</p><code>verel.senses</code></div>
+    <div class="organ"><div class="ic">⚖️</div><h3>Verdict bus</h3><p>One schema for every sense — advisory ceiling, grader attestation, scrubbed fingerprints, stuck/progress.</p><code>verel.verdict</code></div>
+    <div class="organ"><div class="ic">🚁</div><h3>Fleet</h3><p>Agents managing agents — an LLM manager fans out; workers run in isolated git worktrees under budget.</p><code>verel.fleet</code></div>
+    <div class="organ"><div class="ic">🔧</div><h3>Tool-smith</h3><p>Detect → scaffold → test → register → reuse, sandboxed with bwrap, admitted only on a passing attested eval.</p><code>verel.toolsmith</code></div>
+    <div class="organ"><div class="ic">♻️</div><h3>Agent-run CI/CD</h3><p>Self-healing pipeline with a deterministic rollback engine that never acts on advisory evidence.</p><code>verel.ci</code></div>
+  </div>
+</div></section>
+
+<section id="arch"><div class="wrap info">
+  <div class="sech"><div class="k">At a glance</div><h2>The whole architecture</h2>
+    <p>Rendered and verified by the eyes Verel ships — Verel gates its own marketing.</p></div>
+  <img src="infographic.png" alt="Verel architecture infographic — five organs and the eval-driven loop"/>
+</div></section>
+
+<section><div class="wrap">
+  <div class="stats">
+    <div class="stat"><div class="n">5</div><div class="l">organs, end-to-end</div></div>
+    <div class="stat"><div class="n">135</div><div class="l">tests, dogfooded</div></div>
+    <div class="stat"><div class="n">1</div><div class="l">verdict bus, all senses</div></div>
+    <div class="stat"><div class="n">MIT</div><div class="l">open source</div></div>
+  </div>
+</div></section>
+
+<footer>
+  <p>Verel gates its own development with its own verdict bus. © Amit Patole · eyes by
+     <a href="https://github.com/amitpatole/agent-vision" style="color:var(--acc)">AgentVision</a></p>
+</footer>
+</body></html>
