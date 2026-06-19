@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Verel infographic</title>
+<style>
+  :root{ --bg:#0b0b12; --card:#14141f; --card2:#171723; --line:#262633; --fg:#ececf6;
+         --mut:#a6a6c2; --acc:#8b7cff; --acc2:#5ad1e6; --good:#46d39a; }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{width:1200px;background:radial-gradient(1100px 520px at 50% -8%,#1c1640 0%,var(--bg) 60%) #0b0b12;
+       color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+       padding:56px 56px 44px}
+  .eyebrow{letter-spacing:.32em;text-transform:uppercase;font-size:13px;color:var(--acc);font-weight:700}
+  h1{font-size:74px;line-height:1.02;letter-spacing:-2.5px;margin:10px 0 6px;
+     background:linear-gradient(90deg,#d8d2ff,#8b7cff 60%,#5ad1e6);
+     -webkit-background-clip:text;background-clip:text;color:transparent;font-weight:800}
+  .tag{font-size:23px;color:#cfcfe6;max-width:880px;line-height:1.45}
+  .tag b{color:#fff}
+  .thesis{margin:26px 0 36px;padding:20px 26px;border-left:4px solid var(--acc);
+          background:#15131f;border-radius:0 14px 14px 0;font-size:20px;color:#e3e0f5}
+  .thesis b{color:var(--acc)}
+  .sech{font-size:14px;letter-spacing:.18em;text-transform:uppercase;color:var(--mut);
+        font-weight:700;margin:6px 0 16px}
+  /* loop */
+  .loop{display:flex;align-items:center;gap:10px;flex-wrap:nowrap;margin-bottom:40px}
+  .step{flex:1;background:var(--card);border:1px solid var(--line);border-radius:14px;
+        padding:16px 12px;text-align:center}
+  .step .ic{font-size:26px}
+  .step .t{font-weight:700;font-size:16px;margin-top:6px;color:#fff}
+  .step .s{font-size:13px;color:var(--mut);margin-top:3px}
+  .arrow{color:var(--acc);font-size:24px;font-weight:800}
+  .verdict{background:linear-gradient(135deg,#1c2b24,#15231d);border-color:#2c5c46}
+  .verdict .t{color:var(--good)}
+  /* organs */
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-bottom:40px}
+  .organ{background:var(--card2);border:1px solid var(--line);border-radius:16px;padding:22px}
+  .organ .ic{font-size:30px}
+  .organ h3{font-size:20px;margin:10px 0 6px;color:#fff}
+  .organ p{font-size:14.5px;color:var(--mut);line-height:1.5}
+  .organ .mods{margin-top:12px;font-size:12.5px;color:var(--acc2);font-family:ui-monospace,Menlo,monospace}
+  /* stats */
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;margin-bottom:38px}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;text-align:center}
+  .stat .n{font-size:34px;font-weight:800;color:#fff}
+  .stat .l{font-size:13px;color:var(--mut);margin-top:4px}
+  .cta{display:flex;align-items:center;justify-content:space-between;gap:24px;
+       background:linear-gradient(135deg,#1a1730,#141320);border:1px solid #2e2a4a;
+       border-radius:18px;padding:24px 30px}
+  .cta code{font-family:ui-monospace,Menlo,monospace;font-size:20px;color:#fff;
+            background:#0d0d16;border:1px solid #2a2a3c;border-radius:10px;padding:10px 16px}
+  .cta .links{font-size:15px;color:var(--mut);text-align:right;line-height:1.7}
+  .cta .links b{color:var(--acc)}
+  .foot{margin-top:26px;color:#9494b6;font-size:13px;text-align:center}
+</style></head>
+<body>
+  <div class="eyebrow">👁️🧠 Verified Agents Framework</div>
+  <h1>Verel</h1>
+  <p class="tag">The agent framework where nothing is <b>“done”</b> until a grader returns a
+     <b>verdict</b> — checked by real senses including <b>eyes</b> (AgentVision) — and only
+     <b>verified</b> work is allowed to compound into the fleet’s shared memory.</p>
+
+  <div class="thesis">Every agent action is a <b>hypothesis</b>. One verdict bus unifies
+     vision&nbsp;+&nbsp;tests&nbsp;+&nbsp;lint&nbsp;+&nbsp;types into a single
+     <b>pass / warn / fail</b> — so progress, “done”, and what compounds are all decided in one place.</div>
+
+  <div class="sech">The eval-driven loop</div>
+  <div class="loop">
+    <div class="step"><div class="ic">✍️</div><div class="t">Write</div><div class="s">agent acts</div></div>
+    <div class="arrow">→</div>
+    <div class="step"><div class="ic">👁️</div><div class="t">Perceive</div><div class="s">senses → percepts</div></div>
+    <div class="arrow">→</div>
+    <div class="step"><div class="ic">⚖️</div><div class="t">Gate</div><div class="s">verdict bus</div></div>
+    <div class="arrow">→</div>
+    <div class="step"><div class="ic">🛠️</div><div class="t">Fix</div><div class="s">agent patches</div></div>
+    <div class="arrow">→</div>
+    <div class="step verdict"><div class="ic">✅</div><div class="t">Pass</div><div class="s">self-computed</div></div>
+  </div>
+
+  <div class="sech">Five organs</div>
+  <div class="grid">
+    <div class="organ"><div class="ic">🧠</div><h3>Brain</h3>
+      <p>Memory that compounds: trust + provenance, consolidation, and a held-out attested
+         promotion gate. Only verified facts &amp; skills graduate to shared memory.</p>
+      <div class="mods">verel.memory · LocalMemory · mem0</div></div>
+    <div class="organ"><div class="ic">👁️</div><h3>Eyes</h3>
+      <p>AgentVision as a perception organ — DOM/contrast/OCR grounded — feeding both the
+         verdict bus and the brain as one of many senses.</p>
+      <div class="mods">verel.senses · sight</div></div>
+    <div class="organ"><div class="ic">⚖️</div><h3>Verdict bus</h3>
+      <p>One schema for every sense, with an advisory ceiling, grader attestation, scrubbed
+         fingerprints, and strict-subset stuck/progress detection.</p>
+      <div class="mods">verel.verdict · gate()</div></div>
+    <div class="organ"><div class="ic">🚁</div><h3>Fleet</h3>
+      <p>Agents managing agents: an LLM manager fans out, a single-writer scheduler runs
+         workers in isolated git worktrees under budget — each gated by the bus.</p>
+      <div class="mods">verel.fleet · Scheduler</div></div>
+    <div class="organ"><div class="ic">🔧</div><h3>Tool-smith</h3>
+      <p>Agents build their own tools: detect → scaffold → test → register → reuse, sandboxed
+         (bwrap) and admitted only on a passing attested eval.</p>
+      <div class="mods">verel.toolsmith</div></div>
+    <div class="organ"><div class="ic">♻️</div><h3>Agent-run CI/CD</h3>
+      <p>Self-healing pipeline: inner-loop → pre-commit → pre-merge → canary, with a
+         deterministic rollback engine that never acts on advisory evidence.</p>
+      <div class="mods">verel.ci · self_heal</div></div>
+  </div>
+
+  <div class="sech">Status</div>
+  <div class="stats">
+    <div class="stat"><div class="n">5</div><div class="l">organs, end-to-end</div></div>
+    <div class="stat"><div class="n">135</div><div class="l">tests, dogfooded</div></div>
+    <div class="stat"><div class="n">1</div><div class="l">verdict bus, all senses</div></div>
+    <div class="stat"><div class="n">MIT</div><div class="l">open source</div></div>
+  </div>
+
+  <div class="cta">
+    <code>pip install verel</code>
+    <div class="links">github.com/amitpatole/<b>verel</b> &nbsp;·&nbsp; pypi.org/project/<b>verel</b><br>
+      default LLM: <b>Ollama Cloud</b> · eyes: <b>AgentVision</b></div>
+  </div>
+  <div class="foot">Verel gates its own development with its own verdict bus — this page was rendered &amp; verified by the eyes it ships. © Amit Patole</div>
+</body></html>

@@ -1,58 +1,112 @@
-# Verel
+# Verel — Verified Agents 👁️🧠
 
-> The agent framework where nothing is **"done"** until a grader returns a verdict —
-> checked by real senses including **eyes** ([AgentVision](../Eyes_For_AI_Agents)) —
-> and only verified work is allowed to compound into the fleet's shared memory.
+<p align="center">
+  <img src="https://raw.githubusercontent.com/amitpatole/verel/main/media/hero.png" alt="Verel — the agent framework where nothing is done until a grader returns a verdict" width="100%">
+</p>
 
-## Documents
+<p align="center">
+  <a href="https://pypi.org/project/verel/"><img src="https://img.shields.io/pypi/v/verel?color=8b7cff&label=pip%20install%20verel" alt="PyPI"></a>
+  <img src="https://img.shields.io/badge/tests-135%20passing-46d39a" alt="tests">
+  <img src="https://img.shields.io/badge/ruff%20%2B%20mypy-clean-5ad1e6" alt="lint">
+  <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT">
+  <img src="https://img.shields.io/badge/LLM-Ollama%20Cloud%20%C2%B7%20OpenAI-8b7cff" alt="LLM">
+</p>
 
-- **[docs/VEREL_DESIGN.md](docs/VEREL_DESIGN.md)** — definitive architecture & build plan
-  (positioning, the moat, the five organs, the Brain/memory architecture, the Fleet,
-  the Verdict bus, AgentVision-as-eyes, claimable inventions, risks, phased roadmap,
-  open decisions).
-- **[docs/CRITIC_CONVERGENCE.md](docs/CRITIC_CONVERGENCE.md)** — the adversarial critic-loop
-  score record that the design was iterated against until diminishing returns.
+> **Problem:** AI agents declare work *“done”* on their own say-so — shipping broken UIs,
+> failing tests and unverified claims they can’t actually check.
+> **Result:** Verel makes *“done”* a **verdict**, not an opinion — every action is graded by
+> real senses (including **eyes**, via [AgentVision](https://github.com/amitpatole/agent-vision)),
+> and **only verified work compounds** into the fleet’s shared memory.
 
-## The five organs
+Verel is an agent framework built on the idea that **every agent action is a hypothesis**:
 
 ```
-Brain (memory)  ─┐
-Fleet (agents managing agents) ─┤
-Verdict bus (eval-driven everything) ─┼─► nothing merges on a self-asserted "done"
-Senses (AgentVision eyes + logs/tests/metrics) ─┤
-Tool-smith (agent-built tooling) ─┘
+write → perceive → gate (verdict bus) → fix → re-render → pass (self-computed)
 ```
 
-## Install
+One **verdict bus** unifies vision + tests + lint + types into a single `pass / warn / fail`,
+so *progress*, *“done”*, and *what compounds* are all decided in one place — with grader
+attestation so a hollow check can’t mint green.
+
+## The 60-second pitch
 
 ```bash
-pip install verel                 # core: the verdict bus + memory + fleet + tool-smith + CI
-pip install "verel[sight]"        # + AgentVision (the eyes)
-pip install "verel[mem0,mcp]"     # + rented memory backend, + MCP server
+pip install verel
+verel doctor                 # check your environment
+verel heal --repo .          # self-healing CI: failing tests → agent fixes → green
 ```
 
-```bash
-verel doctor                      # check the environment
-verel heal --repo .               # self-healing CI: failing tests → agent fixes → green
-verel loop dashboard.html         # fix a UI until AgentVision returns a pass verdict
-verel fleet "fix the pages" --artifacts a.html b.html
+```python
+from verel.ci import inner_loop_stage, self_heal
+result = self_heal(".", inner_loop_stage(".", with_lint=False))   # tests fail → agent patches → pass
+print(result.healed, result.terminated_on)
 ```
 
 Default LLM is **Ollama Cloud** (`~/.config/ollama/key`, model `qwen3-coder:480b`); set
 `VEREL_LLM_PROVIDER=openai` to switch. Claude is one branch away in `agents/llm.py`.
 
-## What's built (all five organs, end-to-end)
+<p align="center">
+  <img src="https://raw.githubusercontent.com/amitpatole/verel/main/media/infographic.png" alt="Verel architecture — the five organs and the eval-driven loop" width="100%">
+</p>
 
-| Organ | Module | What works |
+## The five organs
+
+| Organ | Module | What it does |
 |---|---|---|
-| **Verdict bus** | `verel.verdict` | one schema for vision **+ tests + lint + types**; advisory ceiling, grader attestation, scrubbed fingerprints, strict-subset stuck/progress |
-| **Eyes** | `verel.senses` | AgentVision adapter — perception feeds the bus and memory |
-| **Agents** | `verel.agents` | coder (fixes UIs) + code-fixer (patches source); Ollama Cloud |
-| **Brain** | `verel.memory` | trust layer (LocalMemory / mem0), failure ledger + regression guard, consolidation, **held-out attested promotion gate** |
-| **Fleet** | `verel.fleet` | single-writer scheduler (barriers/budget/WAL), **LLM-driven manager**, **isolated git worktrees** |
-| **Tool-smith** | `verel.toolsmith` | detect → scaffold → test → register → reuse; signed registry; sandboxed exec |
-| **Agent-run CI/CD** | `verel.ci` | tests/lint/type graders, inner-loop/pre-commit/pre-merge stages, **self-healing**, ci-medic, deterministic rollback engine, git hook + CLI |
-| **Surfaces** | `verel.cli`, `verel.mcp_server` | `verel` CLI, MCP server, `verel-ci` |
+| 🧠 **Brain** | `verel.memory` | Memory that compounds — trust + provenance, consolidation, and a **held-out, attested promotion gate**. Only verified facts/skills graduate to shared memory. Backends: zero-dep `LocalMemory` or rented `mem0`, semantic recall via embeddings. |
+| 👁️ **Eyes** | `verel.senses` | **AgentVision** as a perception organ (DOM/contrast/OCR grounded) feeding both the verdict bus and the brain as one of many senses. |
+| ⚖️ **Verdict bus** | `verel.verdict` | One schema for every sense, with an advisory **ceiling clamp**, **grader attestation**, scrubbed fingerprints, and strict-subset **stuck/progress** detection. |
+| 🚁 **Fleet** | `verel.fleet` | Agents managing agents — an **LLM manager** fans out, a single-writer scheduler runs workers in **isolated git worktrees** under budget, each gated by the bus. |
+| 🔧 **Tool-smith** | `verel.toolsmith` | Agents build their own tools: detect → scaffold → test → register → reuse, **sandboxed** (`bwrap`), admitted only on a passing attested eval. |
+| ♻️ **Agent-run CI/CD** | `verel.ci` | Self-healing pipeline (inner-loop → pre-commit → pre-merge → canary) with a deterministic **rollback engine** that never acts on advisory evidence. |
 
-**106 tests, 9 runnable demos.** Code + module guide: [`src/verel/`](src/verel/README.md).
-Design & roadmap: [docs/VEREL_DESIGN.md](docs/VEREL_DESIGN.md). Changelog: [CHANGELOG.md](CHANGELOG.md).
+## What makes it trustworthy
+
+- **Grader attestation** — a required grader must present a signed `run_receipt` proving it
+  ran the frozen suite over the changed files. A hollow `PASS, issues=[]` *fails* the gate.
+- **Precise vs advisory** — per-issue trust keys off the source (DOM/CV/OCR/test = precise;
+  vision/LLM-judge = advisory, clamped to `warn`). Destructive actions (rollback) **never**
+  depend on advisory evidence.
+- **Only verified work compounds** — a consolidated rule starts `inferred` and reaches
+  `verified` *only* by passing a held-out, agent-inaccessible eval (with a leakage canary).
+- **Dogfooded** — Verel gates its own development with its own verdict bus (CI runs the
+  pre-merge gate over Verel and asserts `pass`). The infographic above was rendered and
+  verified by the eyes Verel ships.
+
+## Many faces, one core
+
+| Surface | For |
+|---|---|
+| **Library** (`import verel`) | Python apps & custom harnesses |
+| **CLI** (`verel …`) | `doctor` · `loop` · `fleet` · `heal` · `ci` |
+| **CI CLI / git hook** (`verel-ci`, `python -m verel.ci`) | agent-run CI, pre-commit gates |
+| **MCP server** (`verel-mcp`) | Cursor, Claude, any MCP host |
+
+## Try the demos
+
+```bash
+python examples/demo_selfheal.py         # failing tests → agent patches code → green
+python examples/demo_overflow_loop.py    # fix a UI until AgentVision returns pass
+python examples/demo_fleet_worktrees.py  # LLM manager fans out → isolated-worktree workers
+python examples/demo_h2_moat.py          # measure cross-tenant skill transfer → moat decision
+python examples/demo_canary_rollback.py  # bad merge fails canary → safe auto git-revert
+```
+
+## Honesty (what we do **not** claim)
+
+- The in-process tool guard is a guardrail, not a sandbox — real isolation is the `bwrap`
+  container runner (`isolation="container"`); full network/seccomp containment is the
+  production §7.7 runner.
+- The moat (a public verified-skill registry) is a **bet**, not a given — `verel.registry`
+  ships the **H2 experiment** to *measure* whether skills transfer across tenants before you
+  build it.
+- Advisory (vision/LLM) findings are advisory; they inform, they don’t gate destructive acts.
+
+## Documentation
+
+- [Design & roadmap](docs/VEREL_DESIGN.md) · [Module guide](src/verel/README.md) ·
+  [Changelog](CHANGELOG.md) · [Critic-loop record](docs/CRITIC_CONVERGENCE.md)
+
+## License
+
+MIT © Amit Patole · eyes by [AgentVision](https://github.com/amitpatole/agent-vision)
