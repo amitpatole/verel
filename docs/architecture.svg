@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 940" font-family="system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#12102a"/><stop offset="0.5" stop-color="#0b0b12"/>
+    </linearGradient>
+    <linearGradient id="hub" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#241a52"/><stop offset="1" stop-color="#1a2540"/>
+    </linearGradient>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#8b7cff"/>
+    </marker>
+    <marker id="arrG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#46d39a"/>
+    </marker>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="14" flood-color="#000" flood-opacity="0.45"/>
+    </filter>
+    <style>
+      .t{fill:#f2f1fb;font-weight:800} .s{fill:#b9b9d6} .m{fill:#5ad1e6;font-family:ui-monospace,Menlo,monospace}
+      .k{fill:#8b7cff;font-weight:800;letter-spacing:2px} .lbl{fill:#cfcfe6;font-weight:700}
+    </style>
+  </defs>
+
+  <rect width="1200" height="940" fill="url(#bg)"/>
+  <text x="60" y="56" class="k" font-size="15">VEREL · SYSTEM ARCHITECTURE</text>
+  <text x="60" y="84" class="s" font-size="16">Every agent action is a hypothesis — one verdict bus decides progress, “done”, and what compounds.</text>
+
+  <!-- GOAL -->
+  <rect x="520" y="112" width="160" height="44" rx="22" fill="#15151f" stroke="#3a3358"/>
+  <text x="600" y="140" text-anchor="middle" class="t" font-size="17">goal ▸</text>
+  <line x1="600" y1="156" x2="600" y2="186" stroke="#8b7cff" stroke-width="2.5" marker-end="url(#arr)"/>
+
+  <!-- FLEET -->
+  <rect x="120" y="190" width="960" height="98" rx="16" fill="#15151f" stroke="#2a2a3c" filter="url(#sh)"/>
+  <text x="150" y="226" class="t" font-size="20">🚁  Fleet</text>
+  <text x="150" y="252" class="s" font-size="15.5">LLM manager fans out → workers run in isolated git worktrees under budget; every node gated.</text>
+  <text x="150" y="276" class="m" font-size="13">verel.fleet · Manager · Scheduler · Worktrees</text>
+  <line x1="600" y1="288" x2="600" y2="318" stroke="#8b7cff" stroke-width="2.5" marker-end="url(#arr)"/>
+
+  <!-- SENSES -->
+  <rect x="120" y="322" width="960" height="118" rx="16" fill="#15151f" stroke="#2a2a3c" filter="url(#sh)"/>
+  <text x="150" y="356" class="t" font-size="20">Senses  →  Percepts</text>
+  <g font-size="15" text-anchor="middle">
+    <rect x="150" y="372" width="210" height="48" rx="11" fill="#171724" stroke="#2e2a4a"/>
+    <text x="255" y="401" class="lbl">👁️ Eyes — AgentVision</text>
+    <rect x="378" y="372" width="180" height="48" rx="11" fill="#171724" stroke="#2e2a4a"/>
+    <text x="468" y="401" class="lbl">✅ Tests</text>
+    <rect x="576" y="372" width="180" height="48" rx="11" fill="#171724" stroke="#2e2a4a"/>
+    <text x="666" y="401" class="lbl">⚙️ Lint</text>
+    <rect x="774" y="372" width="180" height="48" rx="11" fill="#171724" stroke="#2e2a4a"/>
+    <text x="864" y="401" class="lbl">⌨️ Types</text>
+  </g>
+  <text x="1040" y="401" text-anchor="end" class="m" font-size="13">verel.senses</text>
+  <line x1="600" y1="440" x2="600" y2="470" stroke="#8b7cff" stroke-width="2.5" marker-end="url(#arr)"/>
+
+  <!-- VERDICT BUS (hub) -->
+  <rect x="120" y="474" width="960" height="120" rx="16" fill="url(#hub)" stroke="#5a4fd0" stroke-width="1.5" filter="url(#sh)"/>
+  <text x="150" y="512" class="t" font-size="22">⚖️  Verdict bus — gate()</text>
+  <text x="150" y="538" class="s" font-size="15">advisory ceiling · grader attestation · scrubbed fingerprints · strict-subset stuck/progress</text>
+  <g font-size="15" font-weight="800" text-anchor="middle">
+    <rect x="150" y="552" width="120" height="32" rx="16" fill="#16271f" stroke="#2c5c46"/><text x="210" y="574" fill="#46d39a">pass</text>
+    <rect x="284" y="552" width="120" height="32" rx="16" fill="#2a2417" stroke="#5c4e2c"/><text x="344" y="574" fill="#e2b14a">warn</text>
+    <rect x="418" y="552" width="120" height="32" rx="16" fill="#2a1719" stroke="#5c2c30"/><text x="478" y="574" fill="#e06a72">fail</text>
+  </g>
+  <text x="1040" y="574" text-anchor="end" class="m" font-size="13">verel.verdict</text>
+
+  <!-- feedback loop: verdict -> fix & re-render -> back up to Senses -->
+  <path d="M1080 534 C 1150 534 1150 381 1085 381" fill="none" stroke="#8b7cff" stroke-width="2.2" stroke-dasharray="6 5" marker-end="url(#arr)"/>
+  <text x="1158" y="458" class="s" font-size="13" text-anchor="middle" transform="rotate(90 1158 458)">fix &amp; re-render</text>
+
+  <!-- branch down to consumers -->
+  <line x1="305" y1="594" x2="305" y2="648" stroke="#46d39a" stroke-width="2.5" marker-end="url(#arrG)"/>
+  <text x="318" y="628" class="s" font-size="13" fill="#46d39a">only verified compounds</text>
+  <line x1="600" y1="594" x2="600" y2="648" stroke="#8b7cff" stroke-width="2.5" marker-end="url(#arr)"/>
+  <line x1="895" y1="594" x2="895" y2="648" stroke="#8b7cff" stroke-width="2.5" marker-end="url(#arr)"/>
+
+  <!-- consumers -->
+  <g>
+    <rect x="120" y="652" width="290" height="150" rx="16" fill="#15151f" stroke="#2a2a3c" filter="url(#sh)"/>
+    <text x="146" y="688" class="t" font-size="19">🧠  Brain</text>
+    <text x="146" y="714" class="s" font-size="14.5">Memory that compounds: trust +</text>
+    <text x="146" y="734" class="s" font-size="14.5">provenance, consolidation, and a</text>
+    <text x="146" y="754" class="s" font-size="14.5">held-out attested promotion gate.</text>
+    <text x="146" y="784" class="m" font-size="13">verel.memory</text>
+
+    <rect x="455" y="652" width="290" height="150" rx="16" fill="#15151f" stroke="#2a2a3c" filter="url(#sh)"/>
+    <text x="481" y="688" class="t" font-size="19">🔧  Tool-smith</text>
+    <text x="481" y="714" class="s" font-size="14.5">Agents build their own tools:</text>
+    <text x="481" y="734" class="s" font-size="14.5">detect → scaffold → test → register</text>
+    <text x="481" y="754" class="s" font-size="14.5">→ reuse, sandboxed &amp; eval-gated.</text>
+    <text x="481" y="784" class="m" font-size="13">verel.toolsmith</text>
+
+    <rect x="790" y="652" width="290" height="150" rx="16" fill="#15151f" stroke="#2a2a3c" filter="url(#sh)"/>
+    <text x="816" y="688" class="t" font-size="19">♻️  Agent-run CI/CD</text>
+    <text x="816" y="714" class="s" font-size="14.5">Self-healing pipeline + a</text>
+    <text x="816" y="734" class="s" font-size="14.5">deterministic rollback engine that</text>
+    <text x="816" y="754" class="s" font-size="14.5">never acts on advisory evidence.</text>
+    <text x="816" y="784" class="m" font-size="13">verel.ci</text>
+  </g>
+
+  <text x="600" y="852" text-anchor="middle" class="s" font-size="14">Surfaces — library · CLI (verel) · CI CLI / git hook (verel-ci) · MCP server (verel-mcp)</text>
+  <text x="600" y="892" text-anchor="middle" class="m" font-size="13" fill="#8b7cff">pip install verel  ·  github.com/amitpatole/verel  ·  MIT</text>
+</svg>
