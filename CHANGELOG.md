@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.1 — post-merge canary + verdict-driven rollback (CI/CD table complete)
+
+- **Post-merge canary stage** (`ci/postmerge_stage`) and **`canary_rollback()`**: run the
+  smoke/E2E canary on merged code; on a PRECISE-evidence failure, auto-revert.
+- **`RollbackExecutor`**: agent proposes → `RollbackPolicy` authorizes (precise gating
+  evidence only) → a safe, non-destructive `git revert` (never a history rewrite). An
+  advisory-only (vision/LLM) failure can never trigger a destructive revert.
+- Completes §7.4's stage table: inner-loop → pre-commit → pre-merge → post-merge/canary.
+- 130 tests; demo_canary_rollback.py (live, real git, no key): bad merge auto-reverted,
+  advisory-only refused.
+
 ## 0.2.0 — public Skill Registry + the H2 corpus-transfer experiment (the moat gate)
 
 - **Public Skill Registry** (`verel.registry`): content-addressed, signed, provenance-tagged

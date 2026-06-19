@@ -84,6 +84,16 @@ def precommit_stage(repo: str, *, covers: list[str] | None = None) -> Stage:
                  required={GraderKind.TEST})
 
 
+def postmerge_stage(repo: str, *, smoke_paths: list[str] | None = None,
+                    covers: list[str] | None = None) -> Stage:
+    """Smoke/E2E canary on the merged code (§7.4). A failing canary on PRECISE evidence is
+    what the rollback policy engine acts on (canary.py)."""
+    from .graders import pytest_spec
+
+    return Stage("post_merge", [pytest_spec(repo, covers, paths=smoke_paths)],
+                 required={GraderKind.TEST})
+
+
 def premerge_stage(repo: str, *, covers: list[str] | None = None, with_types: bool = True) -> Stage:
     """Full suite + lint (+types) — the sandbox-CI gate before a merge is allowed (§7.4).
     Pair with a regression-guard by passing a ledger to run_stage."""

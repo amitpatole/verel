@@ -9,6 +9,7 @@ opinion. This keeps an advisory hallucination from triggering a production rever
 
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass, field
 
 from ..verdict.constants import ADVISORY_GRADERS, GATING_SEVERITY, SEV_ORDER
@@ -58,3 +59,43 @@ class RollbackPolicy:
             return Decision(False, "denied: only ADVISORY graders support this rollback — "
                             "destructive actions never depend on advisory evidence")
         return Decision(False, "denied: no gating precise evidence supports the proposal")
+
+
+@dataclass
+class RollbackOutcome:
+    executed: bool
+    decision: Decision
+    reverted_sha: str = ""  # the commit that was reverted
+    new_sha: str = ""  # the resulting revert commit
+    error: str = ""
+
+
+def _git(repo: str, *args: str) -> tuple[int, str, str]:
+    r = subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True)
+    return r.returncode, r.stdout.strip(), r.stderr.strip()
+
+
+class RollbackExecutor:
+    """Agent proposes; the engine executes — and ONLY a safe, non-destructive `git revert`
+    (a new commit that undoes the bad one), never a history-rewriting reset. Execution is
+    gated by `RollbackPolicy`, so a destructive action can never ride on advisory evidence."""
+
+    def __init__(self, policy: RollbackPolicy | None = None):
+        self.policy = policy or RollbackPolicy()
+
+    def maybe_rollback(self, repo: str, proposal: RollbackProposal,
+                       reports: list[Report]) -> RollbackOutcome:
+        decision = self.policy.decide(proposal, reports)
+        if not decision.allow:
+            return RollbackOutcome(False, decision)
+
+        rc, head, err = _git(repo, "rev-parse", "HEAD")
+        if rc != 0:
+            return RollbackOutcome(False, decision, error=f"rev-parse: {err}")
+        rc, _, err = _git(repo, "-c", "user.name=verel", "-c", "user.email=verel@local",
+                          "revert", "--no-edit", head)
+        if rc != 0:
+            _git(repo, "revert", "--abort")  # leave the tree clean on failure
+            return RollbackOutcome(False, decision, reverted_sha=head, error=f"revert: {err}")
+        _, new, _ = _git(repo, "rev-parse", "HEAD")
+        return RollbackOutcome(True, decision, reverted_sha=head, new_sha=new)
