@@ -4,6 +4,16 @@ on:
     branches: [main]
   pull_request:
 
+# Least privilege: the GITHUB_TOKEN is read-only for every job in this workflow.
+# Fork PRs get a read-only token and NO repository secrets (GitHub default) — so even a
+# malicious fork PR cannot push, tag, release, or read secrets.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
