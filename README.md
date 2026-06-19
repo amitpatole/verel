@@ -79,6 +79,12 @@ every iteration. A *full* brain like Verel ingests the rich `Report` and runs it
 AgentVision's distilled `Handoff` is there for simpler brains. See
 [AgentVision's handoff doc](https://github.com/amitpatole/agent-vision/blob/main/docs/handoff.md).
 
+The eyes can also **watch over time** — `verel.senses.watch(...)` drives AgentVision's temporal
+verification (playback / loading / liveness for streaming UIs, video, live dashboards). A
+deterministic video **stall** gates the bus to FAIL, and `playing` / `live` / `stabilized`
+land in the brain's memory — so a release can be gated on *verified playback*, and "the player
+plays" compounds across builds.
+
 ## What makes it trustworthy
 
 - **Grader attestation** — a required grader must present a signed `run_receipt` proving it

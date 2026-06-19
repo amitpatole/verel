@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.4 — temporal perception: the eyes can now *watch* (AgentVision 0.6.0)
+
+AgentVision 0.6.0 added temporal verification (`watch` — playback/loading/liveness over a
+frame sequence). The brain now drives and records it:
+
+- **`verel.senses.watch(source, …)`** — a temporal sense mirroring `perceive()`. Returns the
+  same `SightResult`, so the verdict bus consumes it like any sense. A deterministic video
+  **stall** (currentTime not advancing) is DOM-sourced → precise → **gates to FAIL**; the
+  temporal *vision* findings are advisory/clamped — exactly the right trust split.
+- **`Percept` gains `playing` / `live` / `stabilized`**, extracted from the watch signal and
+  recorded by `PerceptLog`, so the brain can gate releases on *verified playback* and
+  **compound** "the player plays (with captions)" across builds instead of re-checking it.
+- +2 sight-adapter tests (152 passing). Keeps eyes and brain in sync.
+
 ## 0.4.3 — eyes intent conformance (AgentVision 0.3.0 compatibility)
 
 - **Forward-compat with AgentVision 0.3.0**: `verdict.models.IssueKind` gains

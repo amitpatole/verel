@@ -155,6 +155,7 @@ def from_agentvision(av_report, *, sense: str = "sight", agent_id: str = "", art
 
     vp = getattr(av_report, "viewport", None)
     matches_intent, intent_satisfied, intent_total = _conformance(av_report)
+    playing, live, stabilized = _temporal(av_report)
     percept = Percept(
         sense=sense,
         verdict=_verdict(getattr(av_report.verdict, "value", av_report.verdict)),
@@ -169,8 +170,25 @@ def from_agentvision(av_report, *, sense: str = "sight", agent_id: str = "", art
         matches_intent=matches_intent,
         intent_satisfied=intent_satisfied,
         intent_total=intent_total,
+        playing=playing,
+        live=live,
+        stabilized=stabilized,
     )
     return SightResult(reports=reports, percept=percept, raw=av_report)
+
+
+def _temporal(av_report) -> tuple[bool | None, bool | None, bool | None]:
+    """Extract the temporal signal a `watch` capture rides on an issue's detail; else Nones."""
+    for av in getattr(av_report, "issues", []):
+        try:
+            t = json.loads(getattr(av, "detail_json", "{}") or "{}").get("temporal")
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            continue
+        if isinstance(t, dict):
+            vids = t.get("videos") or []
+            playing = any(v.get("playing") for v in vids) if vids else None
+            return playing, bool(t.get("moving")), bool(t.get("stabilized"))
+    return None, None, None
 
 
 def _conformance(av_report) -> tuple[bool | None, int | None, int | None]:
@@ -213,4 +231,22 @@ async def perceive(source: str, *, backend: str = "local", agent_id: str = "",
 
     settings = load_settings(vision_backend=backend)
     av_report = await analyze(source, settings=settings, full_page=full_page, **analyze_kwargs)
+    return from_agentvision(av_report, agent_id=agent_id, artifact_id=source)
+
+
+async def watch(source: str, *, backend: str = "local", agent_id: str = "",
+                **watch_kwargs) -> SightResult:
+    """Temporal perception — watch `source` OVER TIME (playback / loading / liveness).
+
+    Thin wrapper over `agentvision.watch(...)`; returns the same Verel SightResult so the
+    verdict bus and brain consume it like any other sense. A deterministic stall (video not
+    advancing) gates to FAIL; the temporal vision findings are advisory/clamped. The percept
+    carries `playing`/`live`/`stabilized` so the brain can compound "playback verified".
+    Requires `verel[sight]`.
+    """
+    from agentvision import load_settings
+    from agentvision.core import watch as av_watch
+
+    settings = load_settings(vision_backend=backend)
+    av_report = await av_watch(source, settings=settings, **watch_kwargs)
     return from_agentvision(av_report, agent_id=agent_id, artifact_id=source)
