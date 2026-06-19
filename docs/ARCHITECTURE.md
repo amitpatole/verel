@@ -102,8 +102,11 @@ tested against held-out cases, and it is admitted to procedural memory **only on
 attested eval**. Read-only/idempotent tools auto-verify; destructive tools require a
 human-review verdict. Tool code is content-signed and executed under isolation
 (`isolation="container"` uses a `bwrap` namespace sandbox — no network, read-only fs — plus an
-optional seccomp-bpf syscall filter via `verel[container]`: a default denylist, or an opt-in
-default-deny allowlist jail that withholds network, subprocess, and threads for untrusted code).
+optional seccomp-bpf syscall filter via `verel[container]`, in three profiles: a default denylist;
+a default-deny allowlist jail (no network/subprocess/threads); and a per-tool **capability** jail
+that allows only the syscalls a tool exercised while passing its held-out eval, learned via
+`strace` and frozen onto the tool — so a verified tool that later attempts a new syscall is
+refused at the kernel).
 
 ---
 
@@ -152,16 +155,16 @@ its own verdict bus in CI.
 - Deepen consolidation — richer schema induction and decay tuning.
 - Distributed hardening — worker fencing for concurrent managers; multi-repo coordination.
 - A hosted skill registry, once cross-tenant transfer is shown to be worthwhile.
-- Per-capability seccomp policy (e.g. allow a specific tool the syscalls it provably needs).
+- Seccomp profile portability across architectures (the learned policy is x86-64-derived today).
 
 ---
 
 ## Honest limits
 
 - The in-process tool guard is a guardrail, not a sandbox; real isolation is the container
-  runner — namespace isolation (no network, read-only fs) plus a seccomp-bpf syscall filter.
-  Two profiles: a default denylist (defense-in-depth for arbitrary tools) and an opt-in
-  default-deny allowlist jail (no network/subprocess/threads) for untrusted, pure-compute code.
+  runner — namespace isolation (no network, read-only fs) plus a seccomp-bpf syscall filter in
+  three profiles: a default denylist, a default-deny allowlist jail (no network/subprocess/
+  threads), and a per-tool capability jail allowing only the syscalls a tool earned while verified.
 - Advisory (vision/LLM) findings inform but never gate destructive actions.
 - Vision-model bounding boxes are advisory, not pixel-accurate; LLM outputs are not
   deterministic. Verel is explicit about which signals are precise and which are advisory.
