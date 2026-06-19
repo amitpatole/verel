@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.1 — failure-ledger × lifecycle (self-cleaning, permanent-where-it-matters)
+
+- The ci-medic's **transient (retry) and flaky** failures are now written `volatile` to
+  failure-memory, so they self-clean unless they RECUR (a recurrence re-asserts and confirms
+  them). Genuine regressions are never volatile. Wired through `run_stage`.
+- A failure marked **fixed** is now `promote`d AND **pinned** — confirmed regression knowledge
+  never decays or prunes, so the regression guard catches a reintroduction however long later.
+- `MemoryView` protocol gains `set_flags`/`pin`/`unpin`. +5 tests.
+
 ## 0.4.0 — memory lifecycle (pin / volatile / TTL / staleness / correction chains)
 
 Ideas validated by the r/aiagents memory thread, added to `verel.memory` (both LocalMemory

@@ -35,8 +35,15 @@ class FailureLedger:
     def _key(self, fingerprint: str) -> str:
         return make_key(fingerprint, "fails", self.scope)
 
-    def record(self, report: Report, *, ts: float = 0.0) -> list[str]:
-        """Persist every gating failure; reappearance of a fixed one flips it back to open."""
+    def record(self, report: Report, *, ts: float = 0.0,
+               volatile_fingerprints: set[str] | None = None) -> list[str]:
+        """Persist every gating failure; reappearance of a fixed one flips it back to open.
+
+        `volatile_fingerprints` (e.g. ci-medic's transient/flaky classifications) are written
+        `volatile` so they self-clean from failure-memory unless they RECUR — a recurrence
+        re-asserts the same record, which confirms it (clears volatile) and keeps it. This is
+        the anti-"junk drawer" behaviour the design's interference rule aims at."""
+        volatile_fingerprints = volatile_fingerprints or set()
         recorded = []
         for i in _gating_issues(report):
             existing = self.mem.get(self.mem_id(i.fingerprint))
@@ -57,6 +64,8 @@ class FailureLedger:
                 fingerprint=i.fingerprint, kind=i.kind.value, locator=i.locator,
                 status=status, times_seen=times,
             )
+            if i.fingerprint in volatile_fingerprints:
+                rec.with_detail(volatile=True)  # transient/flaky → expires unless it recurs
             self.mem.write(rec, ts=ts)
             recorded.append(i.fingerprint)
         return recorded
@@ -74,8 +83,11 @@ class FailureLedger:
                 continue
             rec.with_detail(status="fixed", fixed_ts=ts)
             self.mem.write(rec, ts=ts)  # same key -> corroborates; status now fixed
-            # a confirmed fix is verified knowledge worth keeping.
+            # a confirmed fix is verified, PERMANENT knowledge — promote and PIN it so the
+            # regression guard can catch a reintroduction however long later (no decay/prune).
             self.mem.promote(rec.id)
+            if hasattr(self.mem, "pin"):
+                self.mem.pin(rec.id)
             n += 1
         return n
 
