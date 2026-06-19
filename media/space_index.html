@@ -58,8 +58,9 @@
   .organ .ic{font-size:30px}.organ h3{font-size:20px;margin:10px 0 7px}
   .organ p{font-size:14.5px;color:var(--mut)}
   .organ code{display:inline-block;margin-top:12px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:var(--acc2)}
-  /* infographic */
-  .info img{width:100%;border-radius:18px;border:1px solid #241f3a;box-shadow:0 30px 80px -40px #6f5cff55}
+  /* diagrams + infographic */
+  .info img,.diagram{width:100%;border-radius:18px;border:1px solid #241f3a;box-shadow:0 30px 80px -40px #6f5cff55}
+  .diagram{display:block;background:#0b0b12}
   /* stats */
   .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
   .stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:24px;text-align:center}
@@ -72,7 +73,7 @@
 <nav><div class="wrap">
   <a class="brand" href="#top"><img src="keyvisual.png" alt="">Verel</a>
   <div class="nlinks">
-    <a href="#loop">The loop</a><a href="#organs">Organs</a><a href="#arch">Architecture</a>
+    <a href="#loop">The loop</a><a href="#organs">Organs</a><a href="#diagrams">Architecture</a>
     <a href="https://github.com/amitpatole/verel">GitHub</a>
     <a class="pill" href="https://pypi.org/project/verel/">pip install verel</a>
   </div>
@@ -128,8 +129,15 @@
   </div>
 </div></section>
 
+<section id="diagrams"><div class="wrap">
+  <div class="sech"><div class="k">How it works</div><h2>Architecture &amp; flow</h2>
+    <p>The five organs and the eval-driven loop — hand-drawn, and verified clean by the eyes Verel ships.</p></div>
+  <img class="diagram" src="architecture.png" alt="Verel system architecture diagram"/>
+  <img class="diagram" src="flow_diagram.png" alt="Verel eval-driven loop diagram" style="margin-top:22px"/>
+</div></section>
+
 <section id="arch"><div class="wrap info">
-  <div class="sech"><div class="k">At a glance</div><h2>The whole architecture</h2>
+  <div class="sech"><div class="k">At a glance</div><h2>The whole story, one image</h2>
     <p>Rendered and verified by the eyes Verel ships — Verel gates its own marketing.</p></div>
   <img src="infographic.png" alt="Verel architecture infographic — five organs and the eval-driven loop"/>
 </div></section>
