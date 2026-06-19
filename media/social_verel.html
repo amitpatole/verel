@@ -1,0 +1,34 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{width:1280px;height:640px;overflow:hidden;
+       background:radial-gradient(820px 520px at 26% 40%,#241a52 0%,#0b0b12 62%) #0a0a11;
+       font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+       display:flex;align-items:center;color:#eceaf7}
+  .left{width:520px;height:100%;display:flex;align-items:center;justify-content:center;position:relative}
+  .left::after{content:"";position:absolute;width:420px;height:420px;border-radius:50%;
+       background:radial-gradient(circle,#6f5cff44,transparent 65%);filter:blur(8px)}
+  .left img{width:420px;height:420px;object-fit:contain;position:relative;z-index:1}
+  .right{flex:1;padding:0 70px 0 10px}
+  .eyebrow{letter-spacing:.34em;text-transform:uppercase;font-size:19px;color:#8b7cff;font-weight:800}
+  h1{font-size:128px;line-height:.9;letter-spacing:-4px;margin:14px 0 18px;font-weight:850;
+     background:linear-gradient(92deg,#e2ddff,#8b7cff 55%,#5ad1e6);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .tag{font-size:31px;line-height:1.32;color:#d6d4ee;max-width:600px;font-weight:500}
+  .tag b{color:#fff}
+  .chips{display:flex;gap:12px;margin-top:30px;flex-wrap:wrap}
+  .chip{font-size:18px;font-weight:700;color:#cfcfe6;background:#15151f;border:1px solid #2e2a4a;border-radius:999px;padding:9px 18px}
+  .chip.k{background:linear-gradient(90deg,#7c6bff,#9a7cff);color:#0a0a11;border:none;font-family:ui-monospace,Menlo,monospace}
+  .chip b{color:#46d39a}
+</style></head>
+<body>
+  <div class="left"><img src="keyvisual.png" alt=""></div>
+  <div class="right">
+    <div class="eyebrow">👁️🧠 Verified Agents Framework</div>
+    <h1>Verel</h1>
+    <div class="tag">Nothing is <b>“done”</b> until a grader returns a <b>verdict</b> — checked by real senses including <b>eyes</b>.</div>
+    <div class="chips">
+      <span class="chip k">pip install verel</span>
+      <span class="chip"><b>148</b> tests</span>
+      <span class="chip">MIT</span>
+    </div>
+  </div>
+</body></html>

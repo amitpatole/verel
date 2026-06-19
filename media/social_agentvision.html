@@ -1,0 +1,38 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{width:1280px;height:640px;overflow:hidden;
+       background:radial-gradient(860px 540px at 72% 36%,#142a44 0%,#0a0e16 62%) #090c12;
+       font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+       color:#e9eef7;padding:66px 80px;display:flex;flex-direction:column;justify-content:center}
+  .eyebrow{letter-spacing:.32em;text-transform:uppercase;font-size:20px;color:#5ad1e6;font-weight:800}
+  h1{font-size:118px;line-height:.92;letter-spacing:-3px;margin:12px 0 16px;font-weight:850;
+     background:linear-gradient(92deg,#dbe8ff,#5ad1e6 55%,#8b7cff);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .tag{font-size:32px;color:#cdd8ea;max-width:840px;line-height:1.3;font-weight:500}
+  .tag b{color:#fff}
+  .loop{display:flex;align-items:center;gap:14px;margin:34px 0 26px;flex-wrap:wrap}
+  .node{font-size:21px;font-weight:700;color:#dbe6f5;background:#111824;border:1px solid #244055;border-radius:12px;padding:11px 18px}
+  .node.win{background:linear-gradient(135deg,#10241b,#0e2018);border-color:#2c5c46;color:#7ee6b6}
+  .arr{color:#5ad1e6;font-size:26px;font-weight:800}
+  .chips{display:flex;gap:12px}
+  .chip{font-size:18px;font-weight:700;color:#cdd8ea;background:#101622;border:1px solid #223347;border-radius:999px;padding:9px 18px}
+  .chip.k{background:linear-gradient(90deg,#3aa7c4,#5ad1e6);color:#06121a;border:none;font-family:ui-monospace,Menlo,monospace}
+  .eye{position:absolute;right:90px;top:64px;font-size:84px;opacity:.9}
+</style></head>
+<body>
+  <div class="eye">👁️</div>
+  <div class="eyebrow">Eyes for AI Agents</div>
+  <h1>AgentVision</h1>
+  <div class="tag">Coding agents are <b>blind</b>. AgentVision gives them a machine-graded visual feedback loop to self-correct <b>before claiming done</b>.</div>
+  <div class="loop">
+    <span class="node">Render</span><span class="arr">→</span>
+    <span class="node">Perceive</span><span class="arr">→</span>
+    <span class="node">Report</span><span class="arr">→</span>
+    <span class="node">Fix</span><span class="arr">→</span>
+    <span class="node win">✅ Pass</span>
+  </div>
+  <div class="chips">
+    <span class="chip k">pip install agentvision</span>
+    <span class="chip">DOM · contrast · OCR grounded</span>
+    <span class="chip">MIT</span>
+  </div>
+</body></html>
