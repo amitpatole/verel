@@ -75,11 +75,13 @@ def _extract(reply: str) -> str:
 
 class ToolSmith:
     def __init__(self, registry: ToolRegistry, *, chat: ChatFn | None = None,
-                 runner_identity: str = "toolsmith-runner", sandbox: bool = False):
+                 runner_identity: str = "toolsmith-runner", sandbox: bool = False,
+                 isolation: str | None = None):
         self.registry = registry
         self.chat = chat or _default_chat
         self.runner_identity = runner_identity
-        self.sandbox = sandbox  # evaluate candidate tools in a subprocess sandbox (§7.7)
+        self.sandbox = sandbox  # back-compat alias for isolation='subprocess'
+        self.isolation = isolation  # 'none'|'subprocess'|'container'|'best' (§7.7)
 
     # ---- detect ----
     def detect(self, spec: ToolSpec) -> ToolRecord | None:
@@ -104,7 +106,7 @@ class ToolSmith:
     # ---- test ----
     def evaluate(self, code: str, spec: ToolSpec) -> tuple[bool, float, str]:
         return eval_tool_cases(code, spec.name, spec.cases, side_effect=spec.side_effect,
-                               sandbox=self.sandbox)
+                               sandbox=self.sandbox, isolation=self.isolation)
 
     def _receipt(self, spec: ToolSpec) -> RunReceipt:
         rr = RunReceipt(
@@ -152,22 +154,29 @@ class ToolSmith:
         return BuildResult(tool, False, True, score, Trust.VERIFIED, True, "verified + registered")
 
 
+def _resolve_runner(mode: str):
+    """mode: 'subprocess' (rlimits) | 'container' (bwrap, no net/ro-fs) | 'best' (container
+    if available else subprocess)."""
+    from .container import best_runner, run_container
+    from .sandbox import run_sandboxed
+
+    return {"subprocess": run_sandboxed, "container": run_container, "best": best_runner()}[mode]
+
+
 def eval_tool_cases(code: str, name: str, cases: list[ToolCase], *,
                     side_effect: SideEffect = SideEffect.READ_ONLY,
-                    sandbox: bool = False) -> tuple[bool, float, str]:
+                    sandbox: bool = False, isolation: str | None = None) -> tuple[bool, float, str]:
     """Run `code`'s `name` function against held-out cases. Shared by the smith and the
-    cross-tenant registry import (§8.7) so transfer is judged the SAME way as local build."""
+    cross-tenant registry import (§8.7) so transfer is judged the SAME way as local build.
+
+    isolation: 'none' (in-process), 'subprocess' (rlimits), 'container' (bwrap), 'best'.
+    `sandbox=True` is the back-compat alias for isolation='subprocess'."""
+    mode = isolation or ("subprocess" if sandbox else "none")
     probe = ToolRecord(name=name, code=code, side_effect=side_effect).sign()
     if not cases:
         return False, 0.0, "no held-out cases"
 
-    if sandbox:
-        from .sandbox import SandboxError, run_sandboxed
-
-        def call(c):
-            return run_sandboxed(probe, c.args, c.kwargs)
-        err_types = (SandboxError,)
-    else:
+    if mode == "none":
         try:
             fn = load_callable(probe)
         except Exception as e:  # noqa: BLE001
@@ -176,6 +185,14 @@ def eval_tool_cases(code: str, name: str, cases: list[ToolCase], *,
         def call(c):
             return fn(*c.args, **c.kwargs)
         err_types = (Exception,)
+    else:
+        from .sandbox import SandboxError
+
+        runner = _resolve_runner(mode)
+
+        def call(c):
+            return runner(probe, c.args, c.kwargs)
+        err_types = (SandboxError,)
 
     passed = 0
     for c in cases:

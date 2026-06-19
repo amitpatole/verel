@@ -151,12 +151,26 @@ class ToolRegistry:
         from ..memory.view import relevance
 
         hits = self.mem.recall(capability, scope=self.scope, kind=MemoryKind.SKILL, k=k)
+
+        # Semantic reuse when the memory has an embedder (cosine of capability vs skill
+        # vector); lexical token-overlap otherwise. So "make a url-friendly string" can reuse
+        # "slugify" even with no shared words.
+        embedder = getattr(self.mem, "embedder", None)
+        qv = embedder.embed([capability])[0] if embedder else None
+
+        def rel(h) -> float:
+            if qv is not None and hasattr(self.mem, "_get_vector"):
+                from ..memory.embed import cosine
+
+                v = self.mem._get_vector(h.id)
+                return cosine(qv, v) if v else 0.0
+            return relevance(capability, h)
+
         tools = []
         for h in hits:
             if verified_only and h.trust != Trust.VERIFIED:
                 continue
-            # guard against weak lexical matches reusing the wrong tool (e.g. shared "to"/"a")
-            if min_relevance and relevance(capability, h) < min_relevance:
+            if min_relevance and rel(h) < min_relevance:  # guard against weak matches
                 continue
             t = h.detail.get("tool")
             if t:

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.3.0 — refinements: real mem0, container sandbox, semantic reuse, enriched medic
+
+- **Real mem0 backend** (`memory/mem0_backend.py`): updated to the mem0 **2.x** API
+  (`filters=` on get_all/search, `update(id, data, metadata=)`); `make_ollama_mem0()` now
+  configures a local Chroma store; recall uses mem0's **semantic** ordering (no longer
+  discarded by a lexical re-rank). Live smoke verified (write → promote → semantic recall)
+  against real mem0 + OpenAI vectors. `mem0` extra → `mem0ai>=2.0, chromadb`.
+- **Container tool runner** (`toolsmith/container.py`): `bwrap` namespace sandbox — no
+  network, read-only system-only fs, ephemeral tmp, cleared env, + rlimits. `ToolSmith(
+  isolation="container"|"best")`. Verified live: network blocked, /home unreadable.
+- **Embeddings-backed tool reuse**: `ToolRegistry.find` ranks by cosine when the memory has
+  an embedder, so a tool is reused by MEANING ("make a web-friendly identifier" → slugify).
+- **LLM-enriched ci-medic**: `enrich_diagnoses()` adds a root-cause hint to FIX_BRANCH
+  diagnoses only; the deterministic classification (retry-vs-fix) is never changed by the LLM.
+  Wired into `self_heal(enrich_chat=...)` → hints flow to the code-fixer.
+- 135 tests (+1 gated live mem0 smoke).
+
 ## 0.2.1 — post-merge canary + verdict-driven rollback (CI/CD table complete)
 
 - **Post-merge canary stage** (`ci/postmerge_stage`) and **`canary_rollback()`**: run the

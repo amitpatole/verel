@@ -69,8 +69,10 @@ def _parse_files(reply: str) -> dict[str, str]:
     return {k: v for k, v in files.items() if isinstance(k, str) and isinstance(v, str)}
 
 
-def fix_code(repo: str | Path, reports: list[Report], *, chat: ChatFn | None = None) -> set[str]:
-    """Ask the agent to patch source so the failing graders pass. Returns changed file paths."""
+def fix_code(repo: str | Path, reports: list[Report], *, chat: ChatFn | None = None,
+             hints: list[str] | None = None) -> set[str]:
+    """Ask the agent to patch source so the failing graders pass. Returns changed file paths.
+    `hints` are optional ci-medic root-cause hypotheses (LLM-enriched) to focus the fix."""
     repo = Path(repo)
     chat = chat or (lambda msgs: llm.chat(msgs).content)
     sources = _source_files(repo)
@@ -78,7 +80,8 @@ def fix_code(repo: str | Path, reports: list[Report], *, chat: ChatFn | None = N
         return set()
 
     blob = "\n\n".join(f"=== {path} ===\n{content}" for path, content in sources.items())
-    user = f"Failing graders:\n{_issues_text(reports)}\n\nSource files:\n{blob}"
+    hint_text = ("\nRoot-cause hints:\n" + "\n".join(f"- {h}" for h in hints) if hints else "")
+    user = f"Failing graders:\n{_issues_text(reports)}{hint_text}\n\nSource files:\n{blob}"
     proposed = _parse_files(chat([{"role": "system", "content": _SYSTEM},
                                   {"role": "user", "content": user}]))
 

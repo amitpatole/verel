@@ -22,7 +22,7 @@ from .graders import (
 from .canary import CanaryResult, canary_rollback
 from .heal import HealResult, HealRound, self_heal
 from .hooks import install_precommit, is_installed
-from .medic import Action, Diagnosis, classify_issue, quarantine_severity, triage
+from .medic import Action, Diagnosis, classify_issue, enrich_diagnoses, quarantine_severity, triage
 from .pipeline import (
     Stage,
     StageResult,
@@ -45,7 +45,7 @@ __all__ = [
     "pytest_spec", "ruff_spec", "mypy_spec", "parse_pytest", "parse_ruff", "parse_mypy",
     "Stage", "StageResult", "run_stage", "inner_loop_stage", "precommit_stage", "premerge_stage",
     "postmerge_stage",
-    "Action", "Diagnosis", "classify_issue", "triage", "quarantine_severity",
+    "Action", "Diagnosis", "classify_issue", "triage", "quarantine_severity", "enrich_diagnoses",
     "RollbackPolicy", "RollbackProposal", "Decision", "RollbackExecutor", "RollbackOutcome",
     "canary_rollback", "CanaryResult",
     "self_heal", "HealResult", "HealRound",

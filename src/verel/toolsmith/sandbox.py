@@ -69,13 +69,20 @@ def run_sandboxed(tool: ToolRecord, args=None, kwargs=None, *, timeout_s: float 
         raise SandboxError(f"tool {tool.name!r} failed signature verification")
 
     child = _CHILD.format(cpu=cpu_s, mem=mem_bytes)
+    cmd = [sys.executable, "-I", "-S", "-c", child]
+    return exec_child(cmd, tool, args, kwargs, timeout_s=timeout_s, start_new_session=True)
+
+
+def exec_child(cmd: list[str], tool: ToolRecord, args=None, kwargs=None, *,
+               timeout_s: float = 3.0, env=None, start_new_session: bool = False):
+    """Run a prepared sandbox `cmd` (a python child reading the request on stdin) and parse
+    the JSON result. Shared by the rlimit subprocess sandbox and the bwrap container runner."""
     payload = json.dumps({"code": tool.code, "func": tool.name,
                           "args": list(args or []), "kwargs": dict(kwargs or {})})
     try:
         proc = subprocess.run(
-            [sys.executable, "-I", "-S", "-c", child],
-            input=payload, capture_output=True, text=True, timeout=timeout_s,
-            start_new_session=True,  # own process group, so timeout kills children too
+            cmd, input=payload, capture_output=True, text=True, timeout=timeout_s,
+            start_new_session=start_new_session, env=env,
         )
     except subprocess.TimeoutExpired as e:
         raise SandboxError(f"tool {tool.name!r} exceeded {timeout_s}s wall-clock") from e

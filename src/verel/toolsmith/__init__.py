@@ -7,6 +7,7 @@ verified-and-auto for read-only/idempotent tools, human-review-gated for destruc
 
 from __future__ import annotations
 
+from .container import best_runner, bwrap_available, run_container
 from .registry import SideEffect, ToolRecord, ToolRegistry, load_callable
 from .sandbox import SandboxError, run_sandboxed
 from .smith import BuildResult, ToolCase, ToolSmith, ToolSpec, eval_tool_cases
@@ -17,6 +18,9 @@ __all__ = [
     "ToolRegistry",
     "load_callable",
     "run_sandboxed",
+    "run_container",
+    "best_runner",
+    "bwrap_available",
     "SandboxError",
     "BuildResult",
     "ToolCase",
