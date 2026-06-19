@@ -146,11 +146,17 @@ class ToolRegistry:
         rec = self.mem.get(make_idfromkey(self._id_key(name)))
         return ToolRecord(**rec.detail["tool"]) if rec and "tool" in rec.detail else None
 
-    def find(self, capability: str, *, verified_only: bool = True, k: int = 3) -> list[ToolRecord]:
+    def find(self, capability: str, *, verified_only: bool = True, k: int = 3,
+             min_relevance: float = 0.0) -> list[ToolRecord]:
+        from ..memory.view import relevance
+
         hits = self.mem.recall(capability, scope=self.scope, kind=MemoryKind.SKILL, k=k)
         tools = []
         for h in hits:
             if verified_only and h.trust != Trust.VERIFIED:
+                continue
+            # guard against weak lexical matches reusing the wrong tool (e.g. shared "to"/"a")
+            if min_relevance and relevance(capability, h) < min_relevance:
                 continue
             t = h.detail.get("tool")
             if t:
