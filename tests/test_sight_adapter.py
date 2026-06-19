@@ -60,6 +60,39 @@ def test_synthetic_fallback_issue_excluded_from_gating_reports():
     assert all(i.detail.get("fallback") is not True for i in gated)
 
 
+def test_intent_mismatch_flows_through_without_breaking():
+    # AgentVision 0.3.0 added the `intent_mismatch` kind; the adapter must map it, not crash.
+    av = _av_report([_av_issue("intent_mismatch", "error", "vision",
+                               message="[#1] a Checkout button is missing")])
+    res = from_agentvision(av)
+    assert any(o.kind.value == "intent_mismatch" for o in res.percept.observations)
+    # vision-sourced -> advisory, so even an ERROR clamps to WARN at the gate.
+    assert gate(res.reports).verdict == Verdict.WARN
+
+
+def test_conformance_facts_captured_in_percept():
+    conf = SimpleNamespace(
+        claims=[1, 2, 3],
+        matches_intent=lambda: False,
+        satisfied=2,
+        total=3,
+    )
+    av = _av_report([_av_issue("intent_mismatch", "error", "ocr",
+                               message="[#3] required text not found")])
+    av.conformance = conf
+    res = from_agentvision(av)
+    assert res.percept.matches_intent is False
+    assert res.percept.intent_satisfied == 2
+    assert res.percept.intent_total == 3
+
+
+def test_no_brief_means_no_conformance_facts():
+    av = _av_report([_av_issue("overflow", "error", "dom")])
+    res = from_agentvision(av)  # no `conformance` attribute on the report
+    assert res.percept.matches_intent is None
+    assert res.percept.intent_total is None
+
+
 def test_mixed_sources_split_into_separate_reports():
     av = _av_report([
         _av_issue("overflow", "error", "dom"),

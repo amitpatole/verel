@@ -154,6 +154,7 @@ def from_agentvision(av_report, *, sense: str = "sight", agent_id: str = "", art
         )
 
     vp = getattr(av_report, "viewport", None)
+    matches_intent, intent_satisfied, intent_total = _conformance(av_report)
     percept = Percept(
         sense=sense,
         verdict=_verdict(getattr(av_report.verdict, "value", av_report.verdict)),
@@ -165,8 +166,23 @@ def from_agentvision(av_report, *, sense: str = "sight", agent_id: str = "", art
         image_path=getattr(av_report, "image_path", None),
         device_scale=getattr(av_report, "device_scale", None),
         viewport=str(vp) if vp is not None else None,
+        matches_intent=matches_intent,
+        intent_satisfied=intent_satisfied,
+        intent_total=intent_total,
     )
     return SightResult(reports=reports, percept=percept, raw=av_report)
+
+
+def _conformance(av_report) -> tuple[bool | None, int | None, int | None]:
+    """Extract intent-conformance facts from an AgentVision Report (None when no brief)."""
+    conf = getattr(av_report, "conformance", None)
+    if conf is None or not getattr(conf, "claims", None):
+        return None, None, None
+    try:
+        matches = bool(conf.matches_intent())
+        return matches, int(conf.satisfied), int(conf.total)
+    except (AttributeError, TypeError, ValueError):
+        return None, None, None
 
 
 def _sev(av_sev):

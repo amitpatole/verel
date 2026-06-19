@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.3 — eyes intent conformance (AgentVision 0.3.0 compatibility)
+
+- **Forward-compat with AgentVision 0.3.0**: `verdict.models.IssueKind` gains
+  `intent_mismatch`. AgentVision 0.3.0 added intent-conformance grading, which emits
+  `intent_mismatch` issues; without this the sight adapter raised
+  `ValueError: 'intent_mismatch' is not a valid IssueKind` on any conformance run.
+- **Intent conformance reaches the brain**: `Percept` gains `matches_intent`,
+  `intent_satisfied`, `intent_total`, populated by `senses.sight.from_agentvision` from the
+  AgentVision Report's `conformance`, and recorded by `PerceptLog` — so the brain can compound
+  *"did the artifact match what we set out to build"* across iterations. A full brain still
+  ingests the rich Report and runs its own gate/stuck detection; it does not consume
+  AgentVision's distilled `next_action`. +3 sight-adapter tests.
+
 ## 0.4.2 — docs sync
 
 - README, Hugging Face landing, and module guide updated for the 0.4.x memory lifecycle
