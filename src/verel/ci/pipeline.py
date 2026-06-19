@@ -38,22 +38,30 @@ class StageResult:
 
 
 def run_stage(stage: Stage, *, diff_files: set[str] | None = None, runner: Runner = subprocess_runner,
-              ledger: FailureLedger | None = None, ts: float = 0.0) -> StageResult:
+              ledger: FailureLedger | None = None, ts: float = 0.0,
+              flaky_signatures: set[str] | None = None) -> StageResult:
     """Run all graders in a stage, gate them, and (if a ledger is given) apply the
     failure-memory regression check + record new gating failures."""
     diff_files = diff_files or set()
+    flaky_signatures = flaky_signatures or set()
     reports = [run_grader(s, runner) for s in stage.graders]
     # Pin frozen suites from the trusted stage config (not from grader runtime output).
     frozen = {s.grader: suite_sha(s) for s in stage.graders}
 
     regressions = []
     if ledger is not None:
+        from .medic import Action, triage
+
         flat = Report(verdict=Verdict.FAIL, summary="", grader=GraderKind.OTHER,
                       issues=[i for r in reports for i in r.issues])
         regressions = ledger.check_regressions(flat)
         if regressions:
             reports.append(regression_report(regressions))
-        ledger.record(flat, ts=ts)
+        # ci-medic: transient (retry) and flaky failures are written volatile, so they
+        # self-clean from failure-memory unless they recur. Genuine regressions persist.
+        volatile = {d.issue.fingerprint for d in triage(flat, flaky_signatures=flaky_signatures)
+                    if d.action in (Action.RETRY, Action.QUARANTINE_FLAKY)}
+        ledger.record(flat, ts=ts, volatile_fingerprints=volatile)
 
     gr = gate(reports, required=stage.required, frozen_suites=frozen, diff_files=diff_files)
     return StageResult(stage.name, gr.verdict, gr, reports, regressions)
