@@ -1,0 +1,54 @@
+name: "Verel"
+description: "Gate your build on the Verel verdict bus — tests + lint + types in one verdict. Nothing is done until a grader returns a verdict."
+branding:
+  icon: "check-circle"
+  color: "purple"
+
+inputs:
+  repo:
+    description: "Path to the repository to gate."
+    required: false
+    default: "."
+  no-lint:
+    description: "Skip the lint grader (set 'true')."
+    required: false
+    default: "false"
+  install:
+    description: "Pip spec(s) for YOUR project's deps so its tests import (e.g. '-e .[dev]')."
+    required: false
+    default: ""
+  extras:
+    description: "Verel extras to install (dev brings pytest/ruff/mypy graders)."
+    required: false
+    default: "dev"
+  python-version:
+    description: "Python version."
+    required: false
+    default: "3.12"
+
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+    - name: Install Verel (+ your project deps)
+      shell: bash
+      env:
+        EXTRAS: ${{ inputs.extras }}
+        INSTALL: ${{ inputs.install }}
+      run: |
+        set -euo pipefail
+        python -m pip install --upgrade pip
+        pip install "verel[${EXTRAS}]"
+        if [ -n "$INSTALL" ]; then pip install $INSTALL; fi
+    - name: Run the Verel gate (fails the build on a FAIL verdict)
+      shell: bash
+      env:
+        REPO: ${{ inputs.repo }}
+        NOLINT: ${{ inputs.no-lint }}
+      run: |
+        set -euo pipefail
+        args=( check --repo "$REPO" )
+        [ "$NOLINT" = "true" ] && args+=( --no-lint )
+        verel-ci "${args[@]}"

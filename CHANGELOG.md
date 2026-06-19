@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.5 — developer adoption (CI gate Action + pre-commit), in sync with the eyes
+
+Symmetric adoption polish so the brain drops into a workflow as easily as the eyes:
+- **Reusable GitHub Action** (`action.yml`): installs Verel (+ your deps) and runs the verdict
+  bus gate (`verel-ci check`) — tests + lint + types in one verdict; fails the build on FAIL.
+- **pre-commit hook** (`.pre-commit-hooks.yaml`): `verel-precommit` gates commits on the bus.
+- README "Drop it into your workflow & your agents" section (Action, pre-commit, native hook,
+  `verel-mcp`, `verel[sight]` for visual gating + `watch`).
+No library code change; cut so a pinned `@v0.4.5` action ref and `pip install` align.
+
 ## 0.4.4 — temporal perception: the eyes can now *watch* (AgentVision 0.6.0)
 
 AgentVision 0.6.0 added temporal verification (`watch` — playback/loading/liveness over a
