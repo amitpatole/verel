@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.6.0 — the strict allow-list seccomp jail (default-deny for untrusted tool code)
+
+The 0.5.0 denylist was defense-in-depth; this is the real minimal jail, the last roadmap item
+on tool isolation.
+- **Allow-list profile** (`seccomp_profile="allowlist"`): a default-**deny** filter (EPERM on
+  anything not listed) that allows only the syscalls a single-threaded, pure-compute CPython
+  payload needs — derived by tracing `python3 -I -S` over representative pure tools, plus a margin
+  for libc/stdlib variation, and the handful bwrap's own pid-namespace init needs to reap the
+  child. By omission it withholds **all** network syscalls, **all** process-spawn syscalls
+  (`clone`/`fork`/`vfork` — so no subprocess and no threads), and every privileged family.
+- Verified live under bwrap: pure tools (math/json/re/hashlib/decimal/datetime) run; a tool that
+  opens a `socket()`, runs a `subprocess`, or calls `os.fork()` is refused with EPERM.
+- EPERM (not SIGSYS-KILL) is the default action, matching the Docker/podman convention — a
+  refusal surfaces as a Python `PermissionError` instead of crashing the interpreter.
+- `run_container(..., seccomp_profile=...)`; `build_bpf(..., profile=...)`; new `ALLOWED_SYSCALLS`,
+  `PROFILE_DENYLIST`, `PROFILE_ALLOWLIST` exports. Default stays `denylist` (safe for arbitrary
+  tools); the allow-list jail is opt-in for untrusted code.
+
 ## 0.5.0 — seccomp on the §7.7 container runner (closing the last sandbox overclaim)
 
 The container tool runner promised "seccomp containment" in its docstring but only did namespace
