@@ -60,6 +60,13 @@ class SandboxError(RuntimeError):
     pass
 
 
+def _payload_for(code: str, func: str, args=None, kwargs=None) -> str:
+    """The stdin request the sandbox child reads: code + which function + its inputs. Shared by
+    the runner and the seccomp-policy learner so a tool is traced exactly as it is executed."""
+    return json.dumps({"code": code, "func": func,
+                       "args": list(args or []), "kwargs": dict(kwargs or {})})
+
+
 def run_sandboxed(tool: ToolRecord, args=None, kwargs=None, *, timeout_s: float = 3.0,
                   cpu_s: int = 2, mem_bytes: int = 256 * 1024 * 1024):
     """Execute `tool` in an isolated subprocess. Verifies the signature first; returns the
@@ -78,8 +85,7 @@ def exec_child(cmd: list[str], tool: ToolRecord, args=None, kwargs=None, *,
     """Run a prepared sandbox `cmd` (a python child reading the request on stdin) and parse
     the JSON result. Shared by the rlimit subprocess sandbox and the bwrap container runner.
     `pass_fds` keeps extra inheritable fds open in the child (e.g. bwrap's --seccomp program)."""
-    payload = json.dumps({"code": tool.code, "func": tool.name,
-                          "args": list(args or []), "kwargs": dict(kwargs or {})})
+    payload = _payload_for(tool.code, tool.name, args, kwargs)
     try:
         proc = subprocess.run(
             cmd, input=payload, capture_output=True, text=True, timeout=timeout_s,

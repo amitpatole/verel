@@ -22,7 +22,7 @@ import tempfile
 
 from .registry import ToolRecord
 from .sandbox import _CHILD, SandboxError, exec_child, run_sandboxed
-from .seccomp import PROFILE_DENYLIST, build_bpf, seccomp_available
+from .seccomp import PROFILE_CAPABILITY, PROFILE_DENYLIST, build_bpf, seccomp_available
 
 
 def bwrap_available() -> bool:
@@ -44,12 +44,14 @@ def _bwrap_cmd() -> list[str]:
 
 def run_container(tool: ToolRecord, args=None, kwargs=None, *, timeout_s: float = 5.0,
                   cpu_s: int = 3, mem_bytes: int = 256 * 1024 * 1024, seccomp: bool = True,
-                  seccomp_profile: str = PROFILE_DENYLIST):
+                  seccomp_profile: str = PROFILE_DENYLIST, seccomp_allow=None):
     """Execute `tool` inside a bwrap namespace sandbox (no net, read-only fs, ephemeral tmp), and
     — when `seccomp` is requested and a libseccomp binding is present — under a seccomp-bpf filter
-    applied to the sandboxed process. `seccomp_profile` is "denylist" (default; safe for arbitrary
-    tools) or "allowlist" (a strict default-deny jail for untrusted, pure-compute code — no
-    network, no subprocess, no threads)."""
+    applied to the sandboxed process. `seccomp_profile`:
+      * "denylist"  (default) — safe for arbitrary tools (deny the dangerous set);
+      * "allowlist" — a strict default-deny jail for untrusted pure-compute code;
+      * "capability" — the tightest: allow only this tool's learned syscall policy. The policy is
+        `seccomp_allow` if given, else `tool.syscall_policy`."""
     if not bwrap_available():
         raise SandboxError("bwrap not available — use run_sandboxed or install bubblewrap")
     if not tool.verify():
@@ -61,9 +63,13 @@ def run_container(tool: ToolRecord, args=None, kwargs=None, *, timeout_s: float 
     sec_file = None
     pass_fds: tuple[int, ...] = ()
     if seccomp and seccomp_available():
+        allow = seccomp_allow if seccomp_allow is not None else tool.syscall_policy
+        if seccomp_profile == PROFILE_CAPABILITY and not allow:
+            raise SandboxError("capability profile needs a syscall policy "
+                               "(pass seccomp_allow= or set tool.syscall_policy)")
         # bwrap reads the compiled cBPF program from an inheritable fd; libseccomp exports it.
         sec_file = tempfile.TemporaryFile()  # noqa: SIM115 — fd must outlive the subprocess; closed in finally
-        build_bpf(sec_file, profile=seccomp_profile)
+        build_bpf(sec_file, profile=seccomp_profile, allow=allow)
         sec_file.flush()
         sec_file.seek(0)
         cmd += ["--seccomp", str(sec_file.fileno())]

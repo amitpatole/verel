@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://pypi.org/project/verel/"><img src="https://img.shields.io/pypi/v/verel?color=8b7cff&label=pip%20install%20verel" alt="PyPI"></a>
-  <img src="https://img.shields.io/badge/tests-154%20passing-46d39a" alt="tests">
+  <img src="https://img.shields.io/badge/tests-156%20passing-46d39a" alt="tests">
   <img src="https://img.shields.io/badge/ruff%20%2B%20mypy-clean-5ad1e6" alt="lint">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT">
   <img src="https://img.shields.io/badge/LLM-Ollama%20Cloud%20%C2%B7%20OpenAI-8b7cff" alt="LLM">
@@ -151,17 +151,19 @@ python examples/demo_overflow_loop.py    # fix a UI until AgentVision returns pa
 python examples/demo_fleet_worktrees.py  # LLM manager fans out → isolated-worktree workers
 python examples/demo_h2_moat.py          # measure cross-tenant skill transfer → moat decision
 python examples/demo_canary_rollback.py  # bad merge fails canary → safe auto git-revert
+python examples/demo_capability_jail.py  # learn a tool's syscalls → deny everything it didn't earn
 ```
 
 ## Honesty (what we do **not** claim)
 
 - The in-process tool guard is a guardrail, not a sandbox — real isolation is the `bwrap`
   container runner (`isolation="container"`): no network, read-only system-only fs, ephemeral
-  tmp, cleared env, **and a seccomp-bpf syscall filter** (`verel[container]`). Two profiles: the
-  default **denylist** (defense-in-depth — EPERM on ptrace/mount/raw-socket/namespace/module/bpf
-  syscalls, safe for arbitrary tools) and an opt-in **allowlist** jail (`seccomp_profile=
-  "allowlist"`) — default-deny, allowing only the syscalls a pure-compute CPython payload needs,
-  so an untrusted tool gets **no network, no subprocess, and no threads** at the kernel boundary.
+  tmp, cleared env, **and a seccomp-bpf syscall filter** (`verel[container]`). Three profiles,
+  weakest→strongest: **denylist** (default; EPERM on ptrace/mount/raw-socket/namespace/module/bpf
+  — safe for arbitrary tools), **allowlist** (default-deny, only what a pure-compute CPython needs
+  — no network, subprocess, or threads), and **capability** — the tightest: a tool may use only
+  the syscalls it *exercised while passing its held-out eval* (learned via `strace`), so anything
+  it never earned — including a syscall the allow-list would permit — is refused at the kernel.
 - The moat (a public verified-skill registry) is a **bet**, not a given — `verel.registry`
   ships the **H2 experiment** to *measure* whether skills transfer across tenants before you
   build it.

@@ -76,12 +76,15 @@ def _extract(reply: str) -> str:
 class ToolSmith:
     def __init__(self, registry: ToolRegistry, *, chat: ChatFn | None = None,
                  runner_identity: str = "toolsmith-runner", sandbox: bool = False,
-                 isolation: str | None = None):
+                 isolation: str | None = None, learn_syscalls: bool = False):
         self.registry = registry
         self.chat = chat or _default_chat
         self.runner_identity = runner_identity
         self.sandbox = sandbox  # back-compat alias for isolation='subprocess'
         self.isolation = isolation  # 'none'|'subprocess'|'container'|'best' (§7.7)
+        # learn a per-tool capability seccomp policy from the verified eval cases (needs strace;
+        # a no-op where strace is absent). Off by default — it adds a tracing pass at build time.
+        self.learn_syscalls = learn_syscalls
 
     # ---- detect ----
     def detect(self, spec: ToolSpec) -> ToolRecord | None:
@@ -142,6 +145,15 @@ class ToolSmith:
         if not (passed and gr.verdict == Verdict.PASS):
             return BuildResult(tool, False, False, score, None, False,
                                f"eval failed ({detail}); no tool enters red")
+
+        # Freeze the tool's syscall footprint from the SAME cases that just verified it, so the
+        # capability seccomp profile can later refuse any syscall it didn't exercise while passing.
+        if self.learn_syscalls:
+            from .seccomp_learn import learn_syscall_profile
+            policy = learn_syscall_profile(code, spec.name, spec.cases)
+            if policy:
+                tool.syscall_policy = list(policy)
+                tool.provenance.append(f"syscall-policy:{len(policy)}")
 
         # Destructive tools require a human-review verdict before they can be `verified`.
         if spec.side_effect not in AUTO_PROMOTABLE:

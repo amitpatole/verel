@@ -45,6 +45,12 @@ class ToolRecord(BaseModel):
     side_effect: SideEffect = SideEffect.READ_ONLY
     provenance: list[str] = Field(default_factory=list)
     eval_score: float = 0.0
+    # The syscalls this tool exercised while passing its held-out eval (learned, see
+    # seccomp_learn.py). Operator-set containment metadata for the capability seccomp profile —
+    # deliberately NOT in the HMAC signature: the signature attests untrusted *code* integrity,
+    # while the policy is the operator's enforcement choice applied at run time (an attacker who
+    # could rewrite it could equally run with no seccomp at all, so signing it buys nothing).
+    syscall_policy: list[str] | None = None
     signature: str = ""
 
     def signing_payload(self) -> str:

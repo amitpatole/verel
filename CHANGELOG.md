@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.7.0 — per-capability seccomp jail (a tool earns each syscall by verifying)
+
+The tightest isolation tier, and the one that ties containment to Verel's verification discipline:
+a tool may use only the syscalls it **exercised while passing its held-out eval**.
+- **Policy learning** (`toolsmith/seccomp_learn.py`): `learn_syscall_profile()` runs the tool over
+  its eval cases under `strace` and unions the syscalls observed — the tool's footprint. Needs
+  strace at build time only; enforcement needs just libseccomp.
+- **Capability profile** (`seccomp_profile="capability"`): default-deny, allowing the learned
+  policy unioned with a `RUNTIME_FLOOR` (interpreter+libc essentials, so a thin trace can never
+  crash CPython) and the bwrap supervisor syscalls. Strictly ⊆ the allow-list jail — a syscall the
+  tool never earned is refused even if the allow-list would permit it.
+- **Frozen onto the tool**: `ToolRecord.syscall_policy` (operator metadata, not in the code
+  signature); `ToolSmith(learn_syscalls=True)` learns + stores it on a verified build.
+- Verified live under bwrap: the verified math tool runs 10/10; `socket()`, `subprocess`,
+  `os.fork()` are refused; and a benign `os.pipe()` that the allow-list jail permits (returns 5)
+  is **refused** under the tool's math policy — per-tool tightening, proven, not asserted.
+- New exports: `PROFILE_CAPABILITY`, `capability_allow`, `learn_syscall_profile`,
+  `strace_available`; `build_bpf(profile=, allow=)`, `run_container(seccomp_profile=, seccomp_allow=)`.
+- `examples/demo_capability_jail.py`; 156 offline-CI tests.
+
 ## 0.6.0 — the strict allow-list seccomp jail (default-deny for untrusted tool code)
 
 The 0.5.0 denylist was defense-in-depth; this is the real minimal jail, the last roadmap item

@@ -14,10 +14,13 @@ from .seccomp import (
     ALLOWED_SYSCALLS,
     DENIED_SYSCALLS,
     PROFILE_ALLOWLIST,
+    PROFILE_CAPABILITY,
     PROFILE_DENYLIST,
     build_bpf,
+    capability_allow,
     seccomp_available,
 )
+from .seccomp_learn import learn_syscall_profile, strace_available
 from .smith import BuildResult, ToolCase, ToolSmith, ToolSpec, eval_tool_cases
 
 __all__ = [
@@ -35,6 +38,10 @@ __all__ = [
     "ALLOWED_SYSCALLS",
     "PROFILE_DENYLIST",
     "PROFILE_ALLOWLIST",
+    "PROFILE_CAPABILITY",
+    "capability_allow",
+    "learn_syscall_profile",
+    "strace_available",
     "SandboxError",
     "BuildResult",
     "ToolCase",
