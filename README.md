@@ -157,6 +157,7 @@ python examples/demo_polyglot_ci.py      # Python/JS/Go + perf + security grader
 python examples/demo_consolidation.py    # failures → structured rules → a 2nd-order schema
 python examples/demo_distributed_fleet.py # concurrent managers (fencing) + multi-repo DAG
 python examples/run_h2.py                # LIVE: build skills, measure cross-tenant transfer
+python examples/run_h2_sweep.py          # LIVE: sweep the transfer measurement across models
 ```
 
 ## Honesty (what we do **not** claim)
@@ -171,9 +172,10 @@ python examples/run_h2.py                # LIVE: build skills, measure cross-ten
   it never earned — including a syscall the allow-list would permit — is refused at the kernel.
 - The moat (a public verified-skill registry) is a **bet** we *measure*, not assume — the **H2
   experiment** (`verel.registry`) re-verifies live-built skills against other tenants' held-out
-  cases. A first real run (Ollama `qwen3-coder:480b`, 7 skills × 4 tenants) measured **81%
-  transfer → BUILD** ([results](docs/H2_RESULTS.md)): universal skills transfer 100%,
-  tenant-specific ones only where the rule matches. One corpus, one model — re-run before betting.
+  cases. A **two-model sweep** (Ollama `qwen3-coder:480b` and OpenAI `gpt-4o-mini`, 12 skills ×
+  4 tenants) measured **~88–89% transfer → BUILD** on both ([results](docs/H2_RESULTS.md)):
+  universal skills transfer 100%, tenant-specific ones only where the rule matches. The decision
+  is swept across models, not taken from one run.
 - Advisory (vision/LLM) findings are advisory; they inform, they don’t gate destructive acts.
 
 ## Documentation
