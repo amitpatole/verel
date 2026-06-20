@@ -91,9 +91,18 @@ A control plane over agent execution:
 
 - **Manager** decomposes a goal into a fan-out of independent subtasks (LLM-driven, with the
   plane validating and clamping the decision — and falling back safely on bad output).
-- **Scheduler** — single-writer, runs a Task DAG with barrier policies (`all` / `k_of_n` /
-  `optional`), a concurrency cap, retry → quarantine, a hard budget lease, and WAL-based
-  crash resume. Every node is gated by the verdict bus, so a worker can't self-declare done.
+- **Scheduler** — runs a Task DAG with barrier policies (`all` / `k_of_n` / `optional`), a
+  concurrency cap, retry → quarantine, a hard budget lease, and WAL-based crash resume. Every
+  node is gated by the verdict bus, so a worker can't self-declare done.
+- **Concurrent managers** — more than one scheduler can share a task store safely via **fencing
+  leases** (`lease.py`): a lease carries a monotonic token, taking over an expired lease bumps it,
+  and every terminal write is fenced — a stale leader whose token is no longer current is
+  *rejected*, not allowed to corrupt shared state. Peers adopt each other's recorded outcomes, so
+  each task runs exactly once. Backends: in-memory (one process) or sqlite (`BEGIN IMMEDIATE`,
+  cross-process).
+- **Multi-repo coordination** — `plan_multi_repo` namespaces per-repo tasks and adds cross-repo
+  edges into one DAG, validated acyclic (a cross-repo cycle is rejected up front, never
+  deadlocked). One fenced scheduler then enforces "ship the client only after the API builds".
 - **Worktrees** — each worker runs in its own isolated git worktree with an exclusive
   advisory lease, so parallel workers never stomp each other.
 
@@ -165,7 +174,8 @@ its own verdict bus in CI.
 **Next:**
 - Broaden senses further — Rust/Java toolchains; richer perf harnesses; more SAST backends.
 - Deepen consolidation further — multi-hop schema hierarchies; consolidation across scopes.
-- Distributed hardening — worker fencing for concurrent managers; multi-repo coordination.
+- Distributed hardening — a server-side git fencing sink (reject pushes carrying a stale token);
+  cross-repo atomic sagas (compensating rollback when one repo in a multi-repo change fails).
 - A hosted skill registry, once cross-tenant transfer is shown to be worthwhile.
 - Seccomp profile portability across architectures (the learned policy is x86-64-derived today).
 

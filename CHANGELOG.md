@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.10.0 — distributed fleet: fencing leases for concurrent managers + multi-repo DAGs
+
+The scheduler was single-writer by design (so split-brain couldn't happen). This lifts that limit
+safely — the v3 fencing work the code had deferred.
+- **Fencing leases** (`fleet/lease.py`): a `LeaseStore` where every lease carries a **monotonic
+  token**. Taking over an expired lease bumps it; same-owner renewal keeps it. Every terminal
+  write is **fenced** — a stale leader whose token isn't current is rejected (`FencingError`), so
+  it can't corrupt shared state. `InMemoryLeaseStore` (one process) and `SqliteLeaseStore`
+  (`BEGIN IMMEDIATE`, cross-process).
+- **Concurrent managers**: `Scheduler(leases=store, owner=...)` runs only tasks it can lease,
+  fences its terminal writes, and **adopts peers' recorded outcomes** — so N schedulers over one
+  store run each task exactly once and converge. With no `leases`, behaviour is byte-for-byte the
+  single-writer v1.
+- **Multi-repo coordination** (`fleet/multirepo.py`): `plan_multi_repo` namespaces per-repo tasks
+  (`repo::id`), rewrites intra-repo deps, adds `CrossDep` edges, and validates the combined DAG
+  acyclic (a cross-repo cycle is rejected up front, never deadlocked). One fenced scheduler then
+  enforces cross-repo ordering ("ship the client only after the API builds").
+- `examples/demo_distributed_fleet.py`; 192 offline-CI tests.
+
 ## 0.9.0 — deepened consolidation: adaptive decay, semantic clustering, structured + 2nd-order rules
 
 The Brain's "episodic → semantic" step gets richer and its decay gets smarter.
