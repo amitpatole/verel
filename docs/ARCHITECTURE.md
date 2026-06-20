@@ -189,7 +189,8 @@ Default LLM provider is Ollama Cloud; OpenAI is the bundled fallback, and the pr
 adapter; the memory trust layer with consolidation + promotion gate (LocalMemory and mem0);
 semantic recall; the fleet (manager + scheduler + worktrees); the tool-smith with subprocess
 and container isolation; the full CI/CD stage table with self-healing and rollback; a
-content-addressed skill registry with a cross-tenant transfer experiment; CLI + MCP surfaces.
+content-addressed skill registry — now **hosted** over HTTP (`RegistryServer`/`RemoteRegistry`),
+with a cross-tenant transfer experiment that justified building it; CLI + MCP surfaces.
 The project is lint/type-clean, ships type information, and gates its own development through
 its own verdict bus in CI.
 
@@ -199,8 +200,8 @@ its own verdict bus in CI.
   fed, not just the rule itself).
 - Distributed hardening — replicate the control-plane store (today a single sqlite host is the
   authority); push-time identity (sign the push token to the fencing sink).
-- A hosted skill registry — a first live H2 run measured 81% cross-tenant transfer (BUILD; see
-  `docs/H2_RESULTS.md`), so this is now justified pending a broader corpus/model sweep.
+- Skill-registry curation — reputation/provenance ranking now that the registry is hosted
+  (`RegistryServer`); the two-model H2 sweep (88–89% transfer) justified building it.
 - Seccomp profile portability across architectures (the learned policy is x86-64-derived today).
 
 ---

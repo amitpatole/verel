@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://pypi.org/project/verel/"><img src="https://img.shields.io/pypi/v/verel?color=8b7cff&label=pip%20install%20verel" alt="PyPI"></a>
   <a href="https://amitpatole.github.io/verel/"><img src="https://img.shields.io/badge/docs-amitpatole.github.io-5ad1e6" alt="Docs"></a>
-  <img src="https://img.shields.io/badge/tests-211%20passing-46d39a" alt="tests">
+  <img src="https://img.shields.io/badge/tests-216%20passing-46d39a" alt="tests">
   <img src="https://img.shields.io/badge/ruff%20%2B%20mypy-clean-5ad1e6" alt="lint">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT">
   <img src="https://img.shields.io/badge/LLM-Ollama%20Cloud%20%C2%B7%20OpenAI-8b7cff" alt="LLM">
@@ -158,6 +158,7 @@ python examples/demo_consolidation.py    # failures → structured rules → a 2
 python examples/demo_distributed_fleet.py # concurrent managers (fencing) + multi-repo DAG
 python examples/run_h2.py                # LIVE: build skills, measure cross-tenant transfer
 python examples/run_h2_sweep.py          # LIVE: sweep the transfer measurement across models
+python examples/demo_hosted_registry.py  # publish a skill over HTTP; another tenant re-verifies
 ```
 
 ## Honesty (what we do **not** claim)
@@ -175,7 +176,9 @@ python examples/run_h2_sweep.py          # LIVE: sweep the transfer measurement 
   cases. A **two-model sweep** (Ollama `qwen3-coder:480b` and OpenAI `gpt-4o-mini`, 12 skills ×
   4 tenants) measured **~88–89% transfer → BUILD** on both ([results](docs/H2_RESULTS.md)):
   universal skills transfer 100%, tenant-specific ones only where the rule matches. The decision
-  is swept across models, not taken from one run.
+  is swept across models, not taken from one run — and the registry it justifies now ships
+  (`RegistryServer`/`RemoteRegistry`): a fetched skill is a **candidate** until the importer's own
+  eval passes, so distribution moves bytes, never a verdict.
 - Advisory (vision/LLM) findings are advisory; they inform, they don’t gate destructive acts.
 
 ## Documentation

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from .artifact import SkillArtifact, content_hash
 from .h2 import KILL_LINE, TransferOutcome, TransferReport, measure_transfer
+from .hosted import RegistryServer, RemoteRegistry
 from .store import PublicRegistry
 from .transfer import ImportResult, export_skill, import_skill
 
@@ -16,6 +17,8 @@ __all__ = [
     "SkillArtifact",
     "content_hash",
     "PublicRegistry",
+    "RegistryServer",
+    "RemoteRegistry",
     "export_skill",
     "import_skill",
     "ImportResult",
