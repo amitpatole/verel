@@ -7,6 +7,7 @@ gates every node through the verdict bus. Worker fencing + git fencing sink are 
 
 from __future__ import annotations
 
+from .control_plane import ControlPlaneServer, RemoteLeaseStore
 from .fence_sink import (
     FenceDecision,
     enable_push_options,
@@ -63,6 +64,8 @@ __all__ = [
     "SqliteLeaseStore",
     "FencingError",
     "monotonic_now",
+    "ControlPlaneServer",
+    "RemoteLeaseStore",
     "CrossDep",
     "plan_multi_repo",
     "repo_of",

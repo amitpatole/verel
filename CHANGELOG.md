@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.16.0 — hosted control plane: the fencing authority behind an HTTP API (cross-machine)
+
+The lease stores needed a shared filesystem; this lets managers on different machines coordinate.
+- **Control plane** (`fleet/control_plane.py`): `ControlPlaneServer` wraps a durable
+  `SqliteLeaseStore` in a tiny, dependency-free (stdlib `http.server`) HTTP service —
+  acquire/renew/release/complete + token/outcome. The **server is the clock authority** (it stamps
+  `now` itself), so managers with skewed clocks can't disagree about lease expiry. An optional
+  bearer token gates access.
+- **`RemoteLeaseStore`**: a `LeaseStore` over HTTP that speaks the same Protocol, so
+  `Scheduler(leases=RemoteLeaseStore(url), owner=host)` coordinates cross-machine with no other
+  change. Fencing holds over the wire: a stale `complete` returns 409 and the client raises
+  `FencingError`. **Verified live** — two schedulers pointed at one control plane run each task
+  exactly once and converge; a stale leader's write is refused; bad auth is rejected.
+- 211 offline-CI tests.
+
 ## 0.15.0 — contradiction-driven schema revision (consolidation that can be wrong, and recovers)
 
 Consolidation only ever grew. Now it can contract when reality disagrees.

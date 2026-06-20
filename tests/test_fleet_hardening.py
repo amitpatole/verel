@@ -260,3 +260,58 @@ def test_git_revert_head_makes_an_inverse_commit(tmp_path):
     new = git_revert_head(str(tmp_path))
     assert new and (tmp_path / "f.txt").read_text() == "v1\n"  # reverted to v1, not a reset
     assert len(git("log", "--oneline").stdout.strip().splitlines()) == 3  # revert is a NEW commit
+
+
+# =========================================================== hosted control plane (HTTP)
+def test_control_plane_fences_and_coordinates_over_http(tmp_path):
+    import asyncio
+
+    from verel.fleet import (
+        ControlPlaneServer,
+        FencingError,
+        RemoteLeaseStore,
+        Scheduler,
+        WorkerResult,
+    )
+    from verel.verdict import Verdict
+
+    srv = ControlPlaneServer(tmp_path / "cp.db", auth_token="secret").start()
+    try:
+        c1 = RemoteLeaseStore(srv.url, auth_token="secret")
+        c2 = RemoteLeaseStore(srv.url, auth_token="secret")
+        a = c1.acquire("deploy", "m1", ttl=100.0)
+        assert a is not None and a.token == 1
+        assert c2.acquire("deploy", "m2", ttl=100.0) is None          # live peer blocked over the wire
+
+        # m1 releases; m2 takes over (token 2). m1's stale complete is fenced over HTTP (409).
+        c1.release(a)
+        b = c2.acquire("deploy", "m2", ttl=100.0)
+        assert b is not None and b.token == 2
+        with pytest.raises(FencingError):
+            c1.complete(a, "passed")  # a's token (1) is no longer current
+        c2.complete(b, "passed")
+        assert c1.outcome("deploy") == "passed"
+
+        # bad auth is rejected
+        with pytest.raises(Exception):
+            RemoteLeaseStore(srv.url, auth_token="wrong").current_token("deploy")
+
+        # two schedulers on the same control plane run each task exactly once
+        runs: dict[str, int] = {}
+
+        async def worker(t):
+            runs[t.id] = runs.get(t.id, 0) + 1
+            await asyncio.sleep(0)
+            return WorkerResult(verdict=Verdict.PASS)
+
+        async def go():
+            s1 = Scheduler(worker, concurrency=2, leases=RemoteLeaseStore(srv.url, auth_token="secret"), owner="h1")
+            s2 = Scheduler(worker, concurrency=2, leases=RemoteLeaseStore(srv.url, auth_token="secret"), owner="h2")
+            return await asyncio.gather(s1.run([_t(f"j{i}") for i in range(6)]),
+                                        s2.run([_t(f"j{i}") for i in range(6)]))
+
+        r1, r2 = asyncio.run(go())
+        assert len(runs) == 6 and all(v == 1 for v in runs.values())
+        assert all(s == TaskState.PASSED for s in {**r1, **r2}.values())
+    finally:
+        srv.stop()
