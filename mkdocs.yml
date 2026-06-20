@@ -42,6 +42,7 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Get started: getting-started.md
+  - Developer guide: usage.md
   - Architecture: ARCHITECTURE.md
 
 # Keep internal design + critic-round notes OUT of the public site (defense-in-depth even if
