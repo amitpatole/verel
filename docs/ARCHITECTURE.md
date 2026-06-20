@@ -76,6 +76,12 @@ On top of that:
   top is the most general principle the evidence backs. `consolidate_across_scopes` lifts a pattern
   that recurs across **several repos** into a `global` rule (and refuses a single-repo quirk). All
   start `inferred`; height and breadth never confer trust.
+- **Contradiction-driven revision** (`revise_with_counterexample`) — consolidation can also be
+  *wrong*. A new failure in a rule's domain that the rule failed to prevent is a counterexample:
+  it's recorded (via `annotate`, no corroboration), the rule is `contradict`ed, and once enough
+  counterexamples accumulate the rule is **split** into a narrowed general rule (which supersedes
+  the original) plus a specific exception rule — or, if belief collapses, `rejected`. Revision only
+  ever lowers trust or narrows scope.
 - **Promotion gate** — a candidate reaches `verified` **only** by passing a held-out,
   agent-inaccessible eval (with a leakage canary). Trust is earned, never asserted.
 - **Failure ledger + regression guard** — past gating failures are remembered; reintroducing
@@ -183,8 +189,8 @@ its own verdict bus in CI.
 
 **Next:**
 - Broaden senses further — Rust/Java toolchains; richer perf harnesses; more SAST backends.
-- Consolidation: contradiction-driven schema revision (a schema that a new failure violates is
-  demoted/split, not just grown).
+- Consolidation: propagate a split up the schema hierarchy (revise the principles a narrowed rule
+  fed, not just the rule itself).
 - Distributed hardening — a hosted control-plane service (lease store + fencing sink behind an
   API), so managers on different machines coordinate without a shared filesystem.
 - A hosted skill registry — a first live H2 run measured 81% cross-tenant transfer (BUILD; see

@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://pypi.org/project/verel/"><img src="https://img.shields.io/pypi/v/verel?color=8b7cff&label=pip%20install%20verel" alt="PyPI"></a>
   <a href="https://amitpatole.github.io/verel/"><img src="https://img.shields.io/badge/docs-amitpatole.github.io-5ad1e6" alt="Docs"></a>
-  <img src="https://img.shields.io/badge/tests-204%20passing-46d39a" alt="tests">
+  <img src="https://img.shields.io/badge/tests-210%20passing-46d39a" alt="tests">
   <img src="https://img.shields.io/badge/ruff%20%2B%20mypy-clean-5ad1e6" alt="lint">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT">
   <img src="https://img.shields.io/badge/LLM-Ollama%20Cloud%20%C2%B7%20OpenAI-8b7cff" alt="LLM">
@@ -54,7 +54,7 @@ Default LLM is **Ollama Cloud** (`~/.config/ollama/key`, model `qwen3-coder:480b
 
 | Organ | Module | What it does |
 |---|---|---|
-| 🧠 **Brain** | `verel.memory` | Memory that compounds — trust + provenance, consolidation, and a **held-out, attested promotion gate**. Only verified facts/skills graduate. Lifecycle controls (**pin** / **volatile-until-confirmed** / **TTL** / **correction chains** / **adaptive decay** — useful memories decay slower) keep it from becoming a junk drawer. Consolidation induces **structured rules** (condition→action), a **multi-hop schema hierarchy** (rules → principles → meta-principles), and **cross-scope** rules (a bug recurring across repos becomes a global rule). Backends: zero-dep `LocalMemory` or rented `mem0`; semantic recall + clustering via embeddings. |
+| 🧠 **Brain** | `verel.memory` | Memory that compounds — trust + provenance, consolidation, and a **held-out, attested promotion gate**. Only verified facts/skills graduate. Lifecycle controls (**pin** / **volatile-until-confirmed** / **TTL** / **correction chains** / **adaptive decay** — useful memories decay slower) keep it from becoming a junk drawer. Consolidation induces **structured rules** (condition→action), a **multi-hop schema hierarchy** (rules → principles → meta-principles), and **cross-scope** rules (a bug recurring across repos becomes a global rule) — and **revises by contradiction**: a rule a new failure violates is weakened, then **split** into a narrowed rule + an exception (or rejected). Backends: zero-dep `LocalMemory` or rented `mem0`; semantic recall + clustering via embeddings. |
 | 👁️ **Eyes** | `verel.senses` | **AgentVision** as a perception organ (DOM/contrast/OCR grounded) feeding both the verdict bus and the brain as one of many senses. |
 | ⚖️ **Verdict bus** | `verel.verdict` | One schema for every sense, with an advisory **ceiling clamp**, **grader attestation**, scrubbed fingerprints, and strict-subset **stuck/progress** detection. |
 | 🚁 **Fleet** | `verel.fleet` | Agents managing agents — an **LLM manager** fans out, a scheduler runs workers in **isolated git worktrees** under budget, each gated by the bus. **Concurrent managers** are safe via **fencing leases** (a stale leader's writes are rejected) — enforced even at the remote by a **git pre-receive fencing sink** (a stale push is refused). **Multi-repo** changes run as one cross-linked DAG and commit as an **atomic saga** (a failure compensates the repos that already landed, in reverse). |

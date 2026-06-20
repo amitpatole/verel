@@ -73,6 +73,32 @@ def main() -> None:
     print(f"  after 1 base half-life idle: one-off strength={one_off.retrieval_strength:.2f}  "
           f"corroborated={corroborated.retrieval_strength:.2f}")
 
+    print("\nContradiction-driven revision — a rule that a new failure violates is split, not kept:")
+    from verel.memory.revise import revise_with_counterexample
+    from verel.memory.view import make_key
+    rule = mem.write(MemoryRecord(
+        kind=MemoryKind.DESIGN_RULE, subject="cards", predicate="design_rule",
+        text="fixed width → use max-width", scope="repo:app", epistemic_confidence=0.7,
+        subj_pred_key=make_key("cards", "design_rule", "repo:app")).with_detail(
+        covers_kind="overflow", condition="fixed width", action="use max-width", applies_to="all cards"))
+
+    def split_chat(_messages):
+        return ('{"narrowed":{"condition":"fixed width on a static card","action":"use max-width:100%",'
+                '"applies_to":"static cards"},"exception":{"subject":"flex cards",'
+                '"condition":"fixed width in a flex row","action":"use min-width:0","applies_to":"flex layouts"}}')
+
+    def overflow(text):
+        return MemoryRecord(kind=MemoryKind.FAILURE, subject=text[:8], predicate="f", text=text,
+                            scope="repo:app", subj_pred_key=make_key(text, "f", "repo:app")).with_detail(kind="overflow")
+
+    for i, cx in enumerate([overflow("overflow despite max-width in a flex row"),
+                            overflow("another flex-row overflow")], start=1):
+        rev = revise_with_counterexample(mem, mem.get(rule.id), mem.write(cx), chat=split_chat, split_after=2)
+        print(f"  counterexample {i}: {rev.action}  (confidence={rev.confidence:.2f})")
+        if rev.action == "split":
+            print(f"    narrowed:  {rev.narrowed.text!r}  applies_to={rev.narrowed.detail['applies_to']!r}")
+            print(f"    exception: {rev.exception.text!r}  applies_to={rev.exception.detail['applies_to']!r}")
+
 
 if __name__ == "__main__":
     main()

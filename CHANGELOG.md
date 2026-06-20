@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.15.0 — contradiction-driven schema revision (consolidation that can be wrong, and recovers)
+
+Consolidation only ever grew. Now it can contract when reality disagrees.
+- **Revision** (`memory/revise.py`): a new failure in a rule's domain that the rule failed to
+  prevent is a counterexample. `revise_with_counterexample` records it (`annotate`, no
+  corroboration), `contradict`s the rule, and once `split_after` counterexamples accumulate asks
+  the LLM to **split** the over-broad rule into a NARROWED general rule (which supersedes the
+  original via the interference key) plus a specific EXCEPTION rule — both candidate + inferred. If
+  belief collapses below the reject floor, the rule is `rejected`. `contradicts(rule, failure)` is
+  the pure domain-match check. Revision only ever lowers trust or narrows scope; it never
+  auto-verifies.
+- **`MemoryView.annotate`**: a new backend method (LocalMemory + mem0) to update a record's audit
+  detail (e.g. its counterexample list) WITHOUT the corroboration side effect of `write`.
+- 210 offline-CI tests.
+
 ## 0.14.0 — H2 broadened + swept across models (the moat decision no longer rests on one run)
 
 - **Model sweep** (`examples/run_h2_sweep.py`): the H2 corpus-transfer measurement now runs across

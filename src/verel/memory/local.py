@@ -203,6 +203,16 @@ class LocalMemory(MemoryView):
     def demote(self, record_id):
         return self._adjust(record_id, trust=Trust.CANDIDATE)
 
+    def annotate(self, record_id: str, **detail) -> MemoryRecord | None:
+        """Merge `detail` into a record WITHOUT touching trust/confidence/support — audit
+        metadata (e.g. a counterexample list), never a corroboration."""
+        r = self.get(record_id)
+        if r is None:
+            return None
+        r.with_detail(**detail)
+        self._upsert(r)
+        return r
+
     # ---- lifecycle flags (pin / volatile / TTL) ----
     def set_flags(self, record_id: str, *, pinned=None, volatile=None, ttl_s=None):
         """Set lifecycle flags directly (no corroboration side effect)."""

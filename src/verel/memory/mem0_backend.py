@@ -195,6 +195,15 @@ class Mem0Memory(MemoryView):
     def demote(self, record_id):
         return self._adjust(record_id, trust=Trust.CANDIDATE)
 
+    def annotate(self, record_id, **detail):
+        """Merge `detail` into a record WITHOUT touching trust/confidence/support."""
+        r = self.get(record_id)
+        if r is None:
+            return None
+        r.with_detail(**detail)
+        self._persist(r, self._mem0_id_for(record_id))
+        return r
+
     def set_flags(self, record_id, *, pinned=None, volatile=None, ttl_s=None):
         r = self.get(record_id)
         if r is None:
