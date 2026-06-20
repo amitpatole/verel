@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.14.0 — H2 broadened + swept across models (the moat decision no longer rests on one run)
+
+- **Model sweep** (`examples/run_h2_sweep.py`): the H2 corpus-transfer measurement now runs across
+  multiple (provider, model) configs on a **broadened corpus** (8 universal + 4 tenant-specific
+  skills × 4 tenants) and tabulates the transfer rate per model. Measured live:
+  - Ollama `qwen3-coder:480b` — 12/12 built, **32/36 = 89% → BUILD**
+  - OpenAI `gpt-4o-mini` — 11/12 built, **29/33 = 88% → BUILD**
+  Per-skill rates are identical across the two models (universal 100%; tenant-specific only where
+  the tenant's rule matches), so the BUILD decision holds across models, not just one run.
+  `docs/H2_RESULTS.md` now records the cross-model comparison.
+- No library code change — a measurement/experiment release.
+
 ## 0.13.0 — fleet: git fencing sink (durable) + cross-repo atomic sagas
 
 Completes the distributed-safety story the fencing leases started.
