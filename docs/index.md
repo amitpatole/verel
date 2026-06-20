@@ -45,8 +45,7 @@ into memory; then the eyes look again.
 ## Next
 
 - **[Get started](getting-started.md)** — install, the gate, CI/agents adoption.
-- **[Architecture](ARCHITECTURE.md)** · **[Design deep-dive](VEREL_DESIGN.md)** ·
-  **[Critic convergence](CRITIC_CONVERGENCE.md)**
+- **[Architecture](ARCHITECTURE.md)** — the five organs and the eval-driven loop.
 
 Install: `pip install verel` · Source: [GitHub](https://github.com/amitpatole/verel) ·
 Package: [PyPI](https://pypi.org/project/verel/) · License: MIT.
