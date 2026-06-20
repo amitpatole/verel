@@ -58,6 +58,7 @@ plugins:
 nav:
   - Home: index.md
   - Get started: getting-started.md
+  - 5-minute tutorial: tutorial.md
   - Guides:
       - Developer guide: usage.md
       - Architecture: ARCHITECTURE.md
