@@ -8,7 +8,9 @@ from verel.memory import (
     MemoryRecord,
     Trust,
     cluster_records,
+    consolidate_across_scopes,
     consolidate_failures,
+    induce_hierarchy,
     induce_schemas,
 )
 from verel.memory.view import apply_decay, effective_half_life, make_key
@@ -16,7 +18,14 @@ from verel.memory.view import apply_decay, effective_half_life, make_key
 
 def _fail(text, kind, scope="repo:x"):
     return MemoryRecord(kind=MemoryKind.FAILURE, subject=text[:12], predicate="f", text=text,
-                        scope=scope, subj_pred_key=make_key(text[:12], "f", scope)).with_detail(kind=kind)
+                        scope=scope, subj_pred_key=make_key(text[:12] + scope, "f", scope)).with_detail(kind=kind)
+
+
+def _rule(subj, text, covers_kind, scope="repo:x"):
+    return MemoryRecord(kind=MemoryKind.DESIGN_RULE, subject=subj, predicate="design_rule",
+                        text=text, scope=scope, trust=Trust.CANDIDATE,
+                        subj_pred_key=make_key(subj, "design_rule", scope)).with_detail(
+        covers_kind=covers_kind, grounding="inferred")
 
 
 # ---- adaptive decay tuning ----
@@ -90,14 +99,12 @@ def test_consolidate_accepts_legacy_flat_rule_format():
     assert len(rules) == 1 and rules[0].detail["action"] == "use max-width:100%"
 
 
-# ---- 2nd-order schema induction ----
+# ---- 2nd-order schema induction (rules cluster by their covered family) ----
 def test_induce_schema_subsumes_rules_and_is_candidate():
     mem = LocalMemory()
-    for t, k in [("card overflows viewport", "overflow"), ("panel overflow narrow", "overflow"),
-                 ("low contrast cta", "contrast"), ("button text contrast poor", "contrast")]:
-        mem.write(_fail(t, k))
-    consolidate_failures(mem, scope="repo:x", min_cluster=2, chat=_stub_rule)
-    schema_chat = lambda _m: '{"subject":"perceivable UI","principle":"keep elements legible and in-bounds"}'  # noqa: E731
+    mem.write(_rule("cards", "use max-width", "layout"))      # same family -> one cluster
+    mem.write(_rule("grid", "avoid fixed px", "layout"))
+    schema_chat = lambda _m: '{"subject":"responsive layout","principle":"keep elements in-bounds"}'  # noqa: E731
     schemas = induce_schemas(mem, scope="repo:x", min_rules=2, chat=schema_chat)
     assert len(schemas) == 1
     s = schemas[0]
@@ -108,12 +115,11 @@ def test_induce_schema_subsumes_rules_and_is_candidate():
 
 def test_schema_induction_does_not_reconsolidate_schemas():
     mem = LocalMemory()
-    for t, k in [("a", "overflow"), ("b", "overflow"), ("c", "contrast"), ("d", "contrast")]:
-        mem.write(_fail(t, k))
-    consolidate_failures(mem, scope="repo:x", min_cluster=2, chat=_stub_rule)
-    schema_chat = lambda _m: '{"subject":"UI","principle":"be perceivable"}'  # noqa: E731
+    mem.write(_rule("cards", "use max-width", "layout"))
+    mem.write(_rule("grid", "avoid fixed px", "layout"))
+    schema_chat = lambda _m: '{"subject":"layout","principle":"be responsive"}'  # noqa: E731
     induce_schemas(mem, scope="repo:x", min_rules=2, chat=schema_chat)
-    # a second pass sees the SCHEMA but excludes it (only DESIGN_RULEs feed induction)
+    # a second pass sees the SCHEMA but excludes it (only DESIGN_RULEs feed the first hop)
     again = induce_schemas(mem, scope="repo:x", min_rules=2, chat=schema_chat)
     assert len(again) == 1  # still only the 2 rules cluster; the schema itself is not re-fed
 
@@ -127,3 +133,65 @@ def test_semantic_consolidation_with_real_embedder_runs():
         mem.write(_fail(t, k))
     rules = consolidate_failures(mem, scope="repo:x", min_cluster=2, chat=_stub_rule, semantic=True)
     assert all(r.trust == Trust.CANDIDATE for r in rules)
+
+
+# ---- multi-hop schema hierarchy ----
+def _counting_schema_chat():
+    n = {"i": 0}
+
+    def chat(_messages):
+        n["i"] += 1
+        return f'{{"subject":"principle{n["i"]}","principle":"general principle {n["i"]}"}}'
+    return chat
+
+
+def test_induce_hierarchy_builds_multiple_levels():
+    mem = LocalMemory()
+    for s, t, k in [("cards", "use max-width", "layout"), ("grid", "avoid fixed px", "layout"),
+                    ("cta", "4.5:1 contrast", "color"), ("text", "darken on light", "color")]:
+        mem.write(_rule(s, t, k))
+    levels = induce_hierarchy(mem, scope="repo:x", min_size=2, max_order=4, chat=_counting_schema_chat())
+    # two rule-families -> two order-2 schemas -> one order-3 meta-schema; then it stops
+    assert {o: len(v) for o, v in levels.items()} == {2: 2, 3: 1}
+    assert all(s.detail["order"] == 2 for s in levels[2])
+    assert levels[3][0].detail["order"] == 3 and len(levels[3][0].detail["subsumes"]) == 2
+
+
+def test_hierarchy_nodes_are_all_candidate():
+    mem = LocalMemory()
+    for s, t, k in [("a", "x", "layout"), ("b", "y", "layout"), ("c", "z", "color"), ("d", "w", "color")]:
+        mem.write(_rule(s, t, k))
+    levels = induce_hierarchy(mem, scope="repo:x", min_size=2, chat=_counting_schema_chat())
+    assert all(s.trust == Trust.CANDIDATE for v in levels.values() for s in v)  # height ≠ trust
+
+
+def test_hierarchy_stops_when_corpus_too_thin():
+    mem = LocalMemory()
+    mem.write(_rule("a", "x", "layout"))  # a single rule supports no schema at all
+    assert induce_hierarchy(mem, scope="repo:x", min_size=2, chat=_counting_schema_chat()) == {}
+
+
+# ---- cross-scope consolidation ----
+def _rule_chat(_m):
+    return ('{"subject":"layout","condition":"fixed width","action":"use max-width",'
+            '"applies_to":"all repos"}')
+
+
+def test_consolidate_across_scopes_generalizes_a_cross_repo_pattern():
+    mem = LocalMemory()
+    mem.write(_fail("card overflow", "overflow", "repo:A"))
+    mem.write(_fail("panel overflow", "overflow", "repo:B"))  # same kind, different repo
+    rules = consolidate_across_scopes(mem, ["repo:A", "repo:B"], target_scope="global",
+                                      min_scopes=2, min_cluster=2, chat=_rule_chat)
+    assert len(rules) == 1
+    r = rules[0]
+    assert r.scope == "global" and r.detail["cross_scope"] is True
+    assert r.detail["spans"] == ["repo:A", "repo:B"]
+
+
+def test_cross_scope_ignores_a_single_repo_quirk():
+    mem = LocalMemory()
+    mem.write(_fail("card overflow", "overflow", "repo:A"))
+    mem.write(_fail("panel overflow", "overflow2", "repo:A"))  # both in ONE repo (and diff kinds)
+    rules = consolidate_across_scopes(mem, ["repo:A", "repo:B"], min_scopes=2, min_cluster=2, chat=_rule_chat)
+    assert rules == []  # spans only one scope -> not generalized

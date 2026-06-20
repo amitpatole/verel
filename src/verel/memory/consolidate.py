@@ -89,7 +89,11 @@ def cluster_records(records: list[MemoryRecord], *, vector_of: VectorOf | None =
     into finer sub-patterns but two kinds never collapse together. Order-stable."""
     buckets: dict[str, list[MemoryRecord]] = defaultdict(list)
     for r in records:
-        buckets[str(r.detail.get("kind", r.kind.value))].append(r)
+        # a record's natural category: a failure's `kind`, a design rule's `covers_kind`, else
+        # the MemoryKind. This lets rules cluster by the failure family they cover, which is what
+        # lets a higher level of schema induction find more than one cluster.
+        cat = r.detail.get("kind") or r.detail.get("covers_kind") or r.kind.value
+        buckets[str(cat)].append(r)
     if vector_of is None:
         return list(buckets.values())
     out: list[list[MemoryRecord]] = []
@@ -174,8 +178,53 @@ def consolidate_failures(
 
 
 # ---------------------------------------------------------------------------
-# Layer 3: DesignRules -> SCHEMA (2nd-order induction).
+# Layer 3: DesignRules -> SCHEMA, and SCHEMA -> SCHEMA (multi-hop hierarchy).
 # ---------------------------------------------------------------------------
+def _sources_at(mem: MemoryView, scope: str, source_order: int) -> list[MemoryRecord]:
+    """The records a schema of order `source_order + 1` is induced from: design rules for the
+    first hop (source_order 1), else schemas of exactly `source_order`."""
+    if source_order <= 1:
+        return [r for r in mem.all(scope=scope, kind=MemoryKind.DESIGN_RULE)
+                if r.detail.get("grounding") != "schema"]
+    return [r for r in mem.all(scope=scope, kind=MemoryKind.SCHEMA)
+            if int(r.detail.get("order", 2)) == source_order]
+
+
+def _induce_level(mem: MemoryView, scope: str, *, source_order: int, min_size: int,
+                  chat: ChatFn, semantic: bool, threshold: float, ts: float) -> list[MemoryRecord]:
+    """Induce one schema level: cluster the order-`source_order` records and synthesize an
+    order-`source_order+1` SCHEMA per cluster of size >= `min_size`."""
+    sources = _sources_at(mem, scope, source_order)
+    vof = _vector_of(mem) if semantic else None
+    clusters = cluster_records(sources, vector_of=vof, threshold=threshold)
+    target_order = source_order + 1
+
+    written: list[MemoryRecord] = []
+    for group in clusters:
+        if len(group) < min_size:
+            continue
+        listing = "\n".join(f"- {r.subject}: {r.text}" for r in group[:10])
+        parsed = _parse_schema(chat([
+            {"role": "system", "content": _SCHEMA_SYSTEM},
+            {"role": "user", "content": f"Related {'rules' if source_order <= 1 else 'principles'}:"
+                                        f"\n{listing}"},
+        ]))
+        if parsed is None:
+            continue
+        schema = MemoryRecord(
+            kind=MemoryKind.SCHEMA, subject=parsed["subject"], predicate="schema",
+            text=parsed["principle"], scope=scope, source="consolidation",
+            provenance=[r.id for r in group], trust=Trust.CANDIDATE,
+            epistemic_confidence=0.5, support_count=len(group),
+        ).with_detail(
+            grounding="schema", order=target_order,
+            keywords=_keywords(parsed["subject"], parsed["principle"]),
+            subsumes=[r.id for r in group], cluster_size=len(group),
+        )
+        written.append(mem.write(schema, ts=ts))
+    return written
+
+
 def induce_schemas(
     mem: MemoryView,
     *,
@@ -186,46 +235,92 @@ def induce_schemas(
     cluster_threshold: float = 0.55,
     ts: float = 0.0,
 ) -> list[MemoryRecord]:
-    """Cluster existing DesignRules and induce a higher-level SCHEMA (principle) per cluster of
-    size >= `min_rules`. Schemas are candidate + inferred — they earn trust the same way.
-    `semantic=True` splits the rules into themes (needs a real embedder); the default treats all
-    of a scope's rules as one cluster and induces one overarching principle."""
+    """Cluster DesignRules and induce one level of order-2 SCHEMAs (principles). Candidate +
+    inferred — they earn trust the same way. `semantic=True` splits rules into themes."""
+    return _induce_level(mem, scope, source_order=1, min_size=min_rules,
+                         chat=chat or _default_chat, semantic=semantic,
+                         threshold=cluster_threshold, ts=ts)
+
+
+def induce_hierarchy(
+    mem: MemoryView,
+    *,
+    scope: str = "repo:default",
+    min_size: int = 2,
+    max_order: int = 4,
+    chat: ChatFn | None = None,
+    semantic: bool = False,
+    cluster_threshold: float = 0.55,
+    ts: float = 0.0,
+) -> dict[int, list[MemoryRecord]]:
+    """Build a multi-hop schema hierarchy: rules → order-2 schemas → order-3 … until a level
+    yields nothing new or `max_order` is reached. Returns {order: [schemas induced at that order]}.
+    Each level consolidates the level below it, so the top is the most general principle the
+    corpus supports. Every node stays `candidate` — height never confers trust."""
     chat = chat or _default_chat
-    rules = [r for r in mem.all(scope=scope, kind=MemoryKind.DESIGN_RULE)
-             if r.detail.get("grounding") != "schema"]  # never re-consolidate a schema
-    vof = _vector_of(mem) if semantic else None
-    clusters = cluster_records(rules, vector_of=vof, threshold=cluster_threshold)
+    levels: dict[int, list[MemoryRecord]] = {}
+    for order in range(2, max_order + 1):
+        induced = _induce_level(mem, scope, source_order=order - 1, min_size=min_size,
+                                chat=chat, semantic=semantic, threshold=cluster_threshold, ts=ts)
+        if not induced:
+            break  # the corpus doesn't support a higher level
+        levels[order] = induced
+    return levels
+
+
+# ---------------------------------------------------------------------------
+# Cross-scope consolidation — a pattern that recurs across repos becomes a global rule.
+# ---------------------------------------------------------------------------
+def consolidate_across_scopes(
+    mem: MemoryView,
+    scopes: list[str],
+    *,
+    target_scope: str = "global",
+    min_scopes: int = 2,
+    min_cluster: int = 2,
+    chat: ChatFn | None = None,
+    semantic: bool = False,
+    cluster_threshold: float = 0.6,
+    ts: float = 0.0,
+) -> list[MemoryRecord]:
+    """Gather FAILUREs across several `scopes`, cluster them, and induce a DesignRule in
+    `target_scope` ONLY for clusters whose evidence spans >= `min_scopes` distinct scopes — a
+    cross-cutting pattern (e.g. the same overflow bug in three repos), not a repo-local quirk. The
+    rule records which scopes it generalizes (`detail['spans']`)."""
+    chat = chat or _default_chat
+    failures = [r for s in scopes for r in mem.all(scope=s, kind=MemoryKind.FAILURE)]
+    clusters = cluster_records(failures, vector_of=_vector_of(mem) if semantic else None,
+                               threshold=cluster_threshold)
 
     written: list[MemoryRecord] = []
     for group in clusters:
-        if len(group) < min_rules:
-            continue
-        listing = "\n".join(f"- {r.subject}: {r.text}" for r in group[:10])
-        parsed = _parse_schema(chat([
-            {"role": "system", "content": _SCHEMA_SYSTEM},
-            {"role": "user", "content": f"Related design rules:\n{listing}"},
+        spans = sorted({r.scope for r in group})
+        if len(group) < min_cluster or len(spans) < min_scopes:
+            continue  # not cross-cutting enough to generalize
+        covers_kind = Counter(r.detail.get("kind", "other") for r in group).most_common(1)[0][0]
+        examples = "\n".join(f"- ({r.scope}) {r.text}" for r in group[:8])
+        parsed = _parse_rule(chat([
+            {"role": "system", "content": _RULE_SYSTEM},
+            {"role": "user", "content": f"Failure kind: {covers_kind} (seen across "
+                                        f"{len(spans)} repos)\nExamples:\n{examples}"},
         ]))
         if parsed is None:
             continue
-        schema = MemoryRecord(
-            kind=MemoryKind.SCHEMA,
-            subject=parsed["subject"],
-            predicate="schema",
-            text=parsed["principle"],
-            scope=scope,
-            source="consolidation",
-            provenance=[r.id for r in group],
-            trust=Trust.CANDIDATE,
-            epistemic_confidence=0.5,
-            support_count=len(group),
+        text = (f"{parsed['condition']} → {parsed['action']}"
+                if parsed["condition"] else parsed["action"])
+        rule = MemoryRecord(
+            kind=MemoryKind.DESIGN_RULE, subject=parsed["subject"], predicate="design_rule",
+            text=text, scope=target_scope, source="consolidation",
+            provenance=[r.id for r in group], trust=Trust.CANDIDATE,
+            epistemic_confidence=0.5, support_count=len(group),
         ).with_detail(
-            grounding="schema",  # 2nd-order; guards against re-consolidating schemas
-            order=2,
-            keywords=_keywords(parsed["subject"], parsed["principle"]),
-            subsumes=[r.id for r in group],
-            cluster_size=len(group),
+            grounding="inferred", covers_kind=covers_kind,
+            keywords=_keywords(parsed["condition"], parsed["action"]),
+            condition=parsed["condition"], action=parsed["action"], applies_to=parsed["applies_to"],
+            from_kind=covers_kind, cluster_size=len(group),
+            spans=spans, cross_scope=True,  # generalizes across these scopes
         )
-        written.append(mem.write(schema, ts=ts))
+        written.append(mem.write(rule, ts=ts))
     return written
 
 

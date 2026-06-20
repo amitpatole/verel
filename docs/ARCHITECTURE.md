@@ -71,8 +71,11 @@ On top of that:
   rather than silently duplicating.
 - **Consolidation** — an offline pass clusters recurring failures (by kind, or by **meaning** with
   an embedder) and induces a candidate **structured** `DesignRule` (`condition → action`,
-  `applies_to`). A second pass clusters the rules themselves into a 2nd-order **`SCHEMA`** — a
-  principle that subsumes a family of rules. All start `inferred`; none auto-verify.
+  `applies_to`). `induce_hierarchy` then climbs a **multi-hop `SCHEMA` ladder** — rules → order-2
+  principles → order-3 meta-principles — until the corpus stops supporting a higher level, so the
+  top is the most general principle the evidence backs. `consolidate_across_scopes` lifts a pattern
+  that recurs across **several repos** into a `global` rule (and refuses a single-repo quirk). All
+  start `inferred`; height and breadth never confer trust.
 - **Promotion gate** — a candidate reaches `verified` **only** by passing a held-out,
   agent-inaccessible eval (with a leakage canary). Trust is earned, never asserted.
 - **Failure ledger + regression guard** — past gating failures are remembered; reintroducing
@@ -173,7 +176,8 @@ its own verdict bus in CI.
 
 **Next:**
 - Broaden senses further — Rust/Java toolchains; richer perf harnesses; more SAST backends.
-- Deepen consolidation further — multi-hop schema hierarchies; consolidation across scopes.
+- Consolidation: contradiction-driven schema revision (a schema that a new failure violates is
+  demoted/split, not just grown).
 - Distributed hardening — a server-side git fencing sink (reject pushes carrying a stale token);
   cross-repo atomic sagas (compensating rollback when one repo in a multi-repo change fails).
 - A hosted skill registry — a first live H2 run measured 81% cross-tenant transfer (BUILD; see
