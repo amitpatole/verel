@@ -31,10 +31,10 @@ LINES = [
 
 CSS = """
 *{margin:0;padding:0;box-sizing:border-box}
-body{width:%dpx;height:%dpx;background:#0b0b12;font-family:ui-monospace,'SF Mono',Menlo,monospace}
-.win{height:100%%;display:flex;flex-direction:column}
+body{width:__W__px;height:__H__px;background:#0b0b12;font-family:ui-monospace,'SF Mono',Menlo,monospace}
+.win{height:100%;display:flex;flex-direction:column}
 .bar{height:34px;background:#15151f;display:flex;align-items:center;padding:0 14px;gap:8px;border-bottom:1px solid #23233a}
-.dot{width:12px;height:12px;border-radius:50%%}
+.dot{width:12px;height:12px;border-radius:50%}
 .r{background:#ff5f57}.y{background:#febc2e}.g{background:#28c840}
 .title{margin-left:10px;color:#6b6b85;font-size:13px;letter-spacing:.3px}
 .body{flex:1;padding:18px 20px;font-size:15.5px;line-height:1.6;color:#d6d4ee;white-space:pre-wrap}
@@ -42,7 +42,7 @@ body{width:%dpx;height:%dpx;background:#0b0b12;font-family:ui-monospace,'SF Mono
 .dim{color:#7b87a8}.red{color:#ff6b6b;font-weight:700}.grn{color:#46d39a;font-weight:700}
 .ok{color:#46d39a;font-weight:800}
 .cur{display:inline-block;width:9px;height:18px;background:#8b7cff;vertical-align:-3px;margin-left:2px}
-""" % (W, H)
+""".replace("__W__", str(W)).replace("__H__", str(H))
 
 
 def _html(body_lines: list[str], cursor: bool) -> str:
