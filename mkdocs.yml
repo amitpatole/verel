@@ -43,8 +43,12 @@ nav:
   - Home: index.md
   - Get started: getting-started.md
   - Architecture: ARCHITECTURE.md
-  - Design (deep dive): VEREL_DESIGN.md
-  - Critic convergence: CRITIC_CONVERGENCE.md
+
+# Keep internal design + critic-round notes OUT of the public site (defense-in-depth even if
+# a file lingers in docs/): they are not part of the public documentation.
+exclude_docs: |
+  VEREL_DESIGN.md
+  CRITIC_CONVERGENCE.md
 
 extra:
   social:
