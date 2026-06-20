@@ -185,8 +185,9 @@ python examples/demo_hosted_registry.py  # publish a skill over HTTP; another te
 
 📖 **Full docs site: [amitpatole.github.io/verel](https://amitpatole.github.io/verel/)**
 
-- [Get started](docs/getting-started.md) · [Architecture & roadmap](docs/ARCHITECTURE.md) ·
-  [Module guide](src/verel/README.md) · [Changelog](CHANGELOG.md)
+- [Get started](docs/getting-started.md) · [**Developer guide**](docs/usage.md) ·
+  [Architecture & roadmap](docs/ARCHITECTURE.md) · [Module guide](src/verel/README.md) ·
+  [Changelog](CHANGELOG.md)
 
 ## License
 
