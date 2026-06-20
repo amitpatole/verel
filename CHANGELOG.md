@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.11.0 — H2 measured for real + a tool-smith reuse-safety fix it exposed
+
+Ran the §8.7 corpus-transfer experiment on a **live-built** corpus to resolve the moat bet with
+data instead of assumption.
+- **Real H2 run** (`examples/run_h2.py`, Ollama `qwen3-coder:480b` → OpenAI fallback): the
+  tool-smith builds a mixed corpus — universal skills (slugify, is_palindrome, word_count,
+  initials) + tenant-specific ones (tax_total@8%, price_label, order_code) — then each verified
+  skill is re-verified against 4 tenants' own held-out cases. Measured **17/21 = 81% transfer →
+  BUILD** (well above the 20% kill-line): universal skills transfer 100%, tenant-specific ones
+  only where the rule matches (tax_total 33%, the EUR/10% tenant rejects the USD/8% skills).
+  Result recorded in `docs/H2_RESULTS.md`. One corpus, one model — honest, not the last word.
+- **Tool-smith reuse must re-verify** (correctness fix the run exposed): `ToolSmith.build` reused
+  a semantic capability match **without** re-running it against the new spec's held-out cases, so
+  a close-but-different tool could be returned as "verified" (it collapsed two skills in the first
+  H2 run). Reuse now re-evaluates the candidate against the new cases and only short-circuits on a
+  pass; otherwise it rebuilds. +1 regression test.
+- 193 offline-CI tests.
+
 ## 0.10.0 — distributed fleet: fencing leases for concurrent managers + multi-repo DAGs
 
 The scheduler was single-writer by design (so split-brain couldn't happen). This lifts that limit
