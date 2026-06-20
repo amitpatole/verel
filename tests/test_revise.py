@@ -84,3 +84,61 @@ def test_unparseable_split_falls_back_to_weakened():
     revise_with_counterexample(mem, mem.get(r.id), _fail("o1", "overflow"), chat=lambda _m: "junk", split_after=2)
     rev = revise_with_counterexample(mem, mem.get(r.id), _fail("o2", "overflow"), chat=lambda _m: "still junk", split_after=2)
     assert rev.action == "weakened" and rev.narrowed is None  # no split written on bad LLM output
+
+
+# ---- schema-split propagation up the hierarchy ----
+def _schema(subj, text, order, subsumes, scope="repo:x"):
+    return MemoryRecord(kind=MemoryKind.SCHEMA, subject=subj, predicate="schema", text=text,
+                        scope=scope, trust=Trust.CANDIDATE, epistemic_confidence=0.6,
+                        subj_pred_key=make_key(subj, "schema", scope)).with_detail(
+        grounding="schema", order=order, subsumes=subsumes)
+
+
+def _both_chat(messages):
+    if "NARROWED" in messages[0]["content"]:
+        return SPLIT
+    u = messages[1]["content"]
+    return ('{"subject":"x","principle":"REVISED meta-principle"}' if "layout-principle" in u
+            else '{"subject":"x","principle":"REVISED principle"}')
+
+
+def test_split_propagates_and_rederives_subsuming_schemas():
+    mem = LocalMemory()
+    r = mem.write(_rule(ec=0.7))
+    s2 = mem.write(_schema("layout-principle", "all cards fit any viewport", 2, [r.id]))
+    s3 = mem.write(_schema("ui-meta", "the ui is perceivable", 3, [s2.id]))
+    revise_with_counterexample(mem, mem.get(r.id), _fail("o1", "overflow"), chat=_both_chat, split_after=2)
+    rev = revise_with_counterexample(mem, mem.get(r.id), _fail("o2", "overflow"), chat=_both_chat, split_after=2)
+    assert rev.action == "split" and len(rev.propagated) == 2  # both levels re-derived
+    # order-2 schema re-derived from the NARROWED rule, reset to candidate, flagged
+    g2 = mem.get(s2.id)
+    assert g2.text == "REVISED principle" and g2.detail["revised"] and g2.detail["revised_due_to"] == r.id
+    assert g2.epistemic_confidence == 0.5 and g2.trust == Trust.CANDIDATE
+    # order-3 meta-schema re-derived too (propagation climbed the hierarchy)
+    assert mem.get(s3.id).text == "REVISED meta-principle" and mem.get(s3.id).detail["revised"]
+
+
+def test_propagation_is_a_noop_without_subsuming_schemas():
+    from verel.memory import propagate_revision
+    mem = LocalMemory()
+    r = mem.write(_rule())
+    assert propagate_revision(mem, r.id, chat=_both_chat) == []
+
+
+def test_propagation_contradicts_a_schema_it_cannot_rederive():
+    from verel.memory import propagate_revision
+    mem = LocalMemory()
+    r = mem.write(_rule())
+    s2 = mem.write(_schema("p", "principle", 2, [r.id]))
+    before = mem.get(s2.id).epistemic_confidence
+    propagate_revision(mem, r.id, chat=lambda _m: "garbage")  # can't re-derive
+    assert mem.get(s2.id).epistemic_confidence < before  # weakened instead of left over-claiming
+
+
+def test_propagation_leaves_unrelated_schemas_untouched():
+    from verel.memory import propagate_revision
+    mem = LocalMemory()
+    r = mem.write(_rule())
+    other = mem.write(_schema("unrelated", "something else", 2, ["some-other-id"]))
+    propagate_revision(mem, r.id, chat=_both_chat)
+    assert mem.get(other.id).text == "something else" and not mem.get(other.id).detail.get("revised")
