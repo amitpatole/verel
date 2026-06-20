@@ -6,6 +6,7 @@
 
 <p align="center">
   <a href="https://pypi.org/project/verel/"><img src="https://img.shields.io/pypi/v/verel?color=8b7cff&label=pip%20install%20verel" alt="PyPI"></a>
+  <a href="https://amitpatole.github.io/verel/"><img src="https://img.shields.io/badge/docs-amitpatole.github.io-5ad1e6" alt="Docs"></a>
   <img src="https://img.shields.io/badge/tests-181%20passing-46d39a" alt="tests">
   <img src="https://img.shields.io/badge/ruff%20%2B%20mypy-clean-5ad1e6" alt="lint">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT">
@@ -173,8 +174,10 @@ python examples/demo_consolidation.py    # failures → structured rules → a 2
 
 ## Documentation
 
-- [Architecture & roadmap](docs/ARCHITECTURE.md) · [Module guide](src/verel/README.md) ·
-  [Changelog](CHANGELOG.md)
+📖 **Full docs site: [amitpatole.github.io/verel](https://amitpatole.github.io/verel/)**
+
+- [Get started](docs/getting-started.md) · [Architecture & roadmap](docs/ARCHITECTURE.md) ·
+  [Module guide](src/verel/README.md) · [Changelog](CHANGELOG.md)
 
 ## License
 

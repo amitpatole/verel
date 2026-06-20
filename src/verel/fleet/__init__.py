@@ -7,8 +7,17 @@ gates every node through the verdict bus. Worker fencing + git fencing sink are 
 
 from __future__ import annotations
 
+from .lease import (
+    FencingError,
+    InMemoryLeaseStore,
+    Lease,
+    LeaseStore,
+    SqliteLeaseStore,
+    monotonic_now,
+)
 from .llm_manager import decide_fanout
 from .manager import FanOut, Subtask, clamp, plan_over_artifacts, to_tasks, validate_fanout
+from .multirepo import CrossDep, plan_multi_repo, repo_of
 from .scheduler import DagError, Scheduler, WorkerFn, WorkerResult
 from .task import (
     ROLE_DEFAULTS,
@@ -39,6 +48,15 @@ __all__ = [
     "Scheduler",
     "WorkerFn",
     "WorkerResult",
+    "Lease",
+    "LeaseStore",
+    "InMemoryLeaseStore",
+    "SqliteLeaseStore",
+    "FencingError",
+    "monotonic_now",
+    "CrossDep",
+    "plan_multi_repo",
+    "repo_of",
     "Barrier",
     "BarrierKind",
     "BudgetLease",
