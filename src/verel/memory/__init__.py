@@ -25,7 +25,7 @@ from .promotion import (
     PromotionResult,
     evaluate_rule,
 )
-from .revise import Revision, contradicts, revise_with_counterexample
+from .revise import Revision, contradicts, propagate_revision, revise_with_counterexample
 from .view import (
     MemoryKind,
     MemoryRecord,
@@ -48,6 +48,7 @@ __all__ = [
     "consolidate_across_scopes",
     "cluster_records",
     "revise_with_counterexample",
+    "propagate_revision",
     "contradicts",
     "Revision",
     "FailureLedger",

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ..agents import llm
 from .view import MemoryKind, MemoryRecord, MemoryView, Trust, make_key
@@ -34,6 +34,11 @@ _REVISE_SYSTEM = (
     '{"narrowed": {"condition": "..", "action": "..", "applies_to": ".."}, '
     '"exception": {"subject": "..", "condition": "..", "action": "..", "applies_to": ".."}}. '
     "No prose."
+)
+_REINDUCE_SYSTEM = (
+    "Some of the rules under this principle were just revised (narrowed). Re-state the single "
+    "higher-level principle these CURRENT rules support — it must not over-claim beyond them. "
+    'Respond as strict JSON: {"subject": "..", "principle": "<one imperative sentence>"}. No prose.'
 )
 
 
@@ -49,6 +54,7 @@ class Revision:
     trust: str
     narrowed: MemoryRecord | None = None
     exception: MemoryRecord | None = None
+    propagated: list[MemoryRecord] = field(default_factory=list)  # schemas re-derived above the split
 
 
 def contradicts(rule: MemoryRecord, failure: MemoryRecord) -> bool:
@@ -95,10 +101,64 @@ def revise_with_counterexample(
         if parsed is not None:
             narrowed = _write_narrowed(mem, rule, parsed["narrowed"], counterexample, ts)
             exception = _write_exception(mem, rule, parsed["exception"], counterexample, ts)
-            return Revision("split", rule.id, narrowed.epistemic_confidence,
-                            narrowed.trust.value, narrowed=narrowed, exception=exception)
+            # the rule's claim changed, so any SCHEMA that subsumed it must be re-derived or it
+            # keeps over-claiming above the split. narrowed.id == rule.id (it superseded).
+            propagated = propagate_revision(mem, narrowed.id, chat=chat, ts=ts)
+            return Revision("split", rule.id, narrowed.epistemic_confidence, narrowed.trust.value,
+                            narrowed=narrowed, exception=exception, propagated=propagated)
 
     return Revision("weakened", rule.id, cur.epistemic_confidence, cur.trust.value)
+
+
+def propagate_revision(mem: MemoryView, rule_id: str, *, chat: ChatFn | None = None,
+                       ts: float = 0.0, _depth: int = 0) -> list[MemoryRecord]:
+    """After a rule (or schema) is revised, re-derive every SCHEMA that subsumed it so the
+    hierarchy above stops over-claiming. Each affected schema is re-induced from its CURRENT member
+    records (the revised ones included), superseding the stale principle; if it can't be re-derived
+    it is `contradict`ed instead. Recurses upward. Returns the re-derived schemas."""
+    chat = chat or _default_chat
+    if _depth > 8:  # cycle / runaway guard
+        return []
+    base = mem.get(rule_id)
+    scope = base.scope if base is not None else None
+    affected = [s for s in mem.all(scope=scope, kind=MemoryKind.SCHEMA)
+                if rule_id in s.detail.get("subsumes", []) and s.id != rule_id]
+
+    out: list[MemoryRecord] = []
+    for s in affected:
+        members = [m for m in (mem.get(mid) for mid in s.detail.get("subsumes", [])) if m is not None]
+        parsed = _parse_schema(chat([
+            {"role": "system", "content": _REINDUCE_SYSTEM},
+            {"role": "user", "content": "Member rules (some were just revised):\n"
+                                        + "\n".join(f"- {m.subject}: {m.text}" for m in members[:10])},
+        ])) if members else None
+        if parsed is None:
+            mem.contradict(s.id)  # can't re-derive -> at least stop trusting the stale principle
+            continue
+        # keep the schema's identity (subject/key) so it SUPERSEDES; re-derive only the principle.
+        revised = mem.write(MemoryRecord(
+            kind=MemoryKind.SCHEMA, subject=s.subject, predicate="schema", text=parsed["principle"],
+            scope=s.scope, source="revision", provenance=[*s.provenance, f"revised_due_to:{rule_id}"],
+            trust=Trust.CANDIDATE, epistemic_confidence=0.5, subj_pred_key=s.subj_pred_key,
+        ).with_detail(grounding="schema", order=int(s.detail.get("order", 2)),
+                      subsumes=s.detail.get("subsumes", []), revised=True, revised_due_to=rule_id), ts=ts)
+        out.append(revised)
+        out += propagate_revision(mem, s.id, chat=chat, ts=ts, _depth=_depth + 1)  # climb the hierarchy
+    return out
+
+
+def _parse_schema(reply: str) -> dict | None:
+    reply = reply.strip()
+    start, end = reply.find("{"), reply.rfind("}")
+    if start == -1 or end == -1:
+        return None
+    try:
+        obj = json.loads(reply[start:end + 1])
+    except json.JSONDecodeError:
+        return None
+    if isinstance(obj, dict) and "principle" in obj:
+        return {"subject": str(obj.get("subject", "")), "principle": str(obj["principle"])}
+    return None
 
 
 # ---------------------------------------------------------------------------

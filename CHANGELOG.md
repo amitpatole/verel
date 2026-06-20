@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.18.0 — schema-split propagation (close the one real consistency hole revision left)
+
+0.15.0's revision could split a leaf rule but left the schemas above it derived from the old,
+broader rule — a corrected leaf under an over-claiming principle.
+- **`propagate_revision`**: after a split, every `SCHEMA` whose `subsumes` includes the revised
+  rule is re-derived from its CURRENT members (the narrowed rule among them), superseding the stale
+  principle and resetting to `candidate` so it must re-earn trust. It then recurses **up** the
+  hierarchy (order-2 → order-3 → …), with a depth guard. A schema that can't be re-derived is
+  `contradict`ed rather than left over-claiming; unrelated schemas are untouched.
+- Wired into `revise_with_counterexample`: a split now returns the re-derived schemas
+  (`Revision.propagated`). Verified live: splitting a rule re-derived both its order-2 principle
+  and the order-3 meta-principle above it.
+- 220 offline-CI tests.
+
 ## 0.17.0 — the hosted skill registry (the H2 sweep justified it; trust still doesn't travel)
 
 The two-model H2 sweep measured ~88–89% cross-tenant transfer → BUILD, so the public registry is

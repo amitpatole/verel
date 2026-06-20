@@ -80,8 +80,11 @@ On top of that:
   *wrong*. A new failure in a rule's domain that the rule failed to prevent is a counterexample:
   it's recorded (via `annotate`, no corroboration), the rule is `contradict`ed, and once enough
   counterexamples accumulate the rule is **split** into a narrowed general rule (which supersedes
-  the original) plus a specific exception rule — or, if belief collapses, `rejected`. Revision only
-  ever lowers trust or narrows scope.
+  the original) plus a specific exception rule — or, if belief collapses, `rejected`. A split then
+  **propagates up** (`propagate_revision`): every `SCHEMA` that subsumed the rule is re-derived
+  from its now-revised members and reset to `candidate`, climbing the hierarchy, so a corrected
+  leaf never leaves an over-claiming principle above it. Revision only ever lowers trust or narrows
+  scope.
 - **Promotion gate** — a candidate reaches `verified` **only** by passing a held-out,
   agent-inaccessible eval (with a leakage canary). Trust is earned, never asserted.
 - **Failure ledger + regression guard** — past gating failures are remembered; reintroducing
@@ -196,8 +199,8 @@ its own verdict bus in CI.
 
 **Next:**
 - Broaden senses further — Rust/Java toolchains; richer perf harnesses; more SAST backends.
-- Consolidation: propagate a split up the schema hierarchy (revise the principles a narrowed rule
-  fed, not just the rule itself).
+- Consolidation: re-promote a revised schema automatically once its narrowed members re-verify
+  (today a propagated schema returns to `candidate` and must earn `verified` again by hand).
 - Distributed hardening — replicate the control-plane store (today a single sqlite host is the
   authority); push-time identity (sign the push token to the fencing sink).
 - Skill-registry curation — reputation/provenance ranking now that the registry is hosted
