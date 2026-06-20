@@ -176,7 +176,8 @@ its own verdict bus in CI.
 - Deepen consolidation further — multi-hop schema hierarchies; consolidation across scopes.
 - Distributed hardening — a server-side git fencing sink (reject pushes carrying a stale token);
   cross-repo atomic sagas (compensating rollback when one repo in a multi-repo change fails).
-- A hosted skill registry, once cross-tenant transfer is shown to be worthwhile.
+- A hosted skill registry — a first live H2 run measured 81% cross-tenant transfer (BUILD; see
+  `docs/H2_RESULTS.md`), so this is now justified pending a broader corpus/model sweep.
 - Seccomp profile portability across architectures (the learned policy is x86-64-derived today).
 
 ---

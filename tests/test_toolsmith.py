@@ -48,6 +48,28 @@ def test_good_tool_is_verified_and_registered_and_reusable():
     assert fn("Hello World") == "hello-world"
 
 
+UPPER_SLUG_CODE = '''
+def slugify(text):
+    import re
+    s = text.upper().strip()
+    s = re.sub(r"[^A-Z0-9]+", "-", s)
+    return s.strip("-")
+'''
+
+
+def test_reuse_is_rejected_when_it_fails_the_new_specs_cases():
+    # a capability/name match can surface a tool that doesn't satisfy THIS spec — reuse must
+    # re-verify against the new held-out cases, not trust the match. (Regression: H2 run.)
+    smith, reg = _smith(f"```python\n{SLUGIFY_CODE}\n```")
+    assert smith.build(_spec()).trust == Trust.VERIFIED  # lowercase slugify registered
+    smith.chat = lambda msgs: f"```python\n{UPPER_SLUG_CODE}\n```"  # rebuild returns upper-case impl
+    upper = ToolSpec(name="slugify", capability="convert a title string into a url slug",
+                     cases=[ToolCase(args=["Hello World"], expected="HELLO-WORLD")])
+    res = smith.build(upper)
+    assert res.trust == Trust.VERIFIED and not res.reused  # did NOT reuse the failing lowercase tool
+    assert res.tool.code.strip() == UPPER_SLUG_CODE.strip()
+
+
 def test_failing_tool_not_registered():
     smith, reg = _smith(f"```python\n{BAD_CODE}\n```")
     res = smith.build(_spec())

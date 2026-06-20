@@ -124,8 +124,13 @@ class ToolSmith:
     # ---- build (detect → scaffold → test → register) ----
     def build(self, spec: ToolSpec, *, human_review: Callable[[ToolRecord], bool] | None = None,
               ts: float = 0.0) -> BuildResult:
+        # Reuse must still VERIFY: a semantic capability match can surface a tool that doesn't
+        # actually satisfy this spec's behaviour, so re-run the candidate against THIS spec's
+        # held-out cases before trusting it. Only a passing reuse short-circuits the build.
         if (reuse := self.detect(spec)) is not None:
-            return BuildResult(reuse, True, True, reuse.eval_score, Trust.VERIFIED, True, "reused")
+            passed, score, detail = self.evaluate(reuse.code, spec)
+            if passed:
+                return BuildResult(reuse, True, True, score, Trust.VERIFIED, True, "reused")
 
         code = self.scaffold(spec)
         passed, score, detail = self.evaluate(code, spec)

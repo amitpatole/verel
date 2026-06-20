@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://pypi.org/project/verel/"><img src="https://img.shields.io/pypi/v/verel?color=8b7cff&label=pip%20install%20verel" alt="PyPI"></a>
   <a href="https://amitpatole.github.io/verel/"><img src="https://img.shields.io/badge/docs-amitpatole.github.io-5ad1e6" alt="Docs"></a>
-  <img src="https://img.shields.io/badge/tests-192%20passing-46d39a" alt="tests">
+  <img src="https://img.shields.io/badge/tests-193%20passing-46d39a" alt="tests">
   <img src="https://img.shields.io/badge/ruff%20%2B%20mypy-clean-5ad1e6" alt="lint">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT">
   <img src="https://img.shields.io/badge/LLM-Ollama%20Cloud%20%C2%B7%20OpenAI-8b7cff" alt="LLM">
@@ -156,6 +156,7 @@ python examples/demo_capability_jail.py  # learn a tool's syscalls → deny ever
 python examples/demo_polyglot_ci.py      # Python/JS/Go + perf + security graders on one bus
 python examples/demo_consolidation.py    # failures → structured rules → a 2nd-order schema
 python examples/demo_distributed_fleet.py # concurrent managers (fencing) + multi-repo DAG
+python examples/run_h2.py                # LIVE: build skills, measure cross-tenant transfer
 ```
 
 ## Honesty (what we do **not** claim)
@@ -168,9 +169,11 @@ python examples/demo_distributed_fleet.py # concurrent managers (fencing) + mult
   — no network, subprocess, or threads), and **capability** — the tightest: a tool may use only
   the syscalls it *exercised while passing its held-out eval* (learned via `strace`), so anything
   it never earned — including a syscall the allow-list would permit — is refused at the kernel.
-- The moat (a public verified-skill registry) is a **bet**, not a given — `verel.registry`
-  ships the **H2 experiment** to *measure* whether skills transfer across tenants before you
-  build it.
+- The moat (a public verified-skill registry) is a **bet** we *measure*, not assume — the **H2
+  experiment** (`verel.registry`) re-verifies live-built skills against other tenants' held-out
+  cases. A first real run (Ollama `qwen3-coder:480b`, 7 skills × 4 tenants) measured **81%
+  transfer → BUILD** ([results](docs/H2_RESULTS.md)): universal skills transfer 100%,
+  tenant-specific ones only where the rule matches. One corpus, one model — re-run before betting.
 - Advisory (vision/LLM) findings are advisory; they inform, they don’t gate destructive acts.
 
 ## Documentation
