@@ -10,8 +10,8 @@ kind of check — vision, tests, lint, types — into one `pass / warn / fail`, 
 </p>
 
 This document describes how the pieces fit together and where the project is going. For the
-exact module layout see the [module guide](../src/verel/README.md); for the release history
-see the [changelog](../CHANGELOG.md).
+exact module layout see the [module guide](https://github.com/amitpatole/verel/blob/main/src/verel/README.md); for the release history
+see the [changelog](https://github.com/amitpatole/verel/blob/main/CHANGELOG.md).
 
 ---
 

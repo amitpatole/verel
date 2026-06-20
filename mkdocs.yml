@@ -1,0 +1,54 @@
+site_name: Verel
+site_description: >-
+  The agent framework where nothing is "done" until a grader returns a verdict — verification,
+  grounded perception (AgentVision eyes), compounding memory, a fleet, and agent-run CI/CD.
+site_url: https://amitpatole.github.io/verel/
+repo_url: https://github.com/amitpatole/verel
+repo_name: amitpatole/verel
+copyright: MIT © Amit Patole
+docs_dir: docs
+
+theme:
+  name: material
+  palette:
+    - scheme: slate
+      primary: deep purple
+      accent: deep purple
+  font:
+    text: Inter
+  icon:
+    repo: fontawesome/brands/github
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.tracking
+    - navigation.instant
+    - content.code.copy
+    - toc.follow
+    - search.suggest
+    - search.highlight
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Home: index.md
+  - Get started: getting-started.md
+  - Architecture: ARCHITECTURE.md
+  - Design (deep dive): VEREL_DESIGN.md
+  - Critic convergence: CRITIC_CONVERGENCE.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/amitpatole/verel
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/verel/

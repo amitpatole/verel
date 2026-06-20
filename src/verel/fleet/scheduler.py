@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..verdict.models import Report, Verdict
+from .lease import FencingError, Lease, LeaseStore
 from .task import TERMINAL, Barrier, BarrierKind, BudgetLease, Task, TaskState
 
 
@@ -64,13 +65,22 @@ class _Budget:
 class Scheduler:
     def __init__(self, worker: WorkerFn, *, concurrency: int = 4,
                  budget: BudgetLease | None = None, wal_path: str | Path | None = None,
-                 clock: Callable[[], float] = time.monotonic, sleep=asyncio.sleep):
+                 clock: Callable[[], float] = time.monotonic, sleep=asyncio.sleep,
+                 leases: LeaseStore | None = None, owner: str = "scheduler",
+                 lease_ttl: float = 300.0, poll_s: float = 0.02):
         self.worker = worker
         self.concurrency = max(1, concurrency)
         self.budget = budget
         self.wal_path = Path(wal_path) if wal_path else None
         self._clock = clock
         self._sleep = sleep
+        # Concurrent-manager safety (§6.3): when a shared LeaseStore is given, this scheduler is
+        # one of several over the same task store. It runs only tasks it can lease, fences its
+        # terminal writes, and ADOPTS outcomes recorded by its peers. `owner` must be unique.
+        self.leases = leases
+        self.owner = owner
+        self.lease_ttl = lease_ttl
+        self.poll_s = poll_s
 
     # ---- DAG validation ----
     @staticmethod
@@ -157,6 +167,7 @@ class Scheduler:
                 state[tid] = TaskState.PASSED  # memoized from a prior run
 
         running: dict[str, asyncio.Task] = {}
+        held: dict[str, Lease] = {}  # leases this scheduler currently holds (when fenced)
 
         def schedulable() -> list[str]:
             out = []
@@ -178,32 +189,61 @@ class Scheduler:
                         state[tid] = TaskState.SKIPPED
                         self._wal(phase="skip", task_id=tid, reason=f"budget:{reason}")
 
+            blocked_on_peer = False
             for tid in schedulable():
                 if len(running) >= self.concurrency:
                     break
+                if self.leases is not None:
+                    # a peer may already have finished this task — adopt its recorded outcome.
+                    if (oc := self.leases.outcome(tid)) is not None:
+                        state[tid] = TaskState(oc)
+                        continue
+                    lease = self.leases.acquire(tid, self.owner, now=self._clock(), ttl=self.lease_ttl)
+                    if lease is None:
+                        blocked_on_peer = True  # a live peer owns it; let them finish
+                        continue
+                    held[tid] = lease
                 state[tid] = TaskState.RUNNING
-                running[tid] = asyncio.ensure_future(self._run_one(by_id[tid], budget))
+                running[tid] = asyncio.ensure_future(self._run_one(by_id[tid], budget, held.get(tid)))
 
             if not running:
                 if any(state[t] == TaskState.PENDING for t in state):
-                    continue  # something became skippable; re-loop
+                    if blocked_on_peer:
+                        await self._sleep(self.poll_s)  # poll for the peer's outcome
+                    continue  # something became skippable / adoptable; re-loop
                 break
 
             done, _ = await asyncio.wait(running.values(), return_when=asyncio.FIRST_COMPLETED)
             for fut in done:
                 tid = next(k for k, v in running.items() if v is fut)
                 del running[tid]
+                held.pop(tid, None)
                 state[tid] = fut.result()
 
         return state
 
-    async def _run_one(self, task: Task, budget: _Budget) -> TaskState:
+    def _commit(self, task: Task, lease: Lease | None, st: TaskState) -> TaskState:
+        """Record a terminal state. With a lease, the write is FENCED: if we were taken over
+        mid-task, our token is stale and the store rejects it — we adopt the peer's outcome
+        instead of double-committing."""
+        if self.leases is not None and lease is not None:
+            try:
+                self.leases.complete(lease, st.value)
+            except FencingError:
+                self._wal(phase="fenced", task_id=task.id, token=lease.token)
+                adopted = self.leases.outcome(task.id)
+                return TaskState(adopted) if adopted else TaskState.SKIPPED
+        verdict = Verdict.PASS if st == TaskState.PASSED else Verdict.FAIL
+        self._wal(phase="verdict", task_id=task.id, verdict=verdict.value)
+        return st
+
+    async def _run_one(self, task: Task, budget: _Budget, lease: Lease | None = None) -> TaskState:
         self._wal(phase="intent", task_id=task.id, role=task.role.value)
         for attempt in range(1, task.retry.max + 1):
             task.attempt = attempt
             if (reason := budget.exhausted(self._clock())) is not None:
                 self._wal(phase="skip", task_id=task.id, reason=f"budget:{reason}")
-                return TaskState.SKIPPED
+                return self._commit(task, lease, TaskState.SKIPPED)
             try:
                 res = await self.worker(task)
             except Exception as e:  # transient failure -> retry
@@ -212,11 +252,14 @@ class Scheduler:
                 budget.tokens += res.tokens
                 budget.usd += res.cost_usd
                 if res.verdict == Verdict.PASS:
-                    self._wal(phase="verdict", task_id=task.id, verdict=Verdict.PASS.value)
-                    return TaskState.PASSED
+                    return self._commit(task, lease, TaskState.PASSED)
                 last = f"verdict={res.verdict.value}"
+            # renew the lease between attempts so a slow-but-alive worker keeps its ownership.
+            if self.leases is not None and lease is not None:
+                lease = self.leases.renew(lease, now=self._clock(), ttl=self.lease_ttl) or lease
             if attempt < task.retry.max:
                 idx = min(attempt - 1, len(task.retry.backoff_s) - 1)
                 await self._sleep(task.retry.backoff_s[idx] if task.retry.backoff_s else 0)
-        self._wal(phase="verdict", task_id=task.id, verdict=Verdict.FAIL.value, reason=last)
-        return TaskState.QUARANTINED if task.retry.on_fail == "quarantine" else TaskState.FAILED
+        self._wal(phase="reason", task_id=task.id, detail=last)
+        fail = TaskState.QUARANTINED if task.retry.on_fail == "quarantine" else TaskState.FAILED
+        return self._commit(task, lease, fail)
