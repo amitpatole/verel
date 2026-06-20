@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.17.0 — the hosted skill registry (the H2 sweep justified it; trust still doesn't travel)
+
+The two-model H2 sweep measured ~88–89% cross-tenant transfer → BUILD, so the public registry is
+now built as a service.
+- **Hosted registry** (`registry/hosted.py`): `RegistryServer` serves a `PublicRegistry` over a
+  tiny stdlib HTTP API — `POST /publish` (verifies the signature; refuses a tampered or unsigned
+  artifact with 400), `GET /search`, `GET /fetch`, `GET /all`. Optional bearer token.
+- **`RemoteRegistry`**: a `PublicRegistry`-shaped client over HTTP, so
+  `import_skill(remote.get(hash), into=local, target_cases=...)` works unchanged across machines.
+- **Trust does not travel — end to end**: the server stores and integrity-checks artifacts but
+  confers no trust; a fetched skill enters as a `candidate` and only becomes `verified` by passing
+  the importer's OWN held-out eval. Verified live over real HTTP: a universal skill (slugify)
+  re-verifies for a second tenant; a tenant-specific one (tax_total@8%) stays a candidate for a
+  10% tenant; a tampered publish is refused; bad auth is rejected.
+- 216 offline-CI tests.
+
 ## 0.16.0 — hosted control plane: the fencing authority behind an HTTP API (cross-machine)
 
 The lease stores needed a shared filesystem; this lets managers on different machines coordinate.
