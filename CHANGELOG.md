@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.12.0 — consolidation: multi-hop schema hierarchy + cross-scope generalization
+
+- **Multi-hop hierarchy** (`induce_hierarchy`): consolidation no longer stops at one schema level.
+  It climbs — rules → order-2 principles → order-3 meta-principles → … — each level consolidating
+  the one below, until the corpus stops supporting a higher level (returns `{order: [schemas]}`).
+  Every node stays `candidate`; height never confers trust.
+- **Cross-scope consolidation** (`consolidate_across_scopes`): a failure pattern that recurs across
+  **several repos** is lifted into a `global` `DesignRule` — but only when its evidence spans
+  `>= min_scopes` distinct scopes (it records `detail['spans']`); a single-repo quirk is refused.
+- **Better clustering**: `cluster_records` now buckets by a record's natural category (a failure's
+  `kind`, a rule's `covers_kind`, else the `MemoryKind`), so same-family rules group together —
+  which is what lets a higher hierarchy level find more than one cluster.
+- 198 offline-CI tests.
+
 ## 0.11.0 — H2 measured for real + a tool-smith reuse-safety fix it exposed
 
 Ran the §8.7 corpus-transfer experiment on a **live-built** corpus to resolve the moat bet with
