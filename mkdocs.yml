@@ -39,11 +39,34 @@ markdown_extensions:
   - pymdownx.tabbed:
       alternate_style: true
 
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            show_root_heading: true
+            show_root_full_path: false
+            show_source: false
+            heading_level: 3
+            members_order: source
+            separate_signature: true
+            show_signature_annotations: true
+            filters: ["!^_"]
+
 nav:
   - Home: index.md
   - Get started: getting-started.md
-  - Developer guide: usage.md
-  - Architecture: ARCHITECTURE.md
+  - Guides:
+      - Developer guide: usage.md
+      - Architecture: ARCHITECTURE.md
+  - Reference:
+      - CLI: cli.md
+      - Configuration: configuration.md
+      - Python API: api.md
+  - Help:
+      - FAQ & troubleshooting: faq.md
 
 # Keep internal design + critic-round notes OUT of the public site (defense-in-depth even if
 # a file lingers in docs/): they are not part of the public documentation.
