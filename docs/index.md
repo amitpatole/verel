@@ -45,6 +45,7 @@ into memory; then the eyes look again.
 ## Next
 
 - **[Get started](getting-started.md)** — install, the gate, CI/agents adoption.
+- **[5-minute tutorial](tutorial.md)** — gate a repo, heal failing tests, watch a bug get remembered.
 - **[Architecture](ARCHITECTURE.md)** — the five organs and the eval-driven loop.
 
 Install: `pip install verel` · Source: [GitHub](https://github.com/amitpatole/verel) ·

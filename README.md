@@ -29,6 +29,16 @@ One **verdict bus** unifies vision + tests + lint + types into a single `pass / 
 so *progress*, *“done”*, and *what compounds* are all decided in one place — with grader
 attestation so a hollow check can’t mint green.
 
+## See it in 15 seconds
+
+A repo ships with failing tests and *no hint of the fix*. Verel runs the real grader, an agent
+patches the **source** (never the tests), and the stage re-gates until the graders themselves go
+green — the agent never decides "done", the verdict bus does:
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/amitpatole/verel/main/media/heal-demo.gif" alt="verel heal — round 1 fails, an agent patches the source, round 2 passes" width="88%">
+</p>
+
 ## The 60-second pitch
 
 ```bash
@@ -40,11 +50,13 @@ verel heal --repo .          # self-healing CI: failing tests → agent fixes �
 ```python
 from verel.ci import inner_loop_stage, self_heal
 result = self_heal(".", inner_loop_stage(".", with_lint=False))   # tests fail → agent patches → pass
-print(result.healed, result.terminated_on)
+print(result.healed, result.terminated_on)                        # True  passed
 ```
 
 Default LLM is **Ollama Cloud** (`~/.config/ollama/key`, model `qwen3-coder:480b`); set
 `VEREL_LLM_PROVIDER=openai` to switch. Claude is one branch away in `agents/llm.py`.
+
+New here? **[5-minute tutorial →](docs/tutorial.md)**
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/amitpatole/verel/main/media/infographic.png" alt="Verel architecture — the five organs and the eval-driven loop" width="100%">
@@ -185,7 +197,7 @@ python examples/demo_hosted_registry.py  # publish a skill over HTTP; another te
 
 📖 **Full docs site: [amitpatole.github.io/verel](https://amitpatole.github.io/verel/)**
 
-- [Get started](docs/getting-started.md) · [**Developer guide**](docs/usage.md) ·
+- [Get started](docs/getting-started.md) · [**5-minute tutorial**](docs/tutorial.md) · [**Developer guide**](docs/usage.md) ·
   [Architecture & roadmap](docs/ARCHITECTURE.md) · [Module guide](src/verel/README.md) ·
   [Changelog](CHANGELOG.md)
 
