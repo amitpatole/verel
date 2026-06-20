@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.13.0 — fleet: git fencing sink (durable) + cross-repo atomic sagas
+
+Completes the distributed-safety story the fencing leases started.
+- **Git fencing sink** (`fleet/fence_sink.py`): a `pre-receive` hook fences *pushes*, not just
+  task-store writes. The pusher sends `(resource, token)` as git push options
+  (`git push -o verel-resource=R -o verel-token=N`); the hook accepts only when the token **is**
+  the current one for that resource (checked against the sqlite lease store) — a stale leader's
+  push, an unknown resource, or a forged higher token are all refused. `write_pre_receive_hook`
+  installs it and enables push options on the bare remote. **Verified end-to-end against a real
+  bare repo**: a stale push is rejected by the hook, the current one accepted.
+- **Cross-repo atomic sagas** (`fleet/saga.py`): a multi-repo change commits as a saga — each step
+  has a forward action and a compensation; the first failure runs the compensations of the
+  already-committed steps in **reverse** order and skips the rest, so the set is all-or-nothing.
+  `git_revert_head` is the safe compensation (an inverse commit, never a reset). A compensation
+  that itself fails is reported, not swallowed.
+- 204 offline-CI tests (incl. real-git end-to-end checks, skipped where git is absent).
+
 ## 0.12.0 — consolidation: multi-hop schema hierarchy + cross-scope generalization
 
 - **Multi-hop hierarchy** (`induce_hierarchy`): consolidation no longer stops at one schema level.

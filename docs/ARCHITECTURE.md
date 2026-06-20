@@ -103,9 +103,16 @@ A control plane over agent execution:
   *rejected*, not allowed to corrupt shared state. Peers adopt each other's recorded outcomes, so
   each task runs exactly once. Backends: in-memory (one process) or sqlite (`BEGIN IMMEDIATE`,
   cross-process).
+- **Git fencing sink** — fencing isn't only in the task store: a `pre-receive` hook on the remote
+  (`fence_sink.py`) refuses a *push* whose token isn't current, so a paused leader can't push stale
+  code over a successor's. The pusher passes `(resource, token)` as git push options; the hook
+  checks them against the same sqlite store.
 - **Multi-repo coordination** — `plan_multi_repo` namespaces per-repo tasks and adds cross-repo
   edges into one DAG, validated acyclic (a cross-repo cycle is rejected up front, never
   deadlocked). One fenced scheduler then enforces "ship the client only after the API builds".
+- **Cross-repo atomic sagas** — a change spanning repos commits as a saga (`saga.py`): each step
+  has a forward action and a compensation, and a failure runs the compensations of the
+  already-committed steps in reverse (a safe `git revert`, never a reset) — all-or-nothing.
 - **Worktrees** — each worker runs in its own isolated git worktree with an exclusive
   advisory lease, so parallel workers never stomp each other.
 
@@ -178,8 +185,8 @@ its own verdict bus in CI.
 - Broaden senses further — Rust/Java toolchains; richer perf harnesses; more SAST backends.
 - Consolidation: contradiction-driven schema revision (a schema that a new failure violates is
   demoted/split, not just grown).
-- Distributed hardening — a server-side git fencing sink (reject pushes carrying a stale token);
-  cross-repo atomic sagas (compensating rollback when one repo in a multi-repo change fails).
+- Distributed hardening — a hosted control-plane service (lease store + fencing sink behind an
+  API), so managers on different machines coordinate without a shared filesystem.
 - A hosted skill registry — a first live H2 run measured 81% cross-tenant transfer (BUILD; see
   `docs/H2_RESULTS.md`), so this is now justified pending a broader corpus/model sweep.
 - Seccomp profile portability across architectures (the learned policy is x86-64-derived today).
