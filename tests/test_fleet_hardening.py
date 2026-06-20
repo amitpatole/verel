@@ -150,3 +150,113 @@ def test_multi_repo_unknown_refs_raise():
     with pytest.raises(ValueError):
         plan_multi_repo({"a": [_t("x")]},
                         [CrossDep(to_repo="a", dependent="x", from_repo="a", needs="nope")])
+
+
+# ================================================================ git fencing sink
+def test_validate_push_accepts_current_rejects_stale():
+    import tempfile
+
+    from verel.fleet import SqliteLeaseStore, validate_push
+    with tempfile.TemporaryDirectory() as d:
+        store = SqliteLeaseStore(f"{d}/lease.db")
+        store.acquire("main", "A", now=0.0, ttl=10.0)
+        store.acquire("main", "B", now=20.0, ttl=10.0)  # token 2 current
+        assert validate_push(store, "main", 2).allow            # current holder
+        assert not validate_push(store, "main", 1).allow        # stale leader
+        assert not validate_push(store, "unknown", 1).allow     # no token issued
+
+
+def _have_git():
+    import shutil
+    return shutil.which("git") is not None
+
+
+@pytest.mark.skipif(not _have_git(), reason="git not installed")
+def test_pre_receive_hook_fences_a_stale_push(tmp_path):
+    import subprocess
+
+    from verel.fleet import SqliteLeaseStore, push_options, write_pre_receive_hook
+
+    def git(*a):
+        return subprocess.run(["git", *a], capture_output=True, text=True)
+
+    db = tmp_path / "lease.db"
+    store = SqliteLeaseStore(db)
+    store.acquire("main", "A", now=0.0, ttl=10.0)
+    store.acquire("main", "B", now=20.0, ttl=10.0)  # current token = 2
+    bare = tmp_path / "remote.git"
+    git("init", "--bare", "-q", str(bare))
+    write_pre_receive_hook(bare, db)
+    work = tmp_path / "work"
+    git("init", "-q", str(work))
+    (work / "f.txt").write_text("hi")
+    git("-C", str(work), "add", "-A")
+    git("-C", str(work), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "c1")
+    git("-C", str(work), "remote", "add", "origin", str(bare))
+    br = git("-C", str(work), "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+
+    stale = git("-C", str(work), "push", *push_options("main", 1), "origin", br)
+    assert stale.returncode != 0 and "verel-fence" in stale.stderr  # rejected by the hook
+    current = git("-C", str(work), "push", *push_options("main", 2), "origin", br)
+    assert current.returncode == 0  # current token accepted
+
+
+# ===================================================================== saga
+def test_saga_all_succeed_commits_everything():
+    from verel.fleet import SagaStep, run_saga
+
+    res = run_saga([SagaStep(n, (lambda n=n: n)) for n in ("A", "B", "C")])
+    assert res.ok and res.committed == ["A", "B", "C"] and not res.compensated
+
+
+def test_saga_compensates_completed_in_reverse_on_failure():
+    from verel.fleet import SagaStep, run_saga
+
+    log = []
+
+    def fwd(n):
+        def f():
+            if n == "C":
+                raise RuntimeError("C failed")
+            log.append(f"do:{n}")
+            return n
+        return f
+
+    steps = [SagaStep(n, fwd(n), (lambda _r, n=n: log.append(f"undo:{n}"))) for n in ("A", "B", "C", "D")]
+    res = run_saga(steps)
+    assert not res.ok
+    assert res.committed == [] and res.compensated == ["A", "B"] and res.failed == ["C"]
+    # forward A,B then C fails -> undo B then A (reverse); D never runs
+    assert log == ["do:A", "do:B", "undo:B", "undo:A"]
+
+
+def test_saga_reports_a_failing_compensation():
+    from verel.fleet import SagaStep, run_saga
+
+    def boom(_r):
+        raise RuntimeError("cannot undo")
+
+    steps = [SagaStep("A", lambda: "a", boom), SagaStep("B", lambda: (_ for _ in ()).throw(RuntimeError("B")))]
+    res = run_saga(steps)
+    assert not res.ok and "A" in res.failed  # A's compensation failed and is reported
+
+
+@pytest.mark.skipif(not _have_git(), reason="git not installed")
+def test_git_revert_head_makes_an_inverse_commit(tmp_path):
+    import subprocess
+
+    from verel.fleet import git_revert_head
+
+    def git(*a):
+        return subprocess.run(["git", "-C", str(tmp_path), *a], capture_output=True, text=True)
+
+    git("init", "-q")
+    (tmp_path / "f.txt").write_text("v1\n")
+    git("add", "-A")
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "c1")
+    (tmp_path / "f.txt").write_text("v2-bad\n")
+    git("add", "-A")
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "bad")
+    new = git_revert_head(str(tmp_path))
+    assert new and (tmp_path / "f.txt").read_text() == "v1\n"  # reverted to v1, not a reset
+    assert len(git("log", "--oneline").stdout.strip().splitlines()) == 3  # revert is a NEW commit

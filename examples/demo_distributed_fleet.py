@@ -78,6 +78,28 @@ async def main() -> None:
     print(f"  execution order: {order}")
     print(f"  client shipped only after api built: {order.index('api::build') < order.index('client::ship')}")
 
+    # ---- git fencing sink: the remote refuses a stale push (decision shown; hook is the same) ----
+    from verel.fleet import validate_push
+    fs = InMemoryLeaseStore()
+    fs.acquire("main", "A", now=0.0, ttl=10.0)
+    fs.acquire("main", "B", now=20.0, ttl=10.0)  # current token = 2
+    print("\ngit fencing sink (pre-receive):")
+    print(f"  stale push (token 1): {validate_push(fs, 'main', 1).allow}  "
+          f"current push (token 2): {validate_push(fs, 'main', 2).allow}")
+
+    # ---- cross-repo saga: B fails -> A is compensated, the change is all-or-nothing ----
+    from verel.fleet import SagaStep, run_saga
+    landed: list[str] = []
+    steps = [
+        SagaStep("commit:api", lambda: landed.append("api") or "api",
+                 lambda _r: landed.remove("api")),
+        SagaStep("commit:client", lambda: (_ for _ in ()).throw(RuntimeError("client CI failed"))),
+    ]
+    res = run_saga(steps)
+    print("\ncross-repo saga (client fails):")
+    print(f"  committed={res.committed} compensated={res.compensated} failed={res.failed}")
+    print(f"  repos left landed: {landed} (empty → atomic: nothing half-applied)")
+
 
 if __name__ == "__main__":
     asyncio.run(main())

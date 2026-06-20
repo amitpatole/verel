@@ -7,6 +7,14 @@ gates every node through the verdict bus. Worker fencing + git fencing sink are 
 
 from __future__ import annotations
 
+from .fence_sink import (
+    FenceDecision,
+    enable_push_options,
+    push_options,
+    render_pre_receive_hook,
+    validate_push,
+    write_pre_receive_hook,
+)
 from .lease import (
     FencingError,
     InMemoryLeaseStore,
@@ -18,6 +26,7 @@ from .lease import (
 from .llm_manager import decide_fanout
 from .manager import FanOut, Subtask, clamp, plan_over_artifacts, to_tasks, validate_fanout
 from .multirepo import CrossDep, plan_multi_repo, repo_of
+from .saga import SagaResult, SagaStep, StepOutcome, git_revert_head, run_saga
 from .scheduler import DagError, Scheduler, WorkerFn, WorkerResult
 from .task import (
     ROLE_DEFAULTS,
@@ -57,6 +66,17 @@ __all__ = [
     "CrossDep",
     "plan_multi_repo",
     "repo_of",
+    "FenceDecision",
+    "validate_push",
+    "push_options",
+    "render_pre_receive_hook",
+    "write_pre_receive_hook",
+    "enable_push_options",
+    "SagaStep",
+    "SagaResult",
+    "StepOutcome",
+    "run_saga",
+    "git_revert_head",
     "Barrier",
     "BarrierKind",
     "BudgetLease",
