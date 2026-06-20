@@ -119,6 +119,12 @@ A control plane over agent execution:
 - **Cross-repo atomic sagas** — a change spanning repos commits as a saga (`saga.py`): each step
   has a forward action and a compensation, and a failure runs the compensations of the
   already-committed steps in reverse (a safe `git revert`, never a reset) — all-or-nothing.
+- **Hosted control plane** — for managers on *different machines* (no shared filesystem), the lease
+  authority is wrapped in a tiny, dependency-free HTTP service (`control_plane.py`). The server is
+  the clock authority (so skewed manager clocks can't disagree about expiry); a `RemoteLeaseStore`
+  client speaks the same `LeaseStore` Protocol, so `Scheduler(leases=RemoteLeaseStore(url))`
+  coordinates cross-machine unchanged. Terminal writes are still fenced (a stale `complete` is a
+  409); an optional bearer token gates access.
 - **Worktrees** — each worker runs in its own isolated git worktree with an exclusive
   advisory lease, so parallel workers never stomp each other.
 
@@ -191,8 +197,8 @@ its own verdict bus in CI.
 - Broaden senses further — Rust/Java toolchains; richer perf harnesses; more SAST backends.
 - Consolidation: propagate a split up the schema hierarchy (revise the principles a narrowed rule
   fed, not just the rule itself).
-- Distributed hardening — a hosted control-plane service (lease store + fencing sink behind an
-  API), so managers on different machines coordinate without a shared filesystem.
+- Distributed hardening — replicate the control-plane store (today a single sqlite host is the
+  authority); push-time identity (sign the push token to the fencing sink).
 - A hosted skill registry — a first live H2 run measured 81% cross-tenant transfer (BUILD; see
   `docs/H2_RESULTS.md`), so this is now justified pending a broader corpus/model sweep.
 - Seccomp profile portability across architectures (the learned policy is x86-64-derived today).
