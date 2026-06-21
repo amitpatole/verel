@@ -112,6 +112,12 @@ def _replicated_ha() -> None:
     print(f"  anti-entropy: a lagging node pulled {synced} records from leader B "
           f"→ has {sorted(r.subject for r in late.all(scope='team:frontend'))}")
 
+    # read-your-writes: a reader that hasn't received replicas can still read the leader (strong).
+    reader = ReplicatedMemory(LocalMemory(), leases=leases, cluster_key="brain", owner="R",
+                              read_consistency="strong", sources={"A": a, "B": b}, clock=lambda: clk["t"])
+    print(f"  strong read (read-your-writes): a lagging reader sees the leader's "
+          f"{len(reader.all(scope='team:frontend'))} records without waiting for replication.")
+
 
 def _librarian() -> None:
     """The maintenance cycle that keeps the brain compounding — consolidate, graduate, prune."""

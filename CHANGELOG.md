@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.27.0 — read-your-writes: opt-in strong reads from the leader
+
+Completes the HA-hardening pass. Reads were always local (eventual) — a client reading a follower
+right after writing the leader could miss its own write. Now strong reads are available when needed.
+- **`read_consistency`** on `ReplicatedMemory` (default `"eventual"`): `"strong"` routes reads
+  (`get` / `recall` / `all`) to the **current leader** — the single writer, so it holds every
+  committed write — giving read-your-writes / linearizable-ish reads. Needs `sources` (owner →
+  readable view, e.g. a `RemoteMemory`); falls back to local if no leader can be resolved.
+- `leader_view()` exposes the resolved read target; the leader reads its own local store under
+  strong mode (no needless hop).
+- Verified live: an eventual follower may miss a recent write while a strong follower reads it from
+  the leader; read-your-writes holds; strong reads route over HTTP. 280 offline-CI tests.
+
+**HA brain — hardened end to end:** fault-tolerant replication (0.24) · self-healing anti-entropy
+(0.25) · crash-safe write durability (0.26) · read-your-writes (0.27). No SPOF, no split-brain,
+no lost acked writes, optional strong reads.
+
 ## 0.26.0 — write durability: an acked write survives a leader crash
 
 Closes the small durability window in the HA brain — a write that returned could be lost if the
