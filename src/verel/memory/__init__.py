@@ -28,7 +28,7 @@ from .promotion import (
     PromotionResult,
     evaluate_rule,
 )
-from .replicated import NotLeaderError, ReplicatedMemory, ReplicationError, ReplicationStatus
+from .replicated import AntiEntropy, NotLeaderError, ReplicatedMemory, ReplicationError, ReplicationStatus
 from .revise import Revision, contradicts, propagate_revision, revise_with_counterexample
 from .share import AuthorTrust, BeliefImport, author_of, import_belief
 from .view import (
@@ -72,6 +72,7 @@ __all__ = [
     "NotLeaderError",
     "ReplicationError",
     "ReplicationStatus",
+    "AntiEntropy",
     "FailureLedger",
     "regression_report",
     "LocalMemory",

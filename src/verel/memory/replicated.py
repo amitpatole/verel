@@ -20,6 +20,7 @@ A peer is anything with `apply_replica_fenced(record_dict, token)`: another `Rep
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -163,3 +164,50 @@ class ReplicatedMemory(MemoryView):
 
     def all(self, *, scope=None, kind=None):
         return self.local.all(scope=scope, kind=kind)
+
+
+class AntiEntropy:
+    """Background reconciler: a follower periodically pulls the CURRENT leader's state, so a node
+    that fell behind — or just recovered from a crash — self-heals without an operator. It resolves
+    the leader from the lease store (`holder`), maps it to a readable source via `sources`, and
+    `sync_from`s it. A no-op while this node IS the leader (it's the source of truth) or when no
+    leader holds the lease. Best-effort: a failed cycle never crashes the loop."""
+
+    def __init__(self, node: ReplicatedMemory, sources: dict[str, MemoryView], *,
+                 interval: float = 5.0, sleep: Callable[[float], None] = time.sleep):
+        self.node = node
+        self.sources = sources
+        self.interval = interval
+        self._sleep = sleep
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def leader_source(self) -> MemoryView | None:
+        owner = self.node.leases.holder(self.node.key, now=self.node._clock())
+        if owner is None or owner == self.node.owner:
+            return None  # no leader, or we are the leader — nothing to pull
+        return self.sources.get(owner)
+
+    def tick(self) -> int:
+        """Run one reconciliation cycle; return the number of records synced (0 if this node is the
+        leader or no leader is reachable)."""
+        src = self.leader_source()
+        return self.node.sync_from(src) if src is not None else 0
+
+    def start(self) -> AntiEntropy:
+        def loop():
+            while not self._stop.wait(0):  # check stop without blocking the first tick
+                try:
+                    self.tick()
+                except Exception:  # noqa: BLE001 — best effort; never crash the reconciler
+                    pass
+                if self._stop.wait(self.interval):
+                    break
+        self._thread = threading.Thread(target=loop, daemon=True)
+        self._thread.start()
+        return self
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=5)

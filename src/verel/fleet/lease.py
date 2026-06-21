@@ -43,6 +43,7 @@ class LeaseStore(Protocol):
     def release(self, lease: Lease) -> None: ...
     def current_token(self, key: str) -> int: ...
     def is_current(self, lease: Lease, *, now: float) -> bool: ...
+    def holder(self, key: str, *, now: float) -> str | None: ...
     def complete(self, lease: Lease, state: str) -> None: ...
     def outcome(self, key: str) -> str | None: ...
 
@@ -87,6 +88,11 @@ class InMemoryLeaseStore:
 
     def is_current(self, lease: Lease, *, now: float) -> bool:
         return lease.token == self._tokens.get(lease.key, 0)
+
+    def holder(self, key: str, *, now: float) -> str | None:
+        """The owner of the live lease on `key`, or None if none is held / it has expired."""
+        lease = self._held.get(key)
+        return lease.owner if lease is not None and now < lease.expires_at else None
 
     def complete(self, lease: Lease, state: str) -> None:
         if lease.token != self._tokens.get(lease.key, 0):
@@ -161,6 +167,11 @@ class SqliteLeaseStore:
 
     def is_current(self, lease: Lease, *, now: float) -> bool:
         return lease.token == self.current_token(lease.key)
+
+    def holder(self, key: str, *, now: float) -> str | None:
+        with self._conn() as c:
+            row = c.execute("SELECT owner, expires_at FROM leases WHERE key=?", (key,)).fetchone()
+        return row[0] if row and now < row[1] else None
 
     def complete(self, lease: Lease, state: str) -> None:
         with self._conn() as c:
