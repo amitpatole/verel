@@ -166,6 +166,7 @@ python examples/demo_h2_moat.py          # measure cross-tenant skill transfer �
 python examples/demo_canary_rollback.py  # bad merge fails canary → safe auto git-revert
 python examples/demo_capability_jail.py  # learn a tool's syscalls → deny everything it didn't earn
 python examples/demo_polyglot_ci.py      # Python/JS/Go + perf + security graders on one bus
+python examples/demo_monorepo_ci.py      # separate stage per package with a unified gate
 python examples/demo_consolidation.py    # failures → structured rules → a 2nd-order schema
 python examples/demo_distributed_fleet.py # concurrent managers (fencing) + multi-repo DAG
 python examples/run_h2.py                # LIVE: build skills, measure cross-tenant transfer

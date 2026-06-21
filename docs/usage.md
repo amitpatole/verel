@@ -415,6 +415,7 @@ Runnable, mostly offline — see the [`examples/`](https://github.com/amitpatole
 | gate a repo on tests+lint+types | `verel-ci check --repo .` |
 | self-heal failing tests | `python examples/demo_selfheal.py` |
 | grade Python/JS/Go + perf + security on one bus | `python examples/demo_polyglot_ci.py` |
+| gate a monorepo with separate stages per package | `python examples/demo_monorepo_ci.py` |
 | consolidate failures → rules → schema → revise | `python examples/demo_consolidation.py` |
 | sandbox a tool to only the syscalls it earned | `python examples/demo_capability_jail.py` |
 | run concurrent managers + a multi-repo saga | `python examples/demo_distributed_fleet.py` |
