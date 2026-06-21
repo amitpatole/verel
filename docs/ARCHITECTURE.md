@@ -99,8 +99,14 @@ On top of that:
   a durable `MemoryView` behind a tiny HTTP service. `RemoteMemory` implements the same Protocol, so
   `lattice_recall`, `graduate`, consolidation, and the promotion gate all run against the shared
   brain unchanged. The server is the single writer — every access is lock-serialized, so the
-  interference rule stays correct under concurrent agents (replicating the store, with fencing
-  between authorities, is the next hardening, mirroring the control plane).
+  interference rule stays correct under concurrent agents.
+- **Replicated, HA memory** (`ReplicatedMemory`) — for no single point of failure, the store runs
+  as a leader-fenced cluster. Exactly one node is leader (held by a fencing lease — the same
+  monotonic-token primitive the fleet uses); the leader applies every mutation locally and
+  replicates it to its peers; a deposed leader is fenced (`NotLeaderError` on write, `FencingError`
+  on a stale in-flight replicate) — **no split-brain**. Reads are served from any node's replica
+  (eventual consistency). The lease store (the hosted control plane across machines) is the single
+  source of fencing truth; `ReplicaClient` carries replication to follower `MemoryServer`s over HTTP.
 - **Cross-agent trust** — sharing a brain *safely*. `import_belief` applies the registry's
   "trust does not travel" rule to beliefs: a peer's claim enters as a `candidate` and only becomes
   `verified` by passing the importer's OWN check (its self-asserted confidence is ignored).
