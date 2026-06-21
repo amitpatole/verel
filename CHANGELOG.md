@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.26.0 — write durability: an acked write survives a leader crash
+
+Closes the small durability window in the HA brain — a write that returned could be lost if the
+leader crashed before its sqlite commit reached disk.
+- **Crash-safe by default**: an on-disk `LocalMemory` now opens `PRAGMA journal_mode=WAL` and
+  `PRAGMA synchronous=FULL`, so every commit is **fsync'd before it returns**. A leader's write is
+  durable *before* its replica is acked, and survives a process/leader crash. WAL also gives atomic,
+  recoverable commits and better read/write concurrency.
+- **`LocalMemory(durable=...)`** (default `True`): `durable=False` relaxes to `synchronous=NORMAL`
+  (faster, weaker) where durability isn't required; `MemoryServer(durable=...)` threads it through.
+  `:memory:` stores are unaffected.
+- Verified live: a write survives reopening the db after an unclean close; a disk-backed
+  `ReplicatedMemory` leader's acked write is on disk after a crash. 274 offline-CI tests.
+
 ## 0.25.0 — background anti-entropy: lagging followers self-heal
 
 Catch-up was manual (`sync_from`) in 0.24.0; now a follower that fell behind — or just recovered —

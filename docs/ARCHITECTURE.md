@@ -112,6 +112,9 @@ On top of that:
   source of fencing truth; `ReplicaClient` carries replication to follower `MemoryServer`s over HTTP.
   A node that fell behind self-heals without an operator: the `AntiEntropy` reconciler periodically
   resolves the current leader (via the lease store's `holder`) and `sync_from`s it in the background.
+  On-disk stores are **crash-safe**: `LocalMemory` opens WAL with `synchronous=FULL`, so a commit is
+  fsync'd before the call returns — an acked write is durable *before* its replica is even sent, and
+  survives a leader crash (`durable=False` relaxes to `synchronous=NORMAL` for speed where it's ok).
 - **Cross-agent trust** — sharing a brain *safely*. `import_belief` applies the registry's
   "trust does not travel" rule to beliefs: a peer's claim enters as a `candidate` and only becomes
   `verified` by passing the importer's OWN check (its self-asserted confidence is ignored).
