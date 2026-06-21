@@ -59,6 +59,7 @@ nav:
   - Home: index.md
   - Get started: getting-started.md
   - 5-minute tutorial: tutorial.md
+  - Real-world scenarios: examples.md
   - Guides:
       - Developer guide: usage.md
       - Architecture: ARCHITECTURE.md

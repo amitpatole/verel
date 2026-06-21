@@ -71,6 +71,17 @@
   .organ .ic{font-size:30px}.organ h3{font-size:20px;margin:10px 0 7px}
   .organ p{font-size:14.5px;color:var(--mut)}
   .organ code{display:inline-block;margin-top:12px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:var(--acc2)}
+  /* scenarios */
+  .scns{display:grid;grid-template-columns:repeat(2,1fr);gap:18px}
+  .scn{background:var(--card2);border:1px solid var(--line);border-radius:16px;padding:22px 22px 18px;transition:transform .15s,border-color .15s}
+  .scn:hover{transform:translateY(-3px);border-color:#3a3358}
+  .scn .top{display:flex;align-items:baseline;gap:10px}
+  .scn .num{font-size:13px;font-weight:800;color:var(--acc);background:#1e1940;border:1px solid #322a5c;border-radius:8px;padding:2px 9px}
+  .scn h3{font-size:17.5px;margin:0}
+  .scn p{font-size:14px;color:var(--mut);margin:10px 0 12px}
+  .scn pre{background:#0b0b12;border:1px solid #20202e;border-radius:10px;padding:12px 13px;overflow:auto;font-family:ui-monospace,Menlo,monospace;font-size:12px;line-height:1.5;color:#c7c4e0}
+  .scn pre b{color:var(--good);font-weight:700}
+  .scn .run{display:inline-block;margin-top:11px;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--acc2)}
   /* diagrams + infographic */
   .info img,.diagram{width:100%;border-radius:18px;border:1px solid #241f3a;box-shadow:0 30px 80px -40px #6f5cff55}
   .diagram{display:block;background:#0b0b12}
@@ -80,13 +91,14 @@
   .stat .n{font-size:40px;font-weight:850;background:linear-gradient(90deg,#cfc8ff,#8b7cff);-webkit-background-clip:text;background-clip:text;color:transparent}
   .stat .l{font-size:13.5px;color:var(--mut);margin-top:4px}
   footer{padding:40px 0;text-align:center;color:#9494b6;font-size:14px}
-  @media(max-width:880px){.hero .wrap{grid-template-columns:1fr}.steps,.grid,.stats{grid-template-columns:1fr 1fr}h1{font-size:60px}.nlinks{display:none}}
+  @media(max-width:880px){.hero .wrap{grid-template-columns:1fr}.steps,.grid,.stats,.scns{grid-template-columns:1fr 1fr}h1{font-size:60px}.nlinks{display:none}}
+  @media(max-width:620px){.scns{grid-template-columns:1fr}}
 </style></head>
 <body>
 <nav><div class="wrap">
   <a class="brand" href="#top"><img src="keyvisual.png" alt="">Verel</a>
   <div class="nlinks">
-    <a href="#loop">The loop</a><a href="#organs">Organs</a><a href="#diagrams">Architecture</a>
+    <a href="#loop">The loop</a><a href="#organs">Organs</a><a href="#scenarios">In the wild</a><a href="#diagrams">Architecture</a>
     <a href="https://github.com/amitpatole/verel">GitHub</a>
     <a class="pill" href="https://pypi.org/project/verel/">pip install verel</a>
   </div>
@@ -106,7 +118,7 @@
       <a class="btn" href="https://github.com/amitpatole/verel/blob/main/docs/ARCHITECTURE.md">Architecture</a>
     </div>
     <div class="badges">
-      <span class="badge"><b>148</b> tests passing</span>
+      <span class="badge"><b>300</b> tests passing</span>
       <span class="badge">ruff + mypy <b>clean</b></span>
       <span class="badge">MIT</span>
       <span class="badge">Ollama Cloud · OpenAI</span>
@@ -142,6 +154,66 @@
   </div>
 </div></section>
 
+<section id="scenarios"><div class="wrap">
+  <div class="sech"><div class="k">In the wild</div><h2>Six real-world scenarios</h2>
+    <p>Situations a team actually hits — each a runnable script in <code>examples/</code>. The output
+       below is <b>real, not mocked</b>: an agent never decides “done”, a grader does.</p></div>
+  <div class="scns">
+    <div class="scn">
+      <div class="top"><span class="num">01</span><h3>Your CI went red</h3></div>
+      <p>Real <code>pytest</code> fails → an agent patches the <b>source</b> (never the tests) → the stage re-gates until the graders go green.</p>
+      <pre>round 1: verdict=fail  patched=['mathx.py','strx.py']
+round 2: verdict=<b>pass</b>   patched=[]
+healed=<b>True</b>  terminated_on=<b>passed</b></pre>
+      <span class="run">$ python examples/demo_selfheal.py</span>
+    </div>
+    <div class="scn">
+      <div class="top"><span class="num">02</span><h3>A bad merge slipped through</h3></div>
+      <p>Canary grader fails → deterministic <code>git revert</code> to the last good HEAD — and it <b>refuses</b> to act on advisory-only evidence.</p>
+      <pre>canary verdict=fail  rolled_back=<b>True</b>
+  reverted c2852b1 → new HEAD 59ce62e
+advisory-only failure → executed=<b>False</b> (refused)</pre>
+      <span class="run">$ python examples/demo_canary_rollback.py</span>
+    </div>
+    <div class="scn">
+      <div class="top"><span class="num">03</span><h3>Scale one fix across many repos</h3></div>
+      <p>Concurrent managers fenced by leases (a stale leader’s writes refused); a multi-repo change commits as an <b>atomic saga</b> — nothing half-applied.</p>
+      <pre>8 tasks, 2 managers — ran once each: <b>True</b>
+stale leader A fenced off (token 1 &lt; 2)
+saga: committed=[] compensated=['commit:api']
+  repos left landed: [] → <b>atomic</b></pre>
+      <span class="run">$ python examples/demo_distributed_fleet.py</span>
+    </div>
+    <div class="scn">
+      <div class="top"><span class="num">04</span><h3>A polyglot monorepo</h3></div>
+      <p>Python + JS + Go tests, lint, types, a <b>perf budget</b>, and a <b>security scan</b> — all on one verdict schema, one gate.</p>
+      <pre>Go inner-loop: test [-] TestLogin failed
+JS pre-merge: test [-] submit posts the form
+Python: security [-] B602 shell=True
+        perf [-] p95_ms 240 &gt; budget 150</pre>
+      <span class="run">$ python examples/demo_polyglot_ci.py</span>
+    </div>
+    <div class="scn">
+      <div class="top"><span class="num">05</span><h3>An agent builds its own tool</h3></div>
+      <p>detect → scaffold → test → register on a passing eval, then <b>jailed to the syscalls it earned</b> — a socket it never exercised is refused at the kernel.</p>
+      <pre>learned 28 syscalls → enforced 71
+tool runs under its jail: <b>5</b>
+socket() under the capability jail:
+  <b>REFUSED</b> — Operation not permitted</pre>
+      <span class="run">$ python examples/demo_capability_jail.py</span>
+    </div>
+    <div class="scn">
+      <div class="top"><span class="num">06</span><h3>A shared team brain</h3></div>
+      <p>Recall down a <code>self→team→org→global</code> lattice; a peer’s claim <b>re-verifies before it’s trusted</b>; leader-fenced HA with quorum reads that survive the leader being down.</p>
+      <pre>agent-B's belief (my check fails):
+  stayed <b>CANDIDATE</b> — trust did not travel
+quorum read, leader DOWN → still returns
+  'restart the worker pool' (freshest)</pre>
+      <span class="run">$ python examples/demo_shared_brain.py</span>
+    </div>
+  </div>
+</div></section>
+
 <section id="diagrams"><div class="wrap">
   <div class="sech"><div class="k">How it works</div><h2>Architecture &amp; flow</h2>
     <p>The five organs and the eval-driven loop — hand-drawn, and verified clean by the eyes Verel ships.</p></div>
@@ -158,7 +230,7 @@
 <section><div class="wrap">
   <div class="stats">
     <div class="stat"><div class="n">5</div><div class="l">organs, end-to-end</div></div>
-    <div class="stat"><div class="n">148</div><div class="l">tests, dogfooded</div></div>
+    <div class="stat"><div class="n">300</div><div class="l">tests, dogfooded</div></div>
     <div class="stat"><div class="n">1</div><div class="l">verdict bus, all senses</div></div>
     <div class="stat"><div class="n">MIT</div><div class="l">open source</div></div>
   </div>
