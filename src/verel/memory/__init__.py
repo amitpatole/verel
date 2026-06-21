@@ -28,6 +28,7 @@ from .promotion import (
     evaluate_rule,
 )
 from .revise import Revision, contradicts, propagate_revision, revise_with_counterexample
+from .share import AuthorTrust, BeliefImport, author_of, import_belief
 from .view import (
     MemoryKind,
     MemoryRecord,
@@ -58,6 +59,10 @@ __all__ = [
     "graduate",
     "MemoryServer",
     "RemoteMemory",
+    "import_belief",
+    "AuthorTrust",
+    "BeliefImport",
+    "author_of",
     "FailureLedger",
     "regression_report",
     "LocalMemory",

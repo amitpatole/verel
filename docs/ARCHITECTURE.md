@@ -101,6 +101,13 @@ On top of that:
   brain unchanged. The server is the single writer — every access is lock-serialized, so the
   interference rule stays correct under concurrent agents (replicating the store, with fencing
   between authorities, is the next hardening, mirroring the control plane).
+- **Cross-agent trust** — sharing a brain *safely*. `import_belief` applies the registry's
+  "trust does not travel" rule to beliefs: a peer's claim enters as a `candidate` and only becomes
+  `verified` by passing the importer's OWN check (its self-asserted confidence is ignored).
+  `AuthorTrust` is a per-author reputation, *stored in the brain itself*: a contributor whose
+  beliefs keep re-verifying earns a higher prior (their claims start more believed, surface sooner);
+  a noisy one's falls. A fresh import's starting confidence is anchored to the author's reputation,
+  not the peer's assertion — so a single bad actor can't move the collective.
 - **Recall** — lexical by default; semantic (cosine) when an embedder is configured.
 - **Lifecycle controls** — `pinned` memories ignore decay and are never pruned; `volatile`
   memories are kept only if corroborated/verified within a window; a hard `ttl_s` expires
