@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.28.0 — quorum reads: a point read survives the leader being down
+
+Strong reads (0.27) route to the leader — so a read **fails when the leader is unavailable**. Quorum
+reads close that gap: a point read polls replicas and returns the freshest copy, tolerating leader
+downtime as long as a quorum of replicas still hold the record.
+- **Versioned records**: the leader stamps a monotonic version `token * STRIDE + seq` on every
+  mutation. Versions increase within a leader *and* across failovers (a new leader has a higher
+  fencing token), so any replica can tell which copy of a record is freshest. `version_of(record)`
+  is exported.
+- **`read_consistency="quorum"`** + **`read_quorum`** (default 1) on `ReplicatedMemory`: `get`
+  polls up to `read_quorum` replicas (this node + its `sources`) and returns the **highest-version**
+  copy. A read survives the leader being down — strong reads can't — and an unreachable replica
+  simply doesn't count toward the quorum.
+- **Reorder-/duplicate-safe replication**: `apply_replica_fenced` now drops an incoming record whose
+  version is *older* than the copy already held, so a delayed or duplicated replicate never regresses
+  a newer value.
+- Verified live: versions are monotonic and jump across failover; a quorum read returns the record
+  with the leader down; the freshest copy wins over a stale replica; an older replicate is ignored.
+  300 offline-CI tests (+ `tests/test_quorum_reads.py`).
+
+**HA brain — hardened end to end:** fault-tolerant replication (0.24) · self-healing anti-entropy
+(0.25) · crash-safe write durability (0.26) · read-your-writes (0.27) · quorum reads (0.28). No
+SPOF, no split-brain, no lost acked writes, reads that survive leader downtime.
+
 ## 0.27.0 — read-your-writes: opt-in strong reads from the leader
 
 Completes the HA-hardening pass. Reads were always local (eventual) — a client reading a follower

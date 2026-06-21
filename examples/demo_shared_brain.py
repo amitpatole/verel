@@ -118,6 +118,20 @@ def _replicated_ha() -> None:
     print(f"  strong read (read-your-writes): a lagging reader sees the leader's "
           f"{len(reader.all(scope='team:frontend'))} records without waiting for replication.")
 
+    # quorum read: a point read survives the LEADER being down — poll replicas, return the freshest.
+    from verel.memory import version_of
+    rec = b.write(fact("runbook", "restart the worker pool", "team:frontend"))
+    class DownLeader:                    # the leader, now unreachable
+        def get(self, _rid):
+            raise ConnectionError("leader down")
+    q = ReplicatedMemory(LocalMemory(), leases=leases, cluster_key="brain", owner="Q",
+                         read_consistency="quorum", read_quorum=2,
+                         sources={"B": DownLeader(), "LATE": late}, clock=lambda: clk["t"])
+    AntiEntropy(late, sources={"A": a, "B": b}).tick()   # late catches up, then serves the read
+    got = q.get(rec.id)
+    print(f"  quorum read: with the leader DOWN, a read still returns {got.text!r} "
+          f"(freshest by version {version_of(got)}) from a surviving replica — strong reads couldn't.")
+
 
 def _librarian() -> None:
     """The maintenance cycle that keeps the brain compounding — consolidate, graduate, prune."""
