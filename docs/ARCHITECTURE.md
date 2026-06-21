@@ -108,6 +108,13 @@ On top of that:
   beliefs keep re-verifying earns a higher prior (their claims start more believed, surface sooner);
   a noisy one's falls. A fresh import's starting confidence is anchored to the author's reputation,
   not the peer's assertion — so a single bad actor can't move the collective.
+- **The librarian** (`librarian_pass`) — the gated maintenance cycle, the brain's "sleep." It
+  orchestrates primitives that each earn their own trust: consolidate recurring failures into
+  candidate rules, induce the schema hierarchy, graduate cross-scope beliefs up the lattice, and
+  prune/decay what §5 allows. Steps that create knowledge write only `candidate`/`inferred` records
+  (they still face the promotion gate); prune never touches a `verified` or `pinned` memory. So the
+  brain compounds without rotting, and the librarian *proposes and tidies* — it never mints trust.
+  Runs against any `MemoryView`, so it maintains the shared team brain too.
 - **Recall** — lexical by default; semantic (cosine) when an embedder is configured.
 - **Lifecycle controls** — `pinned` memories ignore decay and are never pruned; `volatile`
   memories are kept only if corroborated/verified within a window; a hard `ttl_s` expires

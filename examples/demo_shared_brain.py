@@ -68,7 +68,36 @@ def main() -> None:
     print("`verified` at the team level via the held-out promotion gate. Trust is never decreed.")
 
     _cross_agent_trust()
+    _librarian()
     _hosted()
+
+
+def _librarian() -> None:
+    """The maintenance cycle that keeps the brain compounding — consolidate, graduate, prune."""
+    from verel.memory import librarian_pass
+
+    print("\n── Librarian: the gated upkeep pass (the brain's 'sleep') ──")
+    mem = LocalMemory()
+
+    def overflow(text, scope="repo:web-app"):
+        return MemoryRecord(kind=MemoryKind.FAILURE, subject=text[:10], predicate="f", text=text,
+                            scope=scope, subj_pred_key=make_key(text + scope, "f", scope)).with_detail(kind="overflow")
+
+    def junk(subj):
+        return MemoryRecord(kind=MemoryKind.FACT, subject=subj, predicate="p", text="ephemeral note",
+                            scope="repo:web-app", trust=Trust.CANDIDATE, epistemic_confidence=0.3,
+                            retrieval_strength=0.1, support_count=1, created_ts=0.0,
+                            subj_pred_key=make_key(subj, "p", "repo:web-app"))
+
+    mem.write(overflow("card overflows the viewport"))
+    mem.write(overflow("panel overflows on mobile"))      # recurring → consolidate into a rule
+    mem.write(junk("scratch1")); mem.write(junk("scratch2"))   # stale → prune
+
+    stub = lambda m: '{"subject":"cards","condition":"fixed px width","action":"use max-width","applies_to":"narrow"}'  # noqa: E731
+    rep = librarian_pass(mem, scope="repo:web-app", chat=stub, half_life_s=1.0, now=10**9)
+    print(f"  {rep.summary()}")
+    print("  Nothing was decreed: consolidated rules enter as candidates (face the promotion gate),")
+    print("  and prune only drops what the §5 rule allows — never verified or pinned memories.")
 
 
 def _cross_agent_trust() -> None:
