@@ -59,6 +59,8 @@ def _make_handler(store: SqliteLeaseStore, token: str | None):
                 return self._send(200, {"token": store.current_token(key)})
             if u.path == "/outcome":
                 return self._send(200, {"outcome": store.outcome(key)})
+            if u.path == "/holder":  # server is the clock authority for expiry
+                return self._send(200, {"holder": store.holder(key, now=time.time())})
             return self._send(404, {"error": "not found"})
 
         def do_POST(self):  # noqa: N802
@@ -164,6 +166,10 @@ class RemoteLeaseStore:
 
     def is_current(self, lease: Lease, *, now: float = 0.0) -> bool:
         return lease.token == self.current_token(lease.key)
+
+    def holder(self, key: str, *, now: float = 0.0) -> str | None:
+        # the client clock is ignored: the server is the authority for lease expiry
+        return self._req("GET", f"/holder?key={key}")["holder"]
 
     def complete(self, lease: Lease, state: str) -> None:
         self._req("POST", "/complete",

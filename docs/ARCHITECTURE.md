@@ -110,6 +110,8 @@ On top of that:
   a stale in-flight replicate) — **no split-brain**. Reads are served from any node's replica
   (eventual consistency). The lease store (the hosted control plane across machines) is the single
   source of fencing truth; `ReplicaClient` carries replication to follower `MemoryServer`s over HTTP.
+  A node that fell behind self-heals without an operator: the `AntiEntropy` reconciler periodically
+  resolves the current leader (via the lease store's `holder`) and `sync_from`s it in the background.
 - **Cross-agent trust** — sharing a brain *safely*. `import_belief` applies the registry's
   "trust does not travel" rule to beliefs: a peer's claim enters as a `candidate` and only becomes
   `verified` by passing the importer's OWN check (its self-asserted confidence is ignored).

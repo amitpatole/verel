@@ -104,6 +104,14 @@ def _replicated_ha() -> None:
     except Exception as e:               # noqa: BLE001
         print(f"  deposed leader A refused: {type(e).__name__} — no split-brain.")
 
+    # a lagging node self-heals: anti-entropy resolves the leader and pulls its state.
+    from verel.memory import AntiEntropy
+    late = ReplicatedMemory(LocalMemory(), leases=leases, cluster_key="brain", owner="LATE",
+                            clock=lambda: clk["t"])
+    synced = AntiEntropy(late, sources={"A": a, "B": b}).tick()
+    print(f"  anti-entropy: a lagging node pulled {synced} records from leader B "
+          f"→ has {sorted(r.subject for r in late.all(scope='team:frontend'))}")
+
 
 def _librarian() -> None:
     """The maintenance cycle that keeps the brain compounding — consolidate, graduate, prune."""

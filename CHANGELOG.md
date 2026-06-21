@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.25.0 — background anti-entropy: lagging followers self-heal
+
+Catch-up was manual (`sync_from`) in 0.24.0; now a follower that fell behind — or just recovered —
+reconciles itself automatically.
+- **`AntiEntropy`**: a background reconciler that periodically resolves the *current* leader (via the
+  lease store's new `holder`), maps it to a readable source, and `sync_from`s it. A no-op while this
+  node is the leader or no leader holds the lease; best-effort (a failed cycle never crashes the
+  loop). `start()`/`stop()` run it in a daemon thread; `tick()` runs one cycle (for tests/manual).
+- **`LeaseStore.holder(key, *, now)`** — the current live owner of a lease — added to the Protocol,
+  `InMemoryLeaseStore`, `SqliteLeaseStore`, and the control plane (`/holder` endpoint +
+  `RemoteLeaseStore.holder`), so "who's the leader" is queryable across machines.
+- Verified live: a lagging node syncs the leader's full state on a tick; the leader never syncs from
+  itself; the background loop self-heals a node with state written *after* it started. 269 offline-CI
+  tests.
+
 ## 0.24.0 — fault-tolerant replication: a dead follower can't break the brain
 
 Hardens the HA memory from 0.23.0, where any unreachable follower failed every write.
