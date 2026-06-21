@@ -135,11 +135,12 @@ class MemoryServer:
     background thread; `url` is the base address; `stop()` shuts it down."""
 
     def __init__(self, db_path: str | Path | None = None, *, store: MemoryView | None = None,
-                 host: str = "127.0.0.1", port: int = 0, auth_token: str | None = None):
+                 host: str = "127.0.0.1", port: int = 0, auth_token: str | None = None,
+                 durable: bool = True):
         if store is None:
             if db_path is None:
                 raise ValueError("MemoryServer needs a db_path or a store")
-            store = LocalMemory(db_path, check_same_thread=False)
+            store = LocalMemory(db_path, check_same_thread=False, durable=durable)
         self.store = store
         self._lock = threading.Lock()
         self._httpd = ThreadingHTTPServer((host, port), _make_handler(self.store, self._lock, auth_token))

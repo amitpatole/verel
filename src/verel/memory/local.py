@@ -38,15 +38,22 @@ _COLS = (
 
 class LocalMemory(MemoryView):
     def __init__(self, path: str | Path = ":memory:", *, embedder=None,
-                 check_same_thread: bool = True):
+                 check_same_thread: bool = True, durable: bool = True):
         self.path = str(path)
         self.embedder = embedder  # optional: enables semantic (cosine) recall (§5.6)
+        self.durable = durable
         if self.path != ":memory:":
             Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         # check_same_thread=False lets a hosted MemoryServer serve this store from its HTTP thread;
         # it is safe ONLY because the server serializes every access behind a lock.
         self._db = sqlite3.connect(self.path, check_same_thread=check_same_thread)
         self._db.row_factory = sqlite3.Row
+        if self.path != ":memory:":
+            # Crash safety (§5/§6.3): WAL for atomic, recoverable commits; synchronous=FULL fsyncs on
+            # every commit so a write that returned is durable BEFORE its replica is acked — it
+            # survives a leader crash. `durable=False` trades that fsync for speed where it's ok.
+            self._db.execute("PRAGMA journal_mode=WAL")
+            self._db.execute(f"PRAGMA synchronous={'FULL' if durable else 'NORMAL'}")
         self._db.execute(
             """CREATE TABLE IF NOT EXISTS memory (
                 id TEXT PRIMARY KEY, kind TEXT, subject TEXT, predicate TEXT, text TEXT,
