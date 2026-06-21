@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.24.0 — fault-tolerant replication: a dead follower can't break the brain
+
+Hardens the HA memory from 0.23.0, where any unreachable follower failed every write.
+- **Tolerates follower failure**: the leader commits locally, then replicates best-effort — an
+  unreachable peer is counted as *lagging*, not fatal. A write is durable once `write_quorum` nodes
+  (incl. the leader, default 1) hold it; below quorum raises `ReplicationError`.
+- **State-based, idempotent replication**: the leader now replicates the *resulting record verbatim*
+  (`apply_replica`) instead of the op, so re-delivery is idempotent and a follower mirrors the
+  leader exactly — no confidence drift. New `apply_replica` on every backend (`LocalMemory`, mem0,
+  `RemoteMemory`) and the `MemoryView` Protocol.
+- **Catch-up** (`sync_from`): a lagging or recovered follower pulls the leader's full state and
+  applies it verbatim.
+- **Observability** (`replication_status`): acks / lagging / quorum from the last write.
+- Verified live: a write succeeds despite a dead follower; quorum enforced; re-delivery is
+  idempotent; `sync_from` catches a late node up. Wire: `MemoryServer` `/replicate` carries a record
+  (fenced), `/apply` for sync; `ReplicaClient.apply_replica_fenced`. 262 offline-CI tests.
+
 ## 0.23.0 — replicated, HA shared memory (no SPOF, fenced between authorities)
 
 Closes the one limitation flagged in 0.20.0: the hosted brain was a single writer / single point of

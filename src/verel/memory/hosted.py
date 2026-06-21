@@ -87,12 +87,15 @@ def _make_handler(store: MemoryView, lock: threading.Lock, token: str | None):
                     return self._send(421, {"error": str(e)})
 
         def _dispatch(self, b):  # noqa: C901 — flat command table
-            if self.path == "/replicate":  # a leader replicating a mutation to this follower
-                rep = getattr(store, "replicate", None)
+            if self.path == "/replicate":  # a leader replicating a record to this follower (fenced)
+                rep = getattr(store, "apply_replica_fenced", None)
                 if rep is None:
                     return self._send(400, {"error": "store is not replicated"})
-                rep(b["op"], int(b["token"]), b["payload"])
+                rep(b["record"], int(b["token"]))
                 return self._send(200, {"ok": True})
+            if self.path == "/apply":      # verbatim upsert (catch-up sync)
+                r = store.apply_replica(MemoryRecord(**b["record"]))
+                return self._send(200, {"record": _rec_json(r)})
             if self.path == "/write":
                 r = store.write(MemoryRecord(**b["record"]), ts=b.get("ts", 0.0))
                 return self._send(200, {"record": _rec_json(r)})
@@ -189,6 +192,10 @@ class RemoteMemory:
         out = self._req("POST", "/write", {"record": record.model_dump(), "ts": ts})
         return self._rec(out["record"])  # type: ignore[return-value]
 
+    def apply_replica(self, record: MemoryRecord) -> MemoryRecord:
+        out = self._req("POST", "/apply", {"record": record.model_dump()})
+        return self._rec(out["record"])  # type: ignore[return-value]
+
     def get(self, record_id: str) -> MemoryRecord | None:
         return self._rec(self._req("GET", f"/get?id={record_id}")["record"])
 
@@ -239,11 +246,11 @@ class ReplicaClient:
         self.token = auth_token
         self.timeout = timeout
 
-    def replicate(self, op: str, token: int, payload: dict) -> None:
+    def apply_replica_fenced(self, record: dict, token: int) -> None:
         headers = {"Content-Type": "application/json"}
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
-        data = json.dumps({"op": op, "token": token, "payload": payload}).encode()
+        data = json.dumps({"record": record, "token": token}).encode()
         req = urllib.request.Request(self.base + "/replicate", data=data, headers=headers, method="POST")
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as r:

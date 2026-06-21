@@ -68,7 +68,7 @@ def test_replicate_rejects_a_stale_token_directly():
     a.write(_fact("a", "1"))                           # current token = 1
     leases.acquire("brain", "C", now=1000.0, ttl=10)  # a takeover bumps the cluster token to 2
     with pytest.raises(FencingError):                 # a stale leader's replicate (token 1) is refused
-        b.replicate("write", 1, {"record": _fact("z", "stale").model_dump()})
+        b.apply_replica_fenced(_fact("z", "stale").model_dump(), 1)
 
 
 def test_reads_served_from_any_node():
@@ -100,3 +100,56 @@ def test_cross_machine_cluster_over_http(tmp_path):
     finally:
         sa.stop()
         sb.stop()
+
+
+# ---- fault tolerance (v0.24.0 hardening) ----
+class _DeadPeer:
+    def apply_replica_fenced(self, record, token):
+        raise ConnectionError("follower unreachable")
+
+
+def test_write_survives_an_unreachable_follower():
+    a, b, _, _ = _cluster()
+    a.peers = [b, _DeadPeer()]                       # one healthy, one down
+    a.write(_fact("deploy", "via pipeline"))         # must NOT fail
+    assert [r.text for r in a.all(scope="team")] == ["via pipeline"]
+    assert [r.text for r in b.all(scope="team")] == ["via pipeline"]   # healthy follower still got it
+    st = a.replication_status()
+    assert st.acks == 2 and st.lagging == 1
+
+
+def test_write_quorum_is_enforced():
+    leases = InMemoryLeaseStore()
+    healthy = ReplicatedMemory(LocalMemory(), leases=leases, cluster_key="q", owner="H")
+    a = ReplicatedMemory(LocalMemory(), leases=leases, cluster_key="q", owner="A",
+                         peers=[healthy, _DeadPeer()], write_quorum=3)
+    from verel.memory import ReplicationError
+    with pytest.raises(ReplicationError):            # leader + 1 healthy = 2 < quorum 3
+        a.write(_fact("x", "y"))
+
+
+def test_write_quorum_met_succeeds():
+    leases = InMemoryLeaseStore()
+    healthy = ReplicatedMemory(LocalMemory(), leases=leases, cluster_key="q2", owner="H")
+    a = ReplicatedMemory(LocalMemory(), leases=leases, cluster_key="q2", owner="A",
+                         peers=[healthy], write_quorum=2)
+    a.write(_fact("x", "y"))                          # leader + 1 healthy = 2 == quorum
+    assert a.replication_status().acks == 2
+
+
+def test_apply_replica_is_idempotent_no_confidence_drift():
+    a, _, _, _ = _cluster()
+    rec = a.write(_fact("ci", "run suite"))
+    before = a.get(rec.id).epistemic_confidence
+    a.apply_replica(rec)
+    a.apply_replica(rec)                              # re-deliver the same record twice
+    assert a.get(rec.id).epistemic_confidence == before   # verbatim, not corroboration
+
+
+def test_sync_from_catches_a_lagging_node_up():
+    a, _, leases, _ = _cluster()
+    a.write(_fact("deploy", "v1"))
+    a.write(_fact("oncall", "page"))
+    late = ReplicatedMemory(LocalMemory(), leases=leases, cluster_key="brain", owner="LATE")
+    n = late.sync_from(a)
+    assert n == 2 and {r.subject for r in late.all(scope="team")} == {"deploy", "oncall"}

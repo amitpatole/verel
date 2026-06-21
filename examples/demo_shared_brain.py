@@ -70,6 +70,39 @@ def main() -> None:
     _cross_agent_trust()
     _librarian()
     _hosted()
+    _replicated_ha()
+
+
+def _replicated_ha() -> None:
+    """High availability: a leader-fenced, fault-tolerant cluster — no SPOF, no split-brain."""
+    from verel.fleet import InMemoryLeaseStore
+    from verel.memory import ReplicatedMemory
+
+    print("\n── Replicated HA: leader-fenced, fault-tolerant, no split-brain ──")
+    leases = InMemoryLeaseStore()       # the control plane in production
+    clk = {"t": 0.0}
+
+    class DownFollower:                  # a peer that's currently unreachable
+        def apply_replica_fenced(self, record, token):
+            raise ConnectionError("follower down")
+
+    b = ReplicatedMemory(LocalMemory(), leases=leases, cluster_key="brain", owner="B",
+                         ttl=10, clock=lambda: clk["t"])
+    a = ReplicatedMemory(LocalMemory(), leases=leases, cluster_key="brain", owner="A",
+                         peers=[b, DownFollower()], ttl=10, clock=lambda: clk["t"])
+
+    a.write(fact("deploy", "via the pipeline", "team:frontend"))
+    print(f"  leader A wrote despite a dead follower — status {a.replication_status()}")
+    print(f"  healthy follower B has the replica: {[r.text for r in b.all(scope='team:frontend')]}")
+
+    clk["t"] = 100.0                     # A's lease lapses → B takes over
+    b.peers = [a]
+    b.write(fact("oncall", "page owner", "team:frontend"))
+    print(f"  failover: B is now leader (token {leases.current_token('brain')}); A is fenced out.")
+    try:
+        a.write(fact("x", "stale", "team:frontend"))
+    except Exception as e:               # noqa: BLE001
+        print(f"  deposed leader A refused: {type(e).__name__} — no split-brain.")
 
 
 def _librarian() -> None:

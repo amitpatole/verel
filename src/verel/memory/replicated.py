@@ -1,26 +1,28 @@
-"""Replicated memory (§5, §6.3) — make the shared brain highly available.
+"""Replicated memory (§5, §6.3) — a highly-available, fault-tolerant shared brain.
 
-The hosted `MemoryServer` is a single writer: no split-brain by construction, but a single point of
-failure. This wraps a local store as one node of a REPLICATED cluster:
+One node of a leader-fenced cluster:
 
-* exactly **one node is the leader** at a time, held by a fencing lease — the same monotonic-token
-  primitive the fleet uses (`fleet.lease`);
-* the leader applies every mutation locally and **replicates** it to its peers;
-* a **stale leader is fenced** — once its lease lapses and a peer takes over (with a higher token),
-  the old leader can no longer write (`NotLeaderError`), and any in-flight replicate it sends is
-  rejected (`FencingError`). No split-brain, no SPOF.
+* exactly **one leader** at a time, held by a fencing lease (`fleet.lease`'s monotonic token);
+* the leader applies each mutation locally, then **replicates the resulting record state** (verbatim,
+  via `apply_replica`) to its peers — state-based, so replication is idempotent and a follower
+  mirrors the leader exactly;
+* replication is **fault-tolerant**: an unreachable follower does NOT fail the write (it falls
+  behind and catches up later); a write is durable once a `write_quorum` of nodes hold it;
+* a **deposed leader is fenced** — `NotLeaderError` on write, `FencingError` on a stale in-flight
+  replicate — so there is no split-brain;
+* a lagging or recovered follower **catches up** with `sync_from(leader)`.
 
-Reads are served from any node's local replica (eventual consistency — a follower is current once
-replication lands; nodes self-maintain via their own `decay`). The lease store — `InMemoryLeaseStore`
-for one process, or the hosted control plane (`RemoteLeaseStore`) across machines — is the single
-source of fencing truth every node consults. A peer is anything with a `replicate(op, token,
-payload)` method: another `ReplicatedMemory`, or a `ReplicaClient` to a remote node (see hosted.py).
+Reads are served from any node's local replica (eventual consistency). The lease store — in-memory
+in one process, or the hosted control plane across machines — is the single source of fencing truth.
+A peer is anything with `apply_replica_fenced(record_dict, token)`: another `ReplicatedMemory`, or a
+`ReplicaClient` to a remote node (hosted.py).
 """
 
 from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from ..fleet.lease import FencingError, Lease, LeaseStore
 from .view import MemoryRecord, MemoryView
@@ -30,24 +32,35 @@ class NotLeaderError(RuntimeError):
     """A mutation was attempted on a node that is not the current leader of the cluster."""
 
 
-# A peer accepts replicated mutations: replicate(op, token, payload) -> None.
-Peer = object
+class ReplicationError(RuntimeError):
+    """A write could not reach the configured `write_quorum` of replicas."""
+
+
+@dataclass
+class ReplicationStatus:
+    acks: int       # nodes that hold the last write (incl. the leader)
+    lagging: int    # peers that were unreachable on the last write
+    quorum: int
 
 
 class ReplicatedMemory(MemoryView):
     """One node of a replicated, fencing-led memory cluster. `local` is this node's durable store;
-    `leases` + `cluster_key` elect the single leader; `peers` receive replicated mutations."""
+    `leases` + `cluster_key` elect the single leader; `peers` receive replicated state. A write is
+    acknowledged once `write_quorum` nodes (incl. the leader) hold it — default 1 (leader-durable,
+    tolerant of every follower being down)."""
 
     def __init__(self, local: MemoryView, *, leases: LeaseStore, cluster_key: str, owner: str,
-                 peers: list[Peer] | None = None, ttl: float = 30.0,
+                 peers: list | None = None, write_quorum: int = 1, ttl: float = 30.0,
                  clock: Callable[[], float] = time.monotonic):
         self.local = local
         self.leases = leases
         self.key = cluster_key
         self.owner = owner
         self.peers: list = list(peers) if peers is not None else []
+        self.write_quorum = max(1, write_quorum)
         self.ttl = ttl
         self._clock = clock
+        self._last = ReplicationStatus(0, 0, self.write_quorum)
 
     # ---- leadership (fenced by the shared lease store) ----
     def _lead(self) -> Lease:
@@ -63,72 +76,78 @@ class ReplicatedMemory(MemoryView):
             return False
         return True
 
+    def replication_status(self) -> ReplicationStatus:
+        """Acks / lagging peers / quorum from the most recent write."""
+        return self._last
+
     # ---- replication target (called on a FOLLOWER by the leader) ----
-    def replicate(self, op: str, token: int, payload: dict) -> None:
-        """Apply a leader's mutation locally — FENCED: a token below the cluster's current (a stale
+    def apply_replica_fenced(self, record: dict, token: int) -> None:
+        """Apply a leader's record verbatim — FENCED: a token below the cluster's current (a stale
         leader's) is rejected, so a deposed leader can't overwrite the successor's state."""
         current = self.leases.current_token(self.key)
         if token < current:
             raise FencingError(f"stale replicate token {token} < current {current} for {self.key!r}")
-        self._apply(op, payload)
+        self.local.apply_replica(MemoryRecord(**record))
 
-    def _apply(self, op: str, payload: dict) -> None:
-        if op == "write":
-            self.local.write(MemoryRecord(**payload["record"]), ts=payload.get("ts", 0.0))
-        elif op == "corroborate":
-            self.local.corroborate(payload["id"], delta=payload["delta"])
-        elif op == "contradict":
-            self.local.contradict(payload["id"], delta=payload["delta"])
-        elif op in ("promote", "demote", "pin", "unpin"):
-            getattr(self.local, op)(payload["id"])
-        elif op == "annotate":
-            self.local.annotate(payload["id"], **payload["detail"])
-        elif op == "set_flags":
-            self.local.set_flags(payload["id"], pinned=payload.get("pinned"),
-                                 volatile=payload.get("volatile"), ttl_s=payload.get("ttl_s"))
-
-    def _mutate(self, op: str, payload: dict, local_call: Callable):
-        lease = self._lead()              # fence: only the current leader proceeds
-        result = local_call()             # apply locally
-        for p in self.peers:              # then replicate to followers, carrying the fencing token
-            try:
-                p.replicate(op, lease.token, payload)
-            except FencingError as e:
-                raise NotLeaderError(f"lost leadership mid-write: {e}") from e
+    def _mutate(self, local_call: Callable[[], MemoryRecord | None]) -> MemoryRecord | None:
+        lease = self._lead()                       # fence: only the current leader proceeds
+        result = local_call()                      # apply locally — the resulting record state
+        acks, lagging = 1, 0                        # the leader holds it
+        if result is not None:
+            payload = result.model_dump()
+            for p in self.peers:
+                try:
+                    p.apply_replica_fenced(payload, lease.token)
+                    acks += 1
+                except FencingError as e:           # we were superseded mid-write — abort
+                    raise NotLeaderError(f"lost leadership mid-write: {e}") from e
+                except Exception:                   # noqa: BLE001 — unreachable follower: best-effort
+                    lagging += 1
+        self._last = ReplicationStatus(acks, lagging, self.write_quorum)
+        if acks < self.write_quorum:
+            raise ReplicationError(f"write reached {acks} replica(s), below quorum {self.write_quorum}")
         return result
+
+    # ---- catch-up ----
+    def sync_from(self, source: MemoryView) -> int:
+        """Pull every record from `source` (the leader) and apply it verbatim locally — for a
+        follower that fell behind or just recovered. Returns the number of records synced."""
+        n = 0
+        for r in source.all():
+            self.local.apply_replica(r)
+            n += 1
+        return n
 
     # ---- MemoryView: mutations are leader-only + replicated ----
     def write(self, record: MemoryRecord, *, ts: float = 0.0) -> MemoryRecord:
-        return self._mutate("write", {"record": record.model_dump(), "ts": ts},
-                            lambda: self.local.write(record, ts=ts))
+        return self._mutate(lambda: self.local.write(record, ts=ts))  # type: ignore[return-value]
+
+    def apply_replica(self, record: MemoryRecord) -> MemoryRecord:
+        return self.local.apply_replica(record)
 
     def corroborate(self, record_id, *, delta: float = 0.15):
-        return self._mutate("corroborate", {"id": record_id, "delta": delta},
-                            lambda: self.local.corroborate(record_id, delta=delta))
+        return self._mutate(lambda: self.local.corroborate(record_id, delta=delta))
 
     def contradict(self, record_id, *, delta: float = 0.25):
-        return self._mutate("contradict", {"id": record_id, "delta": delta},
-                            lambda: self.local.contradict(record_id, delta=delta))
+        return self._mutate(lambda: self.local.contradict(record_id, delta=delta))
 
     def promote(self, record_id):
-        return self._mutate("promote", {"id": record_id}, lambda: self.local.promote(record_id))
+        return self._mutate(lambda: self.local.promote(record_id))
 
     def demote(self, record_id):
-        return self._mutate("demote", {"id": record_id}, lambda: self.local.demote(record_id))
+        return self._mutate(lambda: self.local.demote(record_id))
 
     def pin(self, record_id):
-        return self._mutate("pin", {"id": record_id}, lambda: self.local.pin(record_id))
+        return self._mutate(lambda: self.local.pin(record_id))
 
     def unpin(self, record_id):
-        return self._mutate("unpin", {"id": record_id}, lambda: self.local.unpin(record_id))
+        return self._mutate(lambda: self.local.unpin(record_id))
 
     def annotate(self, record_id, **detail):
-        return self._mutate("annotate", {"id": record_id, "detail": detail},
-                            lambda: self.local.annotate(record_id, **detail))
+        return self._mutate(lambda: self.local.annotate(record_id, **detail))
 
     def set_flags(self, record_id, *, pinned=None, volatile=None, ttl_s=None):
-        payload = {"id": record_id, "pinned": pinned, "volatile": volatile, "ttl_s": ttl_s}
-        return self._mutate("set_flags", payload, lambda: self.local.set_flags(
+        return self._mutate(lambda: self.local.set_flags(
             record_id, pinned=pinned, volatile=volatile, ttl_s=ttl_s))
 
     def decay(self, *, half_life_s: float = 604800.0, now: float = 0.0) -> int:

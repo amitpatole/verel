@@ -139,6 +139,14 @@ class Mem0Memory(MemoryView):
         self._persist(record, mem0_id)
         return record
 
+    def apply_replica(self, record: MemoryRecord) -> MemoryRecord:
+        """Upsert a record VERBATIM (no corroboration/supersede) — for replication / catch-up sync."""
+        if not record.subj_pred_key:
+            record.subj_pred_key = make_key(record.subject, record.predicate, record.scope)
+        record.id = record.id or make_id(record.subj_pred_key)
+        self._persist(record, self._mem0_id_for(record.id))
+        return record
+
     def get(self, record_id: str) -> MemoryRecord | None:
         for row in self._rows():
             if (row.get("metadata") or {}).get("verel_id") == record_id:

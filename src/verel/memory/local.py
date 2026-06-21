@@ -144,6 +144,17 @@ class LocalMemory(MemoryView):
         self._set_vector(record.id, self._embed_text(record))  # no-op without an embedder
         return record
 
+    def apply_replica(self, record: MemoryRecord) -> MemoryRecord:
+        """Upsert a record VERBATIM (id + every field), with NO corroboration/supersede — for
+        replication and catch-up sync, so a follower mirrors the leader's state exactly and
+        re-delivery is idempotent."""
+        if not record.subj_pred_key:
+            record.subj_pred_key = make_key(record.subject, record.predicate, record.scope)
+        record.id = record.id or make_id(record.subj_pred_key)
+        self._upsert(record)
+        self._set_vector(record.id, self._embed_text(record))
+        return record
+
     def get(self, record_id: str) -> MemoryRecord | None:
         row = self._db.execute(f"SELECT {_COLS} FROM memory WHERE id=?", (record_id,)).fetchone()
         return self._row_to_record(row) if row else None
