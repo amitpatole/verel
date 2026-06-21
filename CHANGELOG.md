@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.21.0 — cross-agent trust: sharing the brain *safely*
+
+The third shared-brain slice — what makes opening the brain to *many* agents robust against one
+sloppy or adversarial contributor. Pure logic over any `MemoryView` (incl. `RemoteMemory`).
+- **`import_belief`**: the registry's "trust does not travel" rule, applied to beliefs. A peer's
+  claim enters the importer as a `candidate` and becomes `verified` ONLY by passing the importer's
+  own `verify` check in its own context — the claim's self-asserted trust/confidence are ignored.
+- **`AuthorTrust`**: a per-author reputation, persisted *in the brain* so every agent shares the
+  same view of who's reliable. `prior(author)` is a Laplace-smoothed re-verification rate (neutral
+  0.5 when unknown). A fresh import's starting confidence is anchored to the author's prior (0.3 …
+  0.7), not the peer's assertion — so a noisy author's claims need more corroboration before they
+  surface, and a single bad actor can't move the collective. Verified live: a peer's "VERIFIED,
+  conf 0.99" claim still enters as a candidate; reliable author → ~0.9 prior, noisy → ~0.3.
+- `author_of()` reads the contributor (stored in detail, round-trips across backends);
+  `BeliefImport` reports the outcome. `examples/demo_shared_brain.py` gains the cross-agent section.
+- 244 offline-CI tests.
+
+Next slice: the "librarian" — a gated, scheduled consolidation/curation pass so the shared brain
+compounds without rotting.
+
 ## 0.20.0 — hosted shared memory: a fleet shares one brain over HTTP
 
 The second shared-brain slice — agents on **different machines** read and write one store.

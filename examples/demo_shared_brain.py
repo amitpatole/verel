@@ -67,7 +67,40 @@ def main() -> None:
     print("\nThe graduated belief is a team CANDIDATE — collective, but it still has to re-earn")
     print("`verified` at the team level via the held-out promotion gate. Trust is never decreed.")
 
+    _cross_agent_trust()
     _hosted()
+
+
+def _cross_agent_trust() -> None:
+    """Sharing safely: a peer's belief re-verifies before it's trusted, and authors earn reputation."""
+    from verel.memory import AuthorTrust, import_belief
+
+    print("\n── Cross-agent trust: trust does not travel; authors earn reputation ──")
+    mem = LocalMemory()
+    rep = AuthorTrust(mem)
+
+    def claim(text, author):
+        return MemoryRecord(kind=MemoryKind.FACT, subject=text[:8], predicate="rule", text=text,
+                            scope="team:frontend", trust=Trust.VERIFIED, epistemic_confidence=0.99,
+                            subj_pred_key=make_key(text[:8], "rule", "team:frontend")).with_detail(author=author)
+
+    # a peer asserts VERIFIED + 0.99 — but it only counts if MY check agrees
+    good = import_belief(mem, claim("retry transient errors 3x", "agent-A"),
+                         verify=lambda r: True, author_trust=rep)
+    bad = import_belief(mem, claim("disable all timeouts", "agent-B"),
+                        verify=lambda r: False, author_trust=rep)
+    print(f"  agent-A's belief (my check passes): {'VERIFIED locally' if good.reverified else 'candidate'}")
+    print(f"  agent-B's belief (my check fails):  {'verified' if bad.reverified else 'stayed CANDIDATE — trust did not travel'}")
+
+    # reputation accrues: a steady contributor vs a noisy one
+    for _ in range(9):
+        import_belief(mem, claim("solid rule", "agent-A"), verify=lambda r: True, author_trust=rep)
+    for i in range(9):
+        import_belief(mem, claim("shaky rule", "agent-B"),
+                      verify=lambda r, i=i: i % 3 == 0, author_trust=rep)
+    print(f"  reputations → agent-A prior={rep.prior('agent-A'):.2f} {rep.standing('agent-A')}, "
+          f"agent-B prior={rep.prior('agent-B'):.2f} {rep.standing('agent-B')}")
+    print("  → a new claim from agent-A starts more believed; agent-B's needs more corroboration.")
 
 
 def _hosted() -> None:
