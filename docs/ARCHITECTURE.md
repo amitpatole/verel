@@ -89,6 +89,12 @@ On top of that:
   agent-inaccessible eval (with a leakage canary). Trust is earned, never asserted.
 - **Failure ledger + regression guard** — past gating failures are remembered; reintroducing
   a previously-fixed failure fails the gate from memory alone.
+- **Scope lattice** (`self → team → org → global`) — the spine of a *shared* brain.
+  `lattice_recall` resolves **down**: an agent recalls across its own, its team's, and its org's
+  knowledge at once, with the most-specific scope winning ties. `graduate` promotes **up**: a belief
+  independently verified across sibling scopes becomes a parent-level *candidate* that must re-earn
+  `verified` — collective knowledge no single agent decreed. Individual and collective memory are
+  the same machinery at different radii of the lattice.
 - **Recall** — lexical by default; semantic (cosine) when an embedder is configured.
 - **Lifecycle controls** — `pinned` memories ignore decay and are never pruned; `volatile`
   memories are kept only if corroborated/verified within a window; a hard `ttl_s` expires

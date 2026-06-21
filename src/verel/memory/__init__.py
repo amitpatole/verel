@@ -16,6 +16,7 @@ from .consolidate import (
 )
 from .embed import Embedder, HashEmbedder, OpenAIEmbedder, cosine
 from .failure_ledger import FailureLedger, regression_report
+from .lattice import ScopeLattice, graduate, lattice_recall
 from .local import LocalMemory
 from .mem0_backend import Mem0Memory, make_ollama_mem0
 from .promotion import (
@@ -51,6 +52,9 @@ __all__ = [
     "propagate_revision",
     "contradicts",
     "Revision",
+    "ScopeLattice",
+    "lattice_recall",
+    "graduate",
     "FailureLedger",
     "regression_report",
     "LocalMemory",

@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.19.0 — scope lattice: the foundation of a shared team brain
+
+The first slice of the shared-brain work — the mechanic that turns individual memory into
+collective memory, built on the existing trust layer (pure logic, no infra, any `MemoryView`).
+- **`ScopeLattice`**: a child→parent map over scopes (`repo → team → org → global`); a scope with
+  no explicit parent rolls up to `global`, so existing flat scopes behave exactly as before.
+- **Resolve down** (`lattice_recall`): an agent recalls across its scope *and all ancestors* at
+  once, ranked by the documented `rank()` plus a small specificity bonus so the most-specific scope
+  wins ties (a repo override beats the team default, but the team's knowledge stays in view). A pure
+  read — no recall-reinforcement side effect across scopes.
+- **Graduate up** (`graduate`): a belief independently **verified** in `>= min_scopes` sibling child
+  scopes is promoted to the parent as a **candidate** (records `detail['graduated_from']`) — it must
+  re-earn `verified` at the higher level via the promotion gate. Single-scope quirks and unverified
+  beliefs never graduate; trust is never decreed by height.
+- `examples/demo_shared_brain.py`; 231 offline-CI tests.
+
+Individual and collective cognition are the same verbs at different radii of the lattice — next
+slices: a hosted shared `MemoryView` service, and per-author trust on cross-agent imports.
+
 ## 0.18.0 — schema-split propagation (close the one real consistency hole revision left)
 
 0.15.0's revision could split a leaf rule but left the schemas above it derived from the old,
