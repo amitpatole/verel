@@ -115,6 +115,9 @@ On top of that:
   On-disk stores are **crash-safe**: `LocalMemory` opens WAL with `synchronous=FULL`, so a commit is
   fsync'd before the call returns — an acked write is durable *before* its replica is even sent, and
   survives a leader crash (`durable=False` relaxes to `synchronous=NORMAL` for speed where it's ok).
+  Reads are local (eventual) by default — fast, may lag — or, with `read_consistency='strong'`,
+  routed to the **current leader** (the single writer, so it holds every committed write) for
+  read-your-writes / linearizable-ish reads; it falls back to local if no leader can be resolved.
 - **Cross-agent trust** — sharing a brain *safely*. `import_belief` applies the registry's
   "trust does not travel" rule to beliefs: a peer's claim enters as a `candidate` and only becomes
   `verified` by passing the importer's OWN check (its self-asserted confidence is ignored).

@@ -52,6 +52,8 @@ class ReplicatedMemory(MemoryView):
 
     def __init__(self, local: MemoryView, *, leases: LeaseStore, cluster_key: str, owner: str,
                  peers: list | None = None, write_quorum: int = 1, ttl: float = 30.0,
+                 sources: dict[str, MemoryView] | None = None,
+                 read_consistency: str = "eventual",
                  clock: Callable[[], float] = time.monotonic):
         self.local = local
         self.leases = leases
@@ -60,6 +62,12 @@ class ReplicatedMemory(MemoryView):
         self.peers: list = list(peers) if peers is not None else []
         self.write_quorum = max(1, write_quorum)
         self.ttl = ttl
+        # `read_consistency`: "eventual" (default) reads this node's local replica — fast, may lag;
+        # "strong" routes reads to the CURRENT leader (the single writer, so it holds every committed
+        # write) for read-your-writes / linearizable-ish reads. Needs `sources` (owner -> readable
+        # view) to reach the leader; falls back to local if the leader can't be resolved.
+        self.sources = dict(sources) if sources is not None else {}
+        self.read_consistency = read_consistency
         self._clock = clock
         self._last = ReplicationStatus(0, 0, self.write_quorum)
 
@@ -155,15 +163,26 @@ class ReplicatedMemory(MemoryView):
         # per-node maintenance: each replica decays its own copy on its own schedule; nodes converge.
         return self.local.decay(half_life_s=half_life_s, now=now)
 
-    # ---- reads: served from this node's local replica ----
+    # ---- reads: local (eventual) by default, or routed to the leader (strong) ----
+    def leader_view(self) -> MemoryView:
+        """The view to read from: this node's local replica, unless `read_consistency='strong'`, in
+        which case the CURRENT leader's view (read-your-writes). Falls back to local if the leader
+        can't be resolved (no leader, or no source for it)."""
+        if self.read_consistency != "strong":
+            return self.local
+        owner = self.leases.holder(self.key, now=self._clock())
+        if owner is None or owner == self.owner:
+            return self.local  # no leader, or we ARE the leader → our local is authoritative
+        return self.sources.get(owner, self.local)
+
     def get(self, record_id):
-        return self.local.get(record_id)
+        return self.leader_view().get(record_id)
 
     def recall(self, query, *, scope=None, kind=None, k: int = 5, ts: float = 0.0):
-        return self.local.recall(query, scope=scope, kind=kind, k=k, ts=ts)
+        return self.leader_view().recall(query, scope=scope, kind=kind, k=k, ts=ts)
 
     def all(self, *, scope=None, kind=None):
-        return self.local.all(scope=scope, kind=kind)
+        return self.leader_view().all(scope=scope, kind=kind)
 
 
 class AntiEntropy:
