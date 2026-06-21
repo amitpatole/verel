@@ -118,6 +118,12 @@ On top of that:
   Reads are local (eventual) by default — fast, may lag — or, with `read_consistency='strong'`,
   routed to the **current leader** (the single writer, so it holds every committed write) for
   read-your-writes / linearizable-ish reads; it falls back to local if no leader can be resolved.
+  Strong reads, though, fail when the leader is down. `read_consistency='quorum'` closes that gap:
+  the leader stamps every mutation with a **monotonic version** (`token * STRIDE + seq`, so versions
+  increase within a leader *and* across failovers), and a quorum `get` polls up to `read_quorum`
+  replicas and returns the **freshest** copy — a point read that survives the leader being down, as
+  long as a quorum of replicas hold the record. The same versions make replication
+  reorder-/duplicate-safe: an older-version replicate never clobbers a newer copy (`version_of`).
 - **Cross-agent trust** — sharing a brain *safely*. `import_belief` applies the registry's
   "trust does not travel" rule to beliefs: a peer's claim enters as a `candidate` and only becomes
   `verified` by passing the importer's OWN check (its self-asserted confidence is ignored).

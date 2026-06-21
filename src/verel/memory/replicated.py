@@ -33,6 +33,16 @@ class NotLeaderError(RuntimeError):
     """A mutation was attempted on a node that is not the current leader of the cluster."""
 
 
+_VERSION_STRIDE = 1_000_000_000  # the per-leader sequence space below each fencing token
+
+
+def version_of(record: MemoryRecord) -> int:
+    """The record's replication version (0 if unversioned). The leader stamps a monotonic version
+    `token * STRIDE + seq`, so versions increase within a leader AND across failovers (a new leader
+    has a higher token) — letting any replica tell which copy of a record is freshest."""
+    return int(record.detail.get("_v", 0))
+
+
 class ReplicationError(RuntimeError):
     """A write could not reach the configured `write_quorum` of replicas."""
 
@@ -53,7 +63,7 @@ class ReplicatedMemory(MemoryView):
     def __init__(self, local: MemoryView, *, leases: LeaseStore, cluster_key: str, owner: str,
                  peers: list | None = None, write_quorum: int = 1, ttl: float = 30.0,
                  sources: dict[str, MemoryView] | None = None,
-                 read_consistency: str = "eventual",
+                 read_consistency: str = "eventual", read_quorum: int = 1,
                  clock: Callable[[], float] = time.monotonic):
         self.local = local
         self.leases = leases
@@ -68,7 +78,9 @@ class ReplicatedMemory(MemoryView):
         # view) to reach the leader; falls back to local if the leader can't be resolved.
         self.sources = dict(sources) if sources is not None else {}
         self.read_consistency = read_consistency
+        self.read_quorum = max(1, read_quorum)
         self._clock = clock
+        self._seq = 0  # per-leader sequence under the fencing token → monotonic record versions
         self._last = ReplicationStatus(0, 0, self.write_quorum)
 
     # ---- leadership (fenced by the shared lease store) ----
@@ -96,13 +108,19 @@ class ReplicatedMemory(MemoryView):
         current = self.leases.current_token(self.key)
         if token < current:
             raise FencingError(f"stale replicate token {token} < current {current} for {self.key!r}")
-        self.local.apply_replica(MemoryRecord(**record))
+        rec = MemoryRecord(**record)
+        existing = self.local.get(rec.id)
+        if existing is not None and version_of(existing) > version_of(rec):
+            return  # incoming copy is older than what we hold — don't regress (reorder/dup safety)
+        self.local.apply_replica(rec)
 
     def _mutate(self, local_call: Callable[[], MemoryRecord | None]) -> MemoryRecord | None:
         lease = self._lead()                       # fence: only the current leader proceeds
         result = local_call()                      # apply locally — the resulting record state
         acks, lagging = 1, 0                        # the leader holds it
         if result is not None:
+            self._seq += 1                          # stamp a monotonic version (token-prefixed)
+            result = self.local.annotate(result.id, _v=lease.token * _VERSION_STRIDE + self._seq) or result
             payload = result.model_dump()
             for p in self.peers:
                 try:
@@ -176,7 +194,26 @@ class ReplicatedMemory(MemoryView):
         return self.sources.get(owner, self.local)
 
     def get(self, record_id):
+        if self.read_consistency == "quorum":
+            return self._quorum_get(record_id)
         return self.leader_view().get(record_id)
+
+    def _quorum_get(self, record_id):
+        """Read the record from up to `read_quorum` replicas (this node + its sources) and return
+        the FRESHEST by version — so a point read returns the latest committed value even when the
+        leader is unavailable, as long as a quorum of replicas hold it."""
+        best, reads = None, 0
+        for view in (self.local, *self.sources.values()):
+            try:
+                r = view.get(record_id)
+            except Exception:  # noqa: BLE001 — an unreachable replica just doesn't count
+                continue
+            reads += 1
+            if r is not None and (best is None or version_of(r) > version_of(best)):
+                best = r
+            if reads >= self.read_quorum:
+                break
+        return best
 
     def recall(self, query, *, scope=None, kind=None, k: int = 5, ts: float = 0.0):
         return self.leader_view().recall(query, scope=scope, kind=kind, k=k, ts=ts)
