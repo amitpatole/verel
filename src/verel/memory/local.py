@@ -37,12 +37,15 @@ _COLS = (
 
 
 class LocalMemory(MemoryView):
-    def __init__(self, path: str | Path = ":memory:", *, embedder=None):
+    def __init__(self, path: str | Path = ":memory:", *, embedder=None,
+                 check_same_thread: bool = True):
         self.path = str(path)
         self.embedder = embedder  # optional: enables semantic (cosine) recall (§5.6)
         if self.path != ":memory:":
             Path(self.path).parent.mkdir(parents=True, exist_ok=True)
-        self._db = sqlite3.connect(self.path)
+        # check_same_thread=False lets a hosted MemoryServer serve this store from its HTTP thread;
+        # it is safe ONLY because the server serializes every access behind a lock.
+        self._db = sqlite3.connect(self.path, check_same_thread=check_same_thread)
         self._db.row_factory = sqlite3.Row
         self._db.execute(
             """CREATE TABLE IF NOT EXISTS memory (

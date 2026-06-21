@@ -67,6 +67,29 @@ def main() -> None:
     print("\nThe graduated belief is a team CANDIDATE — collective, but it still has to re-earn")
     print("`verified` at the team level via the held-out promotion gate. Trust is never decreed.")
 
+    _hosted()
+
+
+def _hosted() -> None:
+    """The same brain, but shared across a fleet over HTTP — agents on different machines."""
+    import tempfile
+
+    from verel.memory import MemoryServer, RemoteMemory
+
+    print("\n── Hosted: a fleet shares ONE brain over HTTP ──")
+    with tempfile.TemporaryDirectory() as d:
+        srv = MemoryServer(f"{d}/brain.db", auth_token="team-key").start()
+        try:
+            alice = RemoteMemory(srv.url, auth_token="team-key")   # agent on machine 1
+            bob = RemoteMemory(srv.url, auth_token="team-key")     # agent on machine 2
+            alice.write(fact("oncall", "page the owning team first", "team:frontend"))
+            seen = bob.recall("who do we page on call", scope="team:frontend")
+            print(f"  Alice writes → Bob ({srv.url}) recalls: {[r.text for r in seen]}")
+            print("  RemoteMemory is a drop-in MemoryView — lattice_recall, graduate, the promotion")
+            print("  gate, and consolidation all work against the shared store unchanged.")
+        finally:
+            srv.stop()
+
 
 if __name__ == "__main__":
     main()

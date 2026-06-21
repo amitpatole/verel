@@ -95,6 +95,12 @@ On top of that:
   independently verified across sibling scopes becomes a parent-level *candidate* that must re-earn
   `verified` — collective knowledge no single agent decreed. Individual and collective memory are
   the same machinery at different radii of the lattice.
+- **Hosted shared memory** (`MemoryServer` / `RemoteMemory`) — for a fleet on *different machines*,
+  a durable `MemoryView` behind a tiny HTTP service. `RemoteMemory` implements the same Protocol, so
+  `lattice_recall`, `graduate`, consolidation, and the promotion gate all run against the shared
+  brain unchanged. The server is the single writer — every access is lock-serialized, so the
+  interference rule stays correct under concurrent agents (replicating the store, with fencing
+  between authorities, is the next hardening, mirroring the control plane).
 - **Recall** — lexical by default; semantic (cosine) when an embedder is configured.
 - **Lifecycle controls** — `pinned` memories ignore decay and are never pruned; `volatile`
   memories are kept only if corroborated/verified within a window; a hard `ttl_s` expires
