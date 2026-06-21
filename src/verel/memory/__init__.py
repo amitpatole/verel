@@ -16,6 +16,7 @@ from .consolidate import (
 )
 from .embed import Embedder, HashEmbedder, OpenAIEmbedder, cosine
 from .failure_ledger import FailureLedger, regression_report
+from .hosted import MemoryServer, RemoteMemory
 from .lattice import ScopeLattice, graduate, lattice_recall
 from .local import LocalMemory
 from .mem0_backend import Mem0Memory, make_ollama_mem0
@@ -55,6 +56,8 @@ __all__ = [
     "ScopeLattice",
     "lattice_recall",
     "graduate",
+    "MemoryServer",
+    "RemoteMemory",
     "FailureLedger",
     "regression_report",
     "LocalMemory",

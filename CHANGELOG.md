@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.20.0 — hosted shared memory: a fleet shares one brain over HTTP
+
+The second shared-brain slice — agents on **different machines** read and write one store.
+- **`MemoryServer`**: wraps a durable `MemoryView` (a `LocalMemory` from a `db_path`, opened
+  cross-thread, or your own store) in a tiny stdlib HTTP service exposing the full Protocol —
+  write / get / recall / all / corroborate / contradict / promote / demote / annotate / set_flags /
+  pin / unpin / decay. Optional bearer token. The server is the **single writer**: every access is
+  lock-serialized, so the interference rule (same `(subject,predicate,scope)` supersedes) stays
+  correct under concurrent agents.
+- **`RemoteMemory`**: a `MemoryView` over HTTP — a drop-in for `LocalMemory`/`mem0`, so
+  `lattice_recall`, `graduate`, consolidation, and the promotion gate all work against the shared
+  brain unchanged. Verified live: Alice writes, Bob recalls; corroboration is shared; 40 concurrent
+  writes serialize cleanly; the interference rule holds over the wire; bad auth is rejected.
+- `LocalMemory(check_same_thread=False)` so a server can serve it from its HTTP thread.
+- `examples/demo_shared_brain.py` now ends with the hosted flow; 237 offline-CI tests.
+
+Next slice: per-author trust + `import_belief` (re-verify on cross-agent import), then the
+"librarian" curation pass.
+
 ## 0.19.0 — scope lattice: the foundation of a shared team brain
 
 The first slice of the shared-brain work — the mechanic that turns individual memory into
