@@ -18,6 +18,7 @@ from .embed import Embedder, HashEmbedder, OpenAIEmbedder, cosine
 from .failure_ledger import FailureLedger, regression_report
 from .hosted import MemoryServer, RemoteMemory
 from .lattice import ScopeLattice, graduate, lattice_recall
+from .librarian import LibrarianReport, librarian_pass
 from .local import LocalMemory
 from .mem0_backend import Mem0Memory, make_ollama_mem0
 from .promotion import (
@@ -63,6 +64,8 @@ __all__ = [
     "AuthorTrust",
     "BeliefImport",
     "author_of",
+    "librarian_pass",
+    "LibrarianReport",
     "FailureLedger",
     "regression_report",
     "LocalMemory",

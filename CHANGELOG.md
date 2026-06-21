@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.22.0 — the librarian: the brain compounds without rotting (shared-brain set complete)
+
+The fourth and final shared-brain slice — the gated maintenance cycle ("sleep") that keeps a
+growing brain from becoming a junk drawer. Pure orchestration of primitives that each earn their
+own trust, over any `MemoryView` (incl. `RemoteMemory`, so it maintains the *shared* brain).
+- **`librarian_pass`**: one upkeep cycle over a scope — (1) **consolidate** recurring failures into
+  candidate rules, (2) **induce** the multi-hop schema hierarchy, (3) **graduate** beliefs verified
+  across sibling scopes up the lattice, (4) **prune & decay** what §5 allows. Each step is
+  toggleable; it returns a `LibrarianReport` (`rules_induced` / `schemas_induced` / `graduated` /
+  `pruned`).
+- **Nothing is decreed**: steps 1–3 write only `candidate`/`inferred` records (they still face the
+  promotion gate); prune never drops a `verified` or `pinned` memory. The librarian *proposes and
+  tidies* — it never mints trust. Verified live, including curating a shared store through
+  `RemoteMemory`.
+- `examples/demo_shared_brain.py` now walks the full arc: resolve-down → graduate-up → cross-agent
+  trust → librarian → hosted. 250 offline-CI tests.
+
+**Shared team brain — complete:** scope lattice (cognition) · hosted memory (cross-machine
+substrate) · cross-agent trust (safety) · librarian (curation). Each agent thinks privately, shares
+verified distillations, and the collective accepts only what re-verifies.
+
 ## 0.21.0 — cross-agent trust: sharing the brain *safely*
 
 The third shared-brain slice — what makes opening the brain to *many* agents robust against one
