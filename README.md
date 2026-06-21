@@ -156,23 +156,42 @@ verel-ci install --repo .     # wire a native pre-commit hook
 (AgentVision) plug in as the `sight` sense. Add `verel[sight]` for visual gating, and
 `verel.senses.watch(...)` to gate on verified playback over time.
 
-## Try the demos
+## Real-world scenarios
+
+Six situations a team actually hits — each a **runnable script** whose output below is **real, not
+mocked**. Full write-ups with captured output: **[Real-world scenarios →](docs/examples.md)**.
+
+| # | The situation | What Verel does | Run it |
+|---|---|---|---|
+| 1 | **Your CI went red** | Real `pytest` fails → an agent patches the **source** (never the tests) → the stage re-gates until the *graders* go green (`terminated_on=passed`). | `demo_selfheal.py` |
+| 2 | **A bad merge slipped through** | Canary grader fails → deterministic `git revert` to the last good HEAD — and **refuses** to act when the only evidence is advisory. | `demo_canary_rollback.py` |
+| 3 | **Scale one fix across many repos** | Concurrent managers fenced by **leases** (stale leader's writes refused, even at the git remote); a multi-repo change commits as an **atomic saga** — nothing left half-applied. | `demo_distributed_fleet.py` |
+| 4 | **A polyglot monorepo** | `pytest` + `jest` + `go test` + lint + types + **perf budget** + **security scan** all map to **one verdict schema, one gate**. | `demo_polyglot_ci.py` |
+| 5 | **An agent builds its own tool** | detect → scaffold → test → register on a passing held-out eval, then **jailed to the syscalls it earned** — a socket/subprocess it never exercised is refused at the kernel. | `demo_capability_jail.py` |
+| 6 | **A shared team brain** | Recall *down* a `self→team→org→global` lattice, graduate verified beliefs *up*; a peer's claim **re-verifies before it's trusted**; the store is **leader-fenced HA** with **quorum reads** that survive the leader being down. | `demo_shared_brain.py` |
 
 ```bash
-python examples/demo_selfheal.py         # failing tests → agent patches code → green
+pip install verel
+python examples/demo_selfheal.py          # 1 · red CI heals itself (live LLM + real pytest)
+python examples/demo_canary_rollback.py   # 2 · bad merge auto-reverted on precise evidence
+python examples/demo_distributed_fleet.py # 3 · fenced concurrent managers + atomic cross-repo saga
+python examples/demo_polyglot_ci.py       # 4 · Python/JS/Go + perf + security on one gate
+python examples/demo_capability_jail.py   # 5 · a tool jailed to the syscalls it earned
+python examples/demo_shared_brain.py      # 6 · shared brain — un-poisonable, HA, crash-tolerant
+```
+
+<details><summary>More feature-level demos</summary>
+
+```bash
+python examples/demo_consolidation.py    # failures → structured rules → a 2nd-order schema
+python examples/demo_toolsmith.py        # the full detect→scaffold→test→register→reuse lifecycle
 python examples/demo_overflow_loop.py    # fix a UI until AgentVision returns pass
 python examples/demo_fleet_worktrees.py  # LLM manager fans out → isolated-worktree workers
-python examples/demo_h2_moat.py          # measure cross-tenant skill transfer → moat decision
-python examples/demo_canary_rollback.py  # bad merge fails canary → safe auto git-revert
-python examples/demo_capability_jail.py  # learn a tool's syscalls → deny everything it didn't earn
-python examples/demo_polyglot_ci.py      # Python/JS/Go + perf + security graders on one bus
-python examples/demo_consolidation.py    # failures → structured rules → a 2nd-order schema
-python examples/demo_shared_brain.py     # scope lattice — recall down self→team→org, graduate up
-python examples/demo_distributed_fleet.py # concurrent managers (fencing) + multi-repo DAG
+python examples/demo_hosted_registry.py  # publish a skill over HTTP; another tenant re-verifies
 python examples/run_h2.py                # LIVE: build skills, measure cross-tenant transfer
 python examples/run_h2_sweep.py          # LIVE: sweep the transfer measurement across models
-python examples/demo_hosted_registry.py  # publish a skill over HTTP; another tenant re-verifies
 ```
+</details>
 
 ## Honesty (what we do **not** claim)
 
