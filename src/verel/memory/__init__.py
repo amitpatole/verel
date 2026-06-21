@@ -16,7 +16,7 @@ from .consolidate import (
 )
 from .embed import Embedder, HashEmbedder, OpenAIEmbedder, cosine
 from .failure_ledger import FailureLedger, regression_report
-from .hosted import MemoryServer, RemoteMemory
+from .hosted import MemoryServer, RemoteMemory, ReplicaClient
 from .lattice import ScopeLattice, graduate, lattice_recall
 from .librarian import LibrarianReport, librarian_pass
 from .local import LocalMemory
@@ -28,6 +28,7 @@ from .promotion import (
     PromotionResult,
     evaluate_rule,
 )
+from .replicated import NotLeaderError, ReplicatedMemory
 from .revise import Revision, contradicts, propagate_revision, revise_with_counterexample
 from .share import AuthorTrust, BeliefImport, author_of, import_belief
 from .view import (
@@ -60,12 +61,15 @@ __all__ = [
     "graduate",
     "MemoryServer",
     "RemoteMemory",
+    "ReplicaClient",
     "import_belief",
     "AuthorTrust",
     "BeliefImport",
     "author_of",
     "librarian_pass",
     "LibrarianReport",
+    "ReplicatedMemory",
+    "NotLeaderError",
     "FailureLedger",
     "regression_report",
     "LocalMemory",

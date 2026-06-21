@@ -23,7 +23,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from ..fleet.lease import FencingError
 from .local import LocalMemory
+from .replicated import NotLeaderError
 from .view import MemoryKind, MemoryRecord, MemoryView
 
 
@@ -74,36 +76,51 @@ def _make_handler(store: MemoryView, lock: threading.Lock, token: str | None):
                 b = self._body()
             except (ValueError, json.JSONDecodeError):
                 return self._send(400, {"error": "bad json"})
-
             with lock:  # the server is the single writer: serialize every access
-                if self.path == "/write":
-                    r = store.write(MemoryRecord(**b["record"]), ts=b.get("ts", 0.0))
-                    return self._send(200, {"record": _rec_json(r)})
-                if self.path == "/recall":
-                    hits = store.recall(b["query"], scope=b.get("scope"), kind=_kind(b.get("kind")),
-                                        k=b.get("k", 5), ts=b.get("ts", 0.0))
-                    return self._send(200, {"records": [_rec_json(r) for r in hits]})
-                if self.path == "/all":
-                    recs = store.all(scope=b.get("scope"), kind=_kind(b.get("kind")))
-                    return self._send(200, {"records": [_rec_json(r) for r in recs]})
-                if self.path in ("/corroborate", "/contradict"):
-                    fn = store.corroborate if self.path == "/corroborate" else store.contradict
-                    kw = {"delta": b["delta"]} if "delta" in b else {}
-                    return self._send(200, {"record": _rec_json(fn(b["id"], **kw))})
-                if self.path in ("/promote", "/demote", "/pin", "/unpin"):
-                    fn = {"/promote": store.promote, "/demote": store.demote,
-                          "/pin": store.pin, "/unpin": store.unpin}[self.path]
-                    return self._send(200, {"record": _rec_json(fn(b["id"]))})
-                if self.path == "/annotate":
-                    r = store.annotate(b["id"], **b.get("detail", {}))
-                    return self._send(200, {"record": _rec_json(r)})
-                if self.path == "/set_flags":
-                    r = store.set_flags(b["id"], pinned=b.get("pinned"), volatile=b.get("volatile"),
-                                        ttl_s=b.get("ttl_s"))
-                    return self._send(200, {"record": _rec_json(r)})
-                if self.path == "/decay":
-                    n = store.decay(half_life_s=b.get("half_life_s", 604800.0), now=b.get("now", 0.0))
-                    return self._send(200, {"pruned": n})
+                # a replicated node fences/refuses writes when it isn't the leader; surface that as
+                # 409 (FencingError) / 421 (NotLeaderError) so the client retries the leader.
+                try:
+                    return self._dispatch(b)
+                except FencingError as e:
+                    return self._send(409, {"error": str(e)})
+                except NotLeaderError as e:
+                    return self._send(421, {"error": str(e)})
+
+        def _dispatch(self, b):  # noqa: C901 — flat command table
+            if self.path == "/replicate":  # a leader replicating a mutation to this follower
+                rep = getattr(store, "replicate", None)
+                if rep is None:
+                    return self._send(400, {"error": "store is not replicated"})
+                rep(b["op"], int(b["token"]), b["payload"])
+                return self._send(200, {"ok": True})
+            if self.path == "/write":
+                r = store.write(MemoryRecord(**b["record"]), ts=b.get("ts", 0.0))
+                return self._send(200, {"record": _rec_json(r)})
+            if self.path == "/recall":
+                hits = store.recall(b["query"], scope=b.get("scope"), kind=_kind(b.get("kind")),
+                                    k=b.get("k", 5), ts=b.get("ts", 0.0))
+                return self._send(200, {"records": [_rec_json(r) for r in hits]})
+            if self.path == "/all":
+                recs = store.all(scope=b.get("scope"), kind=_kind(b.get("kind")))
+                return self._send(200, {"records": [_rec_json(r) for r in recs]})
+            if self.path in ("/corroborate", "/contradict"):
+                fn = store.corroborate if self.path == "/corroborate" else store.contradict
+                kw = {"delta": b["delta"]} if "delta" in b else {}
+                return self._send(200, {"record": _rec_json(fn(b["id"], **kw))})
+            if self.path in ("/promote", "/demote", "/pin", "/unpin"):
+                fn = {"/promote": store.promote, "/demote": store.demote,
+                      "/pin": store.pin, "/unpin": store.unpin}[self.path]
+                return self._send(200, {"record": _rec_json(fn(b["id"]))})
+            if self.path == "/annotate":
+                r = store.annotate(b["id"], **b.get("detail", {}))
+                return self._send(200, {"record": _rec_json(r)})
+            if self.path == "/set_flags":
+                r = store.set_flags(b["id"], pinned=b.get("pinned"), volatile=b.get("volatile"),
+                                    ttl_s=b.get("ttl_s"))
+                return self._send(200, {"record": _rec_json(r)})
+            if self.path == "/decay":
+                n = store.decay(half_life_s=b.get("half_life_s", 604800.0), now=b.get("now", 0.0))
+                return self._send(200, {"pruned": n})
             return self._send(404, {"error": "not found"})
 
     return Handler
@@ -210,3 +227,28 @@ class RemoteMemory:
 
     def decay(self, *, half_life_s: float = 604800.0, now: float = 0.0) -> int:
         return int(self._req("POST", "/decay", {"half_life_s": half_life_s, "now": now})["pruned"])
+
+
+class ReplicaClient:
+    """A replication peer over HTTP — give a `ReplicatedMemory` these as `peers` to replicate to
+    follower `MemoryServer`s on other machines. `replicate` raises `FencingError` on a 409 so a
+    deposed leader's in-flight write is rejected at the follower, exactly as in-process."""
+
+    def __init__(self, base_url: str, *, auth_token: str | None = None, timeout: float = 10.0):
+        self.base = base_url.rstrip("/")
+        self.token = auth_token
+        self.timeout = timeout
+
+    def replicate(self, op: str, token: int, payload: dict) -> None:
+        headers = {"Content-Type": "application/json"}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        data = json.dumps({"op": op, "token": token, "payload": payload}).encode()
+        req = urllib.request.Request(self.base + "/replicate", data=data, headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as r:
+                r.read()
+        except urllib.error.HTTPError as e:
+            if e.code == 409:
+                raise FencingError(json.loads(e.read()).get("error", "fenced")) from e
+            raise

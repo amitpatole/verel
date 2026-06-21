@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.23.0 — replicated, HA shared memory (no SPOF, fenced between authorities)
+
+Closes the one limitation flagged in 0.20.0: the hosted brain was a single writer / single point of
+failure. Now it can run as a fault-tolerant cluster, reusing the fleet's fencing-token primitive.
+- **`ReplicatedMemory`**: one node of a leader-fenced cluster. Exactly one node is leader (held by a
+  fencing lease over a shared `LeaseStore`); the leader applies every mutation locally and
+  **replicates** it to its peers; reads are served from any node's replica (eventual consistency).
+- **No split-brain**: a non-leader's write is refused (`NotLeaderError`); when a leader's lease
+  lapses a peer takes over with a **higher token**, and the deposed leader is fenced — its writes
+  are rejected and any in-flight replicate it sends hits `FencingError` at the follower.
+- **Cross-machine**: `MemoryServer` gains a `/replicate` endpoint and a `ReplicaClient` peer, so a
+  cluster of `MemoryServer`s on different machines replicates over HTTP, with the hosted control
+  plane (`RemoteLeaseStore`) as the shared fencing authority. Verified live end-to-end: write→leader
+  replicates to follower, non-leader writes get 421, failover promotes a follower at a higher token.
+- `decay` is per-node maintenance (each replica self-maintains; nodes converge). 257 offline-CI tests.
+
 ## 0.22.0 — the librarian: the brain compounds without rotting (shared-brain set complete)
 
 The fourth and final shared-brain slice — the gated maintenance cycle ("sleep") that keeps a
