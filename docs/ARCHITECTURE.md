@@ -101,10 +101,13 @@ On top of that:
   brain unchanged. The server is the single writer — every access is lock-serialized, so the
   interference rule stays correct under concurrent agents.
 - **Replicated, HA memory** (`ReplicatedMemory`) — for no single point of failure, the store runs
-  as a leader-fenced cluster. Exactly one node is leader (held by a fencing lease — the same
-  monotonic-token primitive the fleet uses); the leader applies every mutation locally and
-  replicates it to its peers; a deposed leader is fenced (`NotLeaderError` on write, `FencingError`
-  on a stale in-flight replicate) — **no split-brain**. Reads are served from any node's replica
+  as a leader-fenced, **fault-tolerant** cluster. Exactly one node is leader (held by a fencing
+  lease — the same monotonic-token primitive the fleet uses); the leader applies every mutation
+  locally and **replicates the resulting record state verbatim** (so replication is idempotent) to
+  its peers. Replication tolerates failure: an unreachable follower does **not** fail the write (it
+  falls behind and catches up via `sync_from`), and a `write_quorum` sets how many nodes must hold a
+  write to call it durable. A deposed leader is fenced (`NotLeaderError` on write, `FencingError` on
+  a stale in-flight replicate) — **no split-brain**. Reads are served from any node's replica
   (eventual consistency). The lease store (the hosted control plane across machines) is the single
   source of fencing truth; `ReplicaClient` carries replication to follower `MemoryServer`s over HTTP.
 - **Cross-agent trust** — sharing a brain *safely*. `import_belief` applies the registry's
