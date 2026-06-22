@@ -5,9 +5,13 @@ synthetic SightResult so the attestation, mapping, and fail-closed paths are exe
 
 import json
 
-from verel.mcp_server import _bbox, dispatch
-from verel.senses.sight import SightResult
-from verel.verdict import (
+import pytest
+
+pytest.importorskip("nacl", reason="ed25519 percept-receipt tests need verel[attest] (pynacl)")
+
+from verel.mcp_server import _bbox, dispatch  # noqa: E402 - after importorskip guard
+from verel.senses.sight import SightResult  # noqa: E402
+from verel.verdict import (  # noqa: E402
     GraderKind,
     Observation,
     Percept,
@@ -16,7 +20,7 @@ from verel.verdict import (
     assign,
     verify_gate_receipt,
 )
-from verel.verdict.models import Confidence, GateReceipt, IssueKind, Severity
+from verel.verdict.models import Confidence, GateReceipt, IssueKind, Severity  # noqa: E402
 
 
 def _fake_result(image_path=None):

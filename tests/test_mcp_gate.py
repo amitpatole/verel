@@ -4,8 +4,12 @@ and `verify` checks it with no trust in the producer.
 
 import json
 
-from verel.mcp_server import dispatch
-from verel.verdict import (
+import pytest
+
+pytest.importorskip("nacl", reason="ed25519 gate-receipt tests need verel[attest] (pynacl)")
+
+from verel.mcp_server import dispatch  # noqa: E402 - after importorskip guard
+from verel.verdict import (  # noqa: E402
     GraderKind,
     Report,
     RunReceipt,
@@ -17,7 +21,7 @@ from verel.verdict import (
     sign_receipt,
     verify_gate_receipt,
 )
-from verel.verdict.models import Issue, IssueKind, Severity, report_result_digest
+from verel.verdict.models import Issue, IssueKind, Severity, report_result_digest  # noqa: E402
 
 
 # --- helpers ----------------------------------------------------------------
