@@ -85,7 +85,7 @@ def _tool_gate(args: dict) -> dict:
         return _err(str(e))   # unknown language → fail closed with a clear message
 
     res = run_stage(stage, diff_files=diff_files, attest=attest)
-    receipt = build_gate_receipt(res.verdict, res.reports)
+    receipt = build_gate_receipt(res.verdict, res.reports, attest=attest)
     checked = verify_gate_receipt(receipt)   # dogfood: confirm the receipt we hand back verifies
 
     return {

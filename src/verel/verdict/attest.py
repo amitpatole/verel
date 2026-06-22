@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import hashlib
 
+from . import keys
 from .constants import ADVISORY_GRADERS, GATING_SEVERITY, PRECISE_GRADERS, SEV_ORDER
-from .gate import verify_receipt
+from .gate import sign_receipt, verify_receipt
 from .models import (
     Confidence,
     GateReceipt,
@@ -47,9 +48,12 @@ def _fingerprint(verdict: Verdict, graders: list[GraderAttestation]) -> str:
     return hashlib.blake2s(blob.encode()).hexdigest()[:16]
 
 
-def build_gate_receipt(verdict: Verdict, reports: list[Report], *,
-                       issued_by: str | None = None) -> GateReceipt:
-    """Assemble the gate-level receipt from a stage's reports (each carrying its signed RunReceipt)."""
+def build_gate_receipt(verdict: Verdict, reports: list[Report], *, issued_by: str | None = None,
+                       attest: str = "hmac") -> GateReceipt:
+    """Assemble the gate-level receipt from a stage's reports (each carrying its signed RunReceipt)
+    and SIGN the envelope (`attest`: "hmac" in-domain, or "ed25519" publicly verifiable). The
+    envelope signature binds the aggregate verdict + the grader set — the grader receipts alone
+    don't (a real grader receipt could otherwise be paired with a flipped gate verdict)."""
     if issued_by is None:
         from .. import __version__
         issued_by = f"verel@{__version__}"
@@ -59,23 +63,38 @@ def build_gate_receipt(verdict: Verdict, reports: list[Report], *,
         for r in reports
     ]
     clamped = any(_was_clamped(r) for r in reports)
-    return GateReceipt(issued_by=issued_by, verdict=verdict, fingerprint=_fingerprint(verdict, graders),
-                       graders=graders, ceiling_clamped=clamped)
+    gr = GateReceipt(issued_by=issued_by, verdict=verdict, fingerprint=_fingerprint(verdict, graders),
+                     graders=graders, ceiling_clamped=clamped)
+    if attest == "ed25519":
+        keys.attest_self(gr)                  # duck-typed: stamps ed25519 identity + signs the envelope
+    else:
+        gr.alg = "hmac-sha256"
+        gr.runner_identity = "ci-runner"
+        gr.signature = sign_receipt(gr)
+    return gr
 
 
 def verify_gate_receipt(receipt: GateReceipt, *,
                         allowed_algs: set[str] | None = None) -> GateReceiptVerification:
-    """Verify a gate-level receipt with NO trust in its producer. Fails closed: the fingerprint must
-    recompute, and EVERY precise grader must carry a RunReceipt whose signature verifies. Advisory
-    graders need not carry one (they never gate). `public_verifiable` is True only when there is at
-    least one precise grader and ALL precise receipts verified as ed25519 against trusted keys."""
+    """Verify a gate-level receipt with NO trust in its producer. Fails closed in layers:
+      1. the ENVELOPE signature must verify (binds verdict + fingerprint + identity) — this is what
+         makes the aggregate verdict unforgeable;
+      2. the fingerprint must recompute from the grader lines;
+      3. every PRECISE grader (precise determined by KIND, never the receipt's self-declared flag —
+         else an attacker relabels a grader advisory to skip its check) must carry a RunReceipt whose
+         signature verifies.
+    `public_verifiable` is True only when the envelope AND all precise receipts verified as ed25519."""
+    env = verify_receipt(receipt, allowed_algs=allowed_algs)  # duck-typed: GateReceipt shares the shape
+    if not env.valid:
+        return GateReceiptVerification(valid=False, verdict=receipt.verdict,
+                                       reason=f"envelope signature: {env.reason}")
     if _fingerprint(receipt.verdict, receipt.graders) != receipt.fingerprint:
         return GateReceiptVerification(valid=False, verdict=receipt.verdict,
                                        reason="fingerprint mismatch (tampered)")
     checked = 0
-    public = True
+    public = env.public_verifiable
     for a in receipt.graders:
-        if not a.precise:
+        if a.kind not in PRECISE_GRADERS:     # authoritative, NOT a.precise (attacker-controlled)
             continue
         if a.run_receipt is None:
             return GateReceiptVerification(valid=False, verdict=receipt.verdict,
@@ -87,5 +106,4 @@ def verify_gate_receipt(receipt: GateReceipt, *,
         checked += 1
         public = public and v.public_verifiable
     return GateReceiptVerification(valid=True, verdict=receipt.verdict, graders_checked=checked,
-                                   public_verifiable=checked > 0 and public,
-                                   reason=f"{checked} precise grader(s) attested")
+                                   public_verifiable=public, reason=f"{checked} precise grader(s) attested")
