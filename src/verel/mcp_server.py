@@ -24,6 +24,10 @@ from typing import Any
 
 _STAGES = ("inner_loop", "pre_merge")
 _ATTEST = ("auto", "ed25519", "hmac")
+# Bound attacker-controlled brain inputs so a single `remember`/`recall` can't balloon the store/memory.
+_MAX_QUERY = 4_000
+_MAX_TEXT = 20_000
+_MAX_FIELD = 512
 
 
 def _err(msg: str) -> dict:
@@ -321,6 +325,8 @@ def _tool_recall(args: dict) -> dict:
     query = args.get("query")
     if not isinstance(query, str) or not query.strip():
         return _err("query (string) is required")
+    if len(query) > _MAX_QUERY:
+        return _err(f"query too long (max {_MAX_QUERY} chars)")
     scope = args.get("scope") if isinstance(args.get("scope"), str) else None
     k = args.get("k", 5)
     if not isinstance(k, int) or isinstance(k, bool) or k <= 0:
@@ -363,12 +369,15 @@ def _tool_remember(args: dict) -> dict:
     fact = args.get("fact")
     if not isinstance(fact, dict) or not isinstance(fact.get("text"), str) or not fact["text"].strip():
         return _err("fact.text (non-empty string) is required")
+    if len(fact["text"]) > _MAX_TEXT:
+        return _err(f"fact.text too long (max {_MAX_TEXT} chars)")
     scope = args.get("scope") or "team"
-    if not isinstance(scope, str):
+    if not isinstance(scope, str) or len(scope) > _MAX_FIELD:
         return _err("scope must be a string")
-    author = args.get("author") if isinstance(args.get("author"), str) else ""
-    subject = str(fact.get("subject", ""))
-    predicate = str(fact.get("predicate", ""))
+    author_raw = args.get("author")
+    author = author_raw[:_MAX_FIELD] if isinstance(author_raw, str) else ""
+    subject = str(fact.get("subject", ""))[:_MAX_FIELD]
+    predicate = str(fact.get("predicate", ""))[:_MAX_FIELD]
     evidence = args.get("evidence")
     ev_ok, ev_ref = _evidence_verifies(evidence)
 
