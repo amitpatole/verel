@@ -59,6 +59,14 @@ def _gh(path: str) -> dict | list | None:
         return None
 
 
+def _as_dict(v: object) -> dict:
+    return v if isinstance(v, dict) else {}
+
+
+def _as_list(v: object) -> list:
+    return v if isinstance(v, list) else []
+
+
 def _agg(rows: list[dict] | None) -> dict[str, int]:
     """Sum a pypistats category series into {category: downloads}, biggest first."""
     agg: dict[str, int] = {}
@@ -84,21 +92,21 @@ def pypi_metrics(pkg: str) -> dict:
 
 
 def github_metrics(repo: str) -> dict:
-    r = _gh(f"repos/{repo}") or {}
-    clones = _gh(f"repos/{repo}/traffic/clones") or {}
-    views = _gh(f"repos/{repo}/traffic/views") or {}
-    refs = _gh(f"repos/{repo}/traffic/popular/referrers") or []
+    r = _as_dict(_gh(f"repos/{repo}"))
+    clones = _as_dict(_gh(f"repos/{repo}/traffic/clones"))
+    views = _as_dict(_gh(f"repos/{repo}/traffic/views"))
+    refs = _as_list(_gh(f"repos/{repo}/traffic/popular/referrers"))
     return {
         "stars": r.get("stargazers_count"), "forks": r.get("forks_count"),
         "watchers": r.get("subscribers_count"), "issues": r.get("open_issues_count"),
         "clones": clones.get("count"), "clones_uniq": clones.get("uniques"),
         "views": views.get("count"), "views_uniq": views.get("uniques"),
-        "referrers": [(x.get("referrer"), x.get("count")) for x in (refs or [])][:8],
+        "referrers": [(x.get("referrer"), x.get("count")) for x in refs][:8],
     }
 
 
 def collect() -> dict:
-    data = {"ts": time.strftime("%Y-%m-%d %H:%M:%S"), "projects": []}
+    data: dict = {"ts": time.strftime("%Y-%m-%d %H:%M:%S"), "projects": []}
     for pkg, repo, label in PROJECTS:
         data["projects"].append({
             "label": label, "pkg": pkg, "repo": repo,
