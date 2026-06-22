@@ -19,6 +19,7 @@ import base64
 import binascii
 import hashlib
 import os
+import string
 
 from .._secrets import _config_dir, load_or_create_keyfile
 
@@ -34,6 +35,9 @@ except ImportError:  # pragma: no cover - exercised via monkeypatch in tests
 
 ED25519 = "ed25519"
 _IDENT_PREFIX = "ed25519:"
+# key_id is a 16-char slice of urlsafe-b64 — strictly ASCII [A-Za-z0-9_-]. Use an explicit ASCII set
+# (not str.isalnum(), which is Unicode-aware) so the fs-path guard can't be widened by exotic glyphs.
+_KEYID_ALPHABET = frozenset(string.ascii_letters + string.digits + "-_")
 
 
 class MissingAttestationDep(RuntimeError):
@@ -113,8 +117,8 @@ def resolve_trusted_key(key_id: str) -> VerifyKey | None:
     if key_id == key_id_for(bytes(own)):
         return own
     # a key_id is a 16-char slice of urlsafe-b64 — reject anything else before touching the fs
-    # (path-traversal / odd filenames). The charset is [A-Za-z0-9_-].
-    if len(key_id) != 16 or not all(c.isalnum() or c in "-_" for c in key_id):
+    # (path-traversal / odd filenames). Strict ASCII alphabet, never Unicode-aware isalnum().
+    if len(key_id) != 16 or not all(c in _KEYID_ALPHABET for c in key_id):
         return None
     path = os.path.join(_trusted_dir(), f"{key_id}.pub")
     try:

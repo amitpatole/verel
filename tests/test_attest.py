@@ -157,6 +157,46 @@ def test_tampered_payload_field_rejected():
     assert verify_signature(rr) is False
 
 
+def test_signing_payload_is_injective_across_field_boundary():
+    """Red-team round 2: the old bare-'|' join let a delimiter inside a field shift the partition,
+    so distinct field tuples produced identical signed bytes. Length-prefixing must keep them
+    distinct — moving a '|' across the suite/inputs boundary changes the payload."""
+    a = RunReceipt(suite_sha="a|", inputs_digest="b", coverage_assertion="c",
+                   runner_identity="r", result_digest="d", signature="x")
+    b = RunReceipt(suite_sha="a", inputs_digest="|b", coverage_assertion="c",
+                   runner_identity="r", result_digest="d", signature="x")
+    assert a.signing_payload() != b.signing_payload()
+
+
+def test_delimiter_injection_signature_does_not_transfer(monkeypatch):
+    """A signature minted over one field partition must NOT verify under a shifted partition — on
+    BOTH tiers. Pins the canonicalization fix end to end."""
+    from verel.verdict.gate import sign_receipt
+    # ed25519 tier
+    rr = _base_receipt(_report())
+    rr.suite_sha, rr.inputs_digest = "a|", "b"
+    attest_self(rr)
+    assert verify_signature(rr) is True
+    shifted = rr.model_copy()
+    shifted.suite_sha, shifted.inputs_digest = "a", "|b"
+    assert verify_signature(shifted) is False
+    # hmac tier (shares signing_payload)
+    hr = _base_receipt(_report())
+    hr.suite_sha, hr.inputs_digest, hr.runner_identity = "a|", "b", "ci-runner"
+    hr.signature = sign_receipt(hr)
+    assert verify_signature(hr) is True
+    hshift = hr.model_copy()
+    hshift.suite_sha, hshift.inputs_digest = "a", "|b"
+    assert verify_signature(hshift) is False
+
+
+def test_unicode_keyid_charset_rejected():
+    """Red-team round 2: key_id charset must be strict ASCII, not Unicode-aware isalnum()."""
+    rr = _self_signed(_report())
+    rr.runner_identity = "ed25519:aaaaaaaaaaaaaa²²"  # superscript-2 passes str.isalnum()
+    assert verify_signature(rr) is False
+
+
 def test_result_binding_under_ed25519_via_gate():
     issue = Issue(kind=IssueKind.OVERFLOW, severity=Severity.ERROR, message="x",
                   source=GraderKind.SECURITY, confidence=Confidence.HIGH)
