@@ -104,6 +104,12 @@ def test_sight_allow_local_defaults_off(monkeypatch, tmp_path):
     _patch_perceive(monkeypatch, _fake_result(str(tmp_path / "x")), capture=cap)
     dispatch("verel_sight", {"url": "https://x.io", "allow_local": True})
     assert cap["allow_local"] is True
+    # fail-open guard: a truthy NON-bool (the string "false", 1, []) must NOT disable the SSRF guard
+    for sneaky in ("false", "true", 1, [1]):
+        cap.clear()
+        _patch_perceive(monkeypatch, _fake_result(str(tmp_path / "x")), capture=cap)
+        dispatch("verel_sight", {"url": "https://x.io", "allow_local": sneaky})
+        assert cap["allow_local"] is False, f"{sneaky!r} must not enable allow_local"
 
 
 def test_sight_viewport_parsed_into_overrides(monkeypatch, tmp_path):
