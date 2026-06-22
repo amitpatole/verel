@@ -91,10 +91,15 @@ class RunReceipt(BaseModel):
     def signing_payload(self) -> str:
         # `alg` is bound FIRST so a signature minted under one scheme can never be replayed as another
         # (algorithm-confusion / downgrade): the bytes a verifier checks differ the moment `alg` differs.
-        return "|".join(
-            [self.alg, self.suite_sha, self.inputs_digest, self.coverage_assertion,
-             self.runner_identity, self.result_digest]
-        )
+        #
+        # LENGTH-PREFIXED (netstring `len:data,`) — NOT a bare "|".join. The join was non-injective: a
+        # "|" inside any field (e.g. free-form coverage_assertion) shifted the partition so one signature
+        # was valid for multiple distinct (suite, inputs, coverage, ...) tuples, defeating the binding's
+        # uniqueness. Prefixing each field with its length makes the encoding an injective function of
+        # the field tuple — no field's content can forge a boundary. (Red-team round 2.)
+        fields = [self.alg, self.suite_sha, self.inputs_digest, self.coverage_assertion,
+                  self.runner_identity, self.result_digest]
+        return "".join(f"{len(f)}:{f}," for f in fields)
 
 
 class Issue(BaseModel):
