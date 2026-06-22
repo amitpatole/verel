@@ -202,7 +202,11 @@ def _tool_sight(args: dict) -> dict:
     for rep in result.reports:
         mint_report_receipt(rep, suite_sha=suite_sha, inputs_digest=inputs_digest,
                             coverage_assertion=f"rendered: {url}", attest=attest)
-    receipt = build_gate_receipt(p.verdict, result.reports, attest=attest)
+    # Bind the trust-implying percept facts (image_ref + intent conformance) INTO the signature, so a
+    # relayed percept can't pair a valid receipt with a different image_ref or a flipped matches_intent.
+    subject = (f"sight image_ref={image_ref} matches_intent={p.matches_intent} "
+               f"intent={p.intent_satisfied}/{p.intent_total}")
+    receipt = build_gate_receipt(p.verdict, result.reports, attest=attest, subject=subject)
     checked = verify_gate_receipt(receipt)
 
     return {
@@ -238,9 +242,12 @@ def _tool_verify(args: dict) -> dict:
     try:
         if "graders" in receipt:
             res = verify_gate_receipt(GateReceipt.model_validate(receipt), allowed_algs=allowed)
+            # graders_checked==0 means VALID but advisory-only (nothing precise attested) — a consumer
+            # wanting gated assurance must check it. `subject` carries the attested percept facts.
             return {"valid": res.valid, "verdict": res.verdict.value if res.verdict else None,
                     "graders_checked": res.graders_checked,
-                    "public_verifiable": res.public_verifiable, "reason": res.reason}
+                    "public_verifiable": res.public_verifiable, "subject": res.subject,
+                    "reason": res.reason}
         rv = verify_receipt(RunReceipt.model_validate(receipt), allowed_algs=allowed)
         return {"valid": rv.valid, "alg": rv.alg, "runner_identity": rv.runner_identity,
                 "public_verifiable": rv.public_verifiable, "reason": rv.reason}

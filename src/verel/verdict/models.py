@@ -247,6 +247,8 @@ class GateReceipt(BaseModel):
     fingerprint: str  # recomputes from (verdict + per-grader outcome/receipt/kind); tamper-evident
     graders: list[GraderAttestation] = Field(default_factory=list)
     ceiling_clamped: bool = False  # an advisory finding was held back from gating a destructive act
+    subject: str = ""  # additional ATTESTED context bound into the signature (e.g. a sight percept's
+    #                    image_ref + matches_intent) — so trust-implying output fields aren't unsigned
     # envelope signature (same tiers as RunReceipt) — binds the verdict so it can't be faked
     alg: str = "hmac-sha256"
     runner_identity: str = ""
@@ -256,10 +258,11 @@ class GateReceipt(BaseModel):
     def signing_payload(self) -> str:
         # Domain tag ("gatereceipt") FIRST for cross-type separation from RunReceipt (shared signer),
         # then `alg` (anti-downgrade); fingerprint transitively binds every grader line. `ceiling_clamped`
-        # is bound too — it's a safety signal (was an advisory finding held back from gating a
-        # destructive act), so a relayed receipt must not let it be flipped undetected (red-team round 2).
+        # and `subject` are bound too — they carry trust-implying facts (a held-back advisory finding; a
+        # percept's image_ref/matches_intent), so a relayed receipt can't flip them undetected (round 2).
         return canonical_payload("gatereceipt", self.alg, self.issued_by, self.verdict.value,
-                                 self.fingerprint, self.runner_identity, str(int(self.ceiling_clamped)))
+                                 self.fingerprint, self.runner_identity,
+                                 str(int(self.ceiling_clamped)), self.subject)
 
 
 class GateReceiptVerification(BaseModel):
@@ -268,6 +271,7 @@ class GateReceiptVerification(BaseModel):
 
     valid: bool
     verdict: Verdict | None = None
-    graders_checked: int = 0
+    graders_checked: int = 0   # # precise graders whose signature verified; 0 = advisory-only, not gated
     public_verifiable: bool = False
+    subject: str = ""          # the receipt's attested `subject` (only meaningful once valid)
     reason: str = ""
