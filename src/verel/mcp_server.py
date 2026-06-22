@@ -177,10 +177,13 @@ def _tool_sight(args: dict) -> dict:
     from .senses.sight import perceive  # lazy module; AgentVision itself is imported at render time
 
     kwargs: dict = {}
-    try:
-        if intent:
+    if intent:
+        try:
             from agentvision import Brief
-            kwargs["brief"] = Brief(text=intent)
+            kwargs["brief"] = Brief(text=intent)   # drives intent-conformance grading
+        except ImportError:
+            pass   # AgentVision absent → no conformance; the render below fails closed if it's real
+    try:
         result = _run_async(perceive(url, backend=backend, allow_local=allow_local,
                                      settings_overrides=overrides, **kwargs))
     except ImportError:
