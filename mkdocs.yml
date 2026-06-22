@@ -61,6 +61,7 @@ nav:
   - 5-minute tutorial: tutorial.md
   - Use cases: use-cases.md
   - Real-world scenarios: examples.md
+  - Adoption: adoption.md
   - Guides:
       - Developer guide: usage.md
       - Architecture: ARCHITECTURE.md
