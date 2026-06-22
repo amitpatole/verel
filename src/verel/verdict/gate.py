@@ -19,8 +19,8 @@ from .models import (
     GraderKind,
     ReceiptVerification,
     Report,
-    RunReceipt,
     Severity,
+    SignableReceipt,
     Verdict,
     report_result_digest,
 )
@@ -43,11 +43,11 @@ def clamp_ceiling(sev: Severity, ceil: Severity) -> Severity:
 # ---------------------------------------------------------------------------
 # Run-receipt attestation helpers.
 # ---------------------------------------------------------------------------
-def _hmac_sig(receipt: RunReceipt, secret: bytes) -> str:
+def _hmac_sig(receipt: SignableReceipt, secret: bytes) -> str:
     return hmac.new(secret, receipt.signing_payload().encode(), hashlib.sha256).hexdigest()
 
 
-def sign_receipt(receipt: RunReceipt, secret: bytes = _RUNNER_SECRET) -> str:
+def sign_receipt(receipt: SignableReceipt, secret: bytes = _RUNNER_SECRET) -> str:
     """Sign per `receipt.alg`. ed25519 signs with the local runner's key (the caller must have
     stamped `runner_identity`/`public_key` first — see `keys.attest_self`); hmac-sha256 (default)
     keys off the shared trust-domain secret."""
@@ -57,7 +57,7 @@ def sign_receipt(receipt: RunReceipt, secret: bytes = _RUNNER_SECRET) -> str:
 
 
 def verify_signature(
-    receipt: RunReceipt, secret: bytes = _RUNNER_SECRET, *, allowed_algs: set[str] | None = None
+    receipt: SignableReceipt, secret: bytes = _RUNNER_SECRET, *, allowed_algs: set[str] | None = None
 ) -> bool:
     """True iff the receipt's signature is valid under its `alg`. Fails CLOSED on: empty signature,
     an alg outside `allowed_algs` (when a policy is given), an unknown alg, ed25519 with an untrusted
@@ -78,7 +78,7 @@ def verify_signature(
 
 
 def verify_receipt(
-    receipt: RunReceipt, *, secret: bytes = _RUNNER_SECRET, allowed_algs: set[str] | None = None
+    receipt: SignableReceipt, *, secret: bytes = _RUNNER_SECRET, allowed_algs: set[str] | None = None
 ) -> ReceiptVerification:
     """The public `verify` verb (§11): check a receipt and explain the result — including whether it
     was **publicly** verifiable (ed25519 against a trusted public key) or shared-secret (HMAC)."""

@@ -12,10 +12,23 @@ from __future__ import annotations
 import hashlib
 import json
 from enum import Enum
+from typing import Protocol
 
 from pydantic import BaseModel, Field
 
 from .._sign import canonical_payload
+
+
+class SignableReceipt(Protocol):
+    """The structural shape the signing/verification machinery (`gate`, `keys`) operates on — shared
+    by RunReceipt (per-grader) and GateReceipt (gate-level envelope) so both reuse one signer."""
+
+    alg: str
+    runner_identity: str
+    public_key: str
+    signature: str
+
+    def signing_payload(self) -> str: ...
 
 
 class Verdict(str, Enum):
@@ -220,14 +233,29 @@ class GraderAttestation(BaseModel):
 
 class GateReceipt(BaseModel):
     """The gate-level receipt (§4) — the headline wedge surfaced over MCP. Wraps the per-grader
-    RunReceipts so a SECOND party can confirm an agent's verdict was real: the `fingerprint`
-    recomputes from the graded outcome and each precise grader's signature verifies the runner."""
+    RunReceipts so a SECOND party can confirm an agent's verdict was real.
+
+    The whole envelope is SIGNED (`signing_payload` binds verdict + fingerprint + identity, `alg`
+    first), so the aggregate verdict and the grader set are cryptographically bound — not merely
+    fingerprinted. Without that signature an attacker could flip the verdict or relabel a grader
+    `precise=false` (to skip its signature check) and just recompute the unsigned fingerprint. The
+    same field shape as RunReceipt lets it reuse the ed25519/HMAC signing machinery (`keys`, `gate`)."""
 
     issued_by: str  # e.g. "verel@0.29.2"
     verdict: Verdict
-    fingerprint: str  # recomputes from (verdict + per-grader outcome/receipt); tamper-evident
+    fingerprint: str  # recomputes from (verdict + per-grader outcome/receipt/kind); tamper-evident
     graders: list[GraderAttestation] = Field(default_factory=list)
     ceiling_clamped: bool = False  # an advisory finding was held back from gating a destructive act
+    # envelope signature (same tiers as RunReceipt) — binds the verdict so it can't be faked
+    alg: str = "hmac-sha256"
+    runner_identity: str = ""
+    public_key: str = ""
+    signature: str = ""
+
+    def signing_payload(self) -> str:
+        # `alg` first (anti-downgrade); fingerprint transitively binds every grader line.
+        return canonical_payload(self.alg, self.issued_by, self.verdict.value, self.fingerprint,
+                                 self.runner_identity)
 
 
 class GateReceiptVerification(BaseModel):

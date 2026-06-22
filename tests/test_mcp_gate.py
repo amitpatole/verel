@@ -45,17 +45,40 @@ def test_gate_receipt_roundtrip_hmac():
 
 def test_gate_receipt_roundtrip_ed25519_is_public():
     rep = _attested_report(attest="ed25519")
-    gr = build_gate_receipt(Verdict.PASS, [rep])
+    gr = build_gate_receipt(Verdict.PASS, [rep], attest="ed25519")
     res = verify_gate_receipt(gr)
     assert res.valid and res.public_verifiable
     assert verify_gate_receipt(gr, allowed_algs={"ed25519"}).valid  # require-public passes
 
 
-def test_gate_receipt_fingerprint_tamper_rejected():
-    gr = build_gate_receipt(Verdict.PASS, [_attested_report(attest="ed25519")])
-    gr.verdict = Verdict.FAIL  # flip the headline verdict; fingerprint must no longer recompute
+def test_gate_receipt_verdict_flip_breaks_envelope_signature():
+    """Round-1 finding: the aggregate verdict must be SIGNED, not just fingerprinted. Flipping it
+    must break the envelope signature (an attacker can recompute a fingerprint, never a signature)."""
+    gr = build_gate_receipt(Verdict.PASS, [_attested_report(attest="ed25519")], attest="ed25519")
+    gr.verdict = Verdict.FAIL
+    res = verify_gate_receipt(gr)
+    assert res.valid is False and "envelope signature" in res.reason
+
+
+def test_gate_receipt_grader_tamper_trips_fingerprint():
+    gr = build_gate_receipt(Verdict.PASS, [_attested_report(attest="ed25519")], attest="ed25519")
+    gr.graders[0].verdict = Verdict.FAIL  # tamper a grader line without touching the signed verdict
     res = verify_gate_receipt(gr)
     assert res.valid is False and "fingerprint" in res.reason
+
+
+def test_gate_receipt_precise_relabel_attack_blocked():
+    """Round-1 finding: `precise` is attacker-controlled in the verify path. Relabeling a TEST grader
+    advisory to skip its signature check must NOT yield valid=True — precise is derived from KIND, and
+    the envelope binds the fingerprint either way."""
+    gr = build_gate_receipt(Verdict.PASS, [_attested_report(attest="ed25519")], attest="ed25519")
+    gr.graders[0].precise = False          # lie: claim the TEST grader is advisory
+    gr.graders[0].run_receipt = None       # and drop its receipt
+    assert verify_gate_receipt(gr).valid is False
+    # even if the attacker recomputes the (unsigned) fingerprint, the envelope signature still fails
+    from verel.verdict.attest import _fingerprint
+    gr.fingerprint = _fingerprint(gr.verdict, gr.graders)
+    assert verify_gate_receipt(gr).valid is False
 
 
 def test_gate_receipt_precise_grader_missing_receipt_fails():
@@ -68,9 +91,9 @@ def test_gate_receipt_precise_grader_missing_receipt_fails():
 
 def test_gate_receipt_forged_grader_receipt_rejected():
     rep = _attested_report(attest="ed25519")
-    gr = build_gate_receipt(Verdict.PASS, [rep])
+    gr = build_gate_receipt(Verdict.PASS, [rep], attest="ed25519")
     gr.graders[0].run_receipt.signature = keys._b64e(b"\x00" * 64)  # wrong signature
-    # fingerprint binds the signature, so this trips the fingerprint check first — either way invalid
+    # fingerprint binds the signature, so this trips the fingerprint check — either way invalid
     assert verify_gate_receipt(gr).valid is False
 
 
