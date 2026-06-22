@@ -205,3 +205,37 @@ class ReceiptVerification(BaseModel):
     runner_identity: str = ""
     public_verifiable: bool = False  # True only for ed25519 verified against a trusted public key
     reason: str = ""
+
+
+class GraderAttestation(BaseModel):
+    """One grader's line in a gate-level receipt (§4): its verdict + the signed RunReceipt that
+    attests it actually ran. Advisory graders (vision/llm) inform but never gate, so they may omit
+    a receipt; a `precise` grader in the gate's required set must carry a verifiable one."""
+
+    kind: GraderKind
+    verdict: Verdict
+    precise: bool
+    run_receipt: RunReceipt | None = None
+
+
+class GateReceipt(BaseModel):
+    """The gate-level receipt (§4) — the headline wedge surfaced over MCP. Wraps the per-grader
+    RunReceipts so a SECOND party can confirm an agent's verdict was real: the `fingerprint`
+    recomputes from the graded outcome and each precise grader's signature verifies the runner."""
+
+    issued_by: str  # e.g. "verel@0.29.2"
+    verdict: Verdict
+    fingerprint: str  # recomputes from (verdict + per-grader outcome/receipt); tamper-evident
+    graders: list[GraderAttestation] = Field(default_factory=list)
+    ceiling_clamped: bool = False  # an advisory finding was held back from gating a destructive act
+
+
+class GateReceiptVerification(BaseModel):
+    """Result of verifying a gate-level receipt: did the fingerprint recompute and every precise
+    grader's signature check out — and was the whole thing publicly verifiable (ed25519)?"""
+
+    valid: bool
+    verdict: Verdict | None = None
+    graders_checked: int = 0
+    public_verifiable: bool = False
+    reason: str = ""

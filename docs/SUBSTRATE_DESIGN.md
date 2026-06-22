@@ -349,3 +349,45 @@ only at the CI pipeline site; `memory.promotion` and `toolsmith.smith` gate a se
 the same call (so there is no external receipt to replay), and cross-rule/cross-tool replay is already
 blocked by the coverage-assertion check. Wiring an *independently computed* expected input digest at
 those two sites is deferred — passing the receipt's own digest there would be a no-op (self-comparison).
+
+## 12. Slice 0 build — `gate` over MCP (the conscience, shipping the attested receipt)
+
+> **Status:** built this session, on top of Slice 3. The MCP `gate` tool now RUNS the real graders and
+> hands back the §3/§4 attested verdict + a verifiable **gate-level receipt** — so an external agent
+> gets a conscience it cannot fake, and a *different* party can confirm the verdict.
+
+### 12.1 What shipped
+- **`verel_gate(repo, stage, language, options, diff_files, attest)`** (`mcp_server.py`) — runs
+  `ci.run_stage` on the agent's repo and returns `{verdict, stage, reports[file:line issues],
+  ceiling_clamped, attest, receipt, receipt_public_verifiable}`. The agent can no longer self-declare
+  "done": the verdict is grounded in real graders and the receipt commits to what ran.
+- **Gate-level receipt (§4)** — new `verdict.GateReceipt` / `GraderAttestation` + `build_gate_receipt`
+  / `verify_gate_receipt` (`verdict/attest.py`). It wraps the per-grader `RunReceipt`s; integrity comes
+  from (a) a `fingerprint` that recomputes from the verdict + each grader's outcome **and signature**
+  (tamper-evident), and (b) each precise grader's signature. `ceiling_clamped` records when an advisory
+  finding was held back from gating.
+- **ed25519 by default when available** — `run_stage`/`run_grader`/`graders._receipt` thread an
+  `attest` mode; the MCP tool's `attest="auto"` mints ed25519 receipts when `verel[attest]` is
+  installed (publicly verifiable), else HMAC. `attest="ed25519"` **fails closed** if PyNaCl is absent —
+  never a silent downgrade.
+- **`verel_verify(receipt, require_public)`** — exposes Slice 3's verb over MCP; accepts a gate receipt
+  (`graders`) or a single `RunReceipt` (`suite_sha`). `require_public` rejects HMAC.
+- Real JSON `inputSchema` on every tool (agents see typed args); receipts serialized `mode="json"` so
+  the stdio transport never chokes on raw enums.
+
+### 12.2 Wiring (one host: Claude Code)
+`examples/mcp.json` → drop into a project as `.mcp.json` (or merge into Claude Code's MCP settings):
+```json
+{ "mcpServers": { "verel": { "command": "verel-mcp" } } }
+```
+`verel-mcp` is the existing console script (`verel[mcp]` extra for the server binding). Loopback stdio,
+single-host, lifecycle-bound. For cross-machine public verifiability, set a stable
+`VEREL_RUNNER_ED25519_SEED` (or rely on the persisted per-install key) and publish the runner's pubkey
+to the verifier's `~/.config/verel/trusted_keys/`.
+
+### 12.3 DoD — met
+Dogfooded: `verel_gate` on a real repo returns a PASS verdict with an ed25519 receipt; `verel_verify`
+(and `verel verify` CLI) confirm it **with no producer trust**; flipping the verdict trips the
+fingerprint. Input handling fails closed (missing/again-non-dir repo, unknown stage/language/attest,
+PyNaCl-absent). Covered by `tests/test_mcp_gate.py` (14 tests). Security cadence (MCP input surface)
+applied below.

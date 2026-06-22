@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "verel": {
+      "command": "verel-mcp",
+      "env": {
+        "VEREL_RUNNER_ED25519_SEED": ""
+      }
+    }
+  }
+}

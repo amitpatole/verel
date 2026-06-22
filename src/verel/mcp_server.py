@@ -1,39 +1,138 @@
-"""Verel MCP server — exposes the framework to any MCP host (Cursor/Claude/etc.), mirroring
+"""Verel MCP server — exposes the framework to any MCP host (Cursor/Claude Code/etc.), mirroring
 AgentVision's surface strategy: the same capabilities, reachable cross-host.
 
 The tool DISPATCH layer (`TOOLS`, `dispatch`) is pure and testable without the `mcp` package;
-`serve()` binds it to a real MCP stdio server (the optional `verel[mcp]` extra). Tools:
+`serve()` binds it to a real MCP stdio server (the optional `verel[mcp]` extra). Hero verbs:
 
-  verel_gate         gate a list of Reports (JSON) → verdict
+  verel_gate         RUN the graders on a repo → attested verdict + a verifiable receipt (§3/§4)
+  verel_verify       verify a receipt with NO trust in its producer (ed25519 = public; §11)
   verel_ci_check     run the inner-loop CI stage on a repo → verdict + issues
   verel_recall       recall from a memory store → records
   verel_build_tool   detect→scaffold→test→register a tool (needs an LLM key)
 
-Every tool returns the same verdict-shaped truth the rest of Verel speaks.
+`gate` is the conscience: the agent can no longer self-declare "done" — it gets a real verdict with
+grounded file:line issues AND a receipt a different party can check. That receipt is the wedge.
 """
 
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
 
-# ---- tool implementations (pure-ish; importable without `mcp`) ----
+_STAGES = ("inner_loop", "pre_merge")
+_ATTEST = ("auto", "ed25519", "hmac")
+
+
+def _err(msg: str) -> dict:
+    return {"error": msg}
+
+
+def _resolve_attest(choice: str) -> tuple[str, str | None]:
+    """Map the requested attest mode to a concrete scheme. 'auto' → ed25519 when verel[attest] is
+    installed, else hmac. Explicit 'ed25519' FAILS CLOSED (returns an error) when unavailable rather
+    than silently downgrading the public-verifiability guarantee."""
+    from .verdict import keys
+
+    if choice not in _ATTEST:
+        return "", f"attest must be one of {_ATTEST}, got {choice!r}"
+    if choice == "ed25519" and not keys.available():
+        return "", "attest='ed25519' requested but PyNaCl is not installed (pip install verel[attest])"
+    if choice == "hmac":
+        return "hmac", None
+    return ("ed25519" if keys.available() else "hmac"), None
+
+
+def _issue_dict(i) -> dict:
+    file, _, line = (i.locator or "").rpartition(":")
+    return {"message": i.message, "file": file or (i.locator or ""), "line": line,
+            "severity": i.severity.value, "source": i.source.value, "fingerprint": i.fingerprint}
 
 
 def _tool_gate(args: dict) -> dict:
-    from .verdict.gate import gate
-    from .verdict.models import Report
+    """Give an agent a conscience: run the real graders on its repo and return an ATTESTED verdict.
+    The agent cannot fake green — the receipt commits to what actually ran."""
+    from .ci import inner_loop_stage, premerge_stage, run_stage
+    from .verdict import build_gate_receipt, verify_gate_receipt
 
-    reports = [Report(**r) for r in args.get("reports", [])]
-    gr = gate(reports)
-    return {"verdict": gr.verdict.value, "reason": gr.reason,
-            "attributions": {k: v.value for k, v in gr.attributions.items()}}
+    repo = args.get("repo")
+    if not repo or not isinstance(repo, str):
+        return _err("repo (absolute path) is required")
+    repo = os.path.abspath(repo)
+    if not os.path.isdir(repo):
+        return _err(f"repo is not a directory: {repo}")
+
+    stage_name = args.get("stage", "inner_loop")
+    if stage_name not in _STAGES:
+        return _err(f"stage must be one of {_STAGES}, got {stage_name!r}")
+    language = args.get("language", "python")
+    opts = args.get("options") or {}
+    if not isinstance(opts, dict):
+        return _err("options must be an object")
+    attest, aerr = _resolve_attest(args.get("attest", "auto"))
+    if aerr:
+        return _err(aerr)
+    diff_files = {f for f in (args.get("diff_files") or []) if isinstance(f, str)}
+
+    try:
+        if stage_name == "pre_merge":
+            stage = premerge_stage(repo, language=language, with_types=opts.get("types", True),
+                                   security=opts.get("security", False))
+        else:
+            stage = inner_loop_stage(repo, language=language, with_lint=opts.get("lint", True),
+                                     with_types=opts.get("types", False))
+    except ValueError as e:
+        return _err(str(e))   # unknown language → fail closed with a clear message
+
+    res = run_stage(stage, diff_files=diff_files, attest=attest)
+    receipt = build_gate_receipt(res.verdict, res.reports)
+    checked = verify_gate_receipt(receipt)   # dogfood: confirm the receipt we hand back verifies
+
+    return {
+        "verdict": res.verdict.value,
+        "stage": stage.name,
+        "reason": res.gate.reason,
+        "reports": [
+            {"grader": r.grader.value, "verdict": r.verdict.value,
+             "issues": [_issue_dict(i) for i in r.issues]}
+            for r in res.reports
+        ],
+        "ceiling_clamped": receipt.ceiling_clamped,
+        "attest": attest,
+        "receipt_public_verifiable": checked.public_verifiable,
+        "receipt": receipt.model_dump(mode="json"),  # enums → strings, so json.dumps over MCP is safe
+    }
+
+
+def _tool_verify(args: dict) -> dict:
+    """Verify a receipt with no trust in its producer. Accepts a gate-level receipt (has `graders`)
+    or a single RunReceipt (has `suite_sha`). `require_public` rejects HMAC (demands ed25519)."""
+    from .verdict import GateReceipt, RunReceipt, verify_gate_receipt, verify_receipt
+
+    receipt = args.get("receipt")
+    if not isinstance(receipt, dict):
+        return _err("receipt (object) is required")
+    allowed = {"ed25519"} if args.get("require_public") else None
+    try:
+        if "graders" in receipt:
+            res = verify_gate_receipt(GateReceipt.model_validate(receipt), allowed_algs=allowed)
+            return {"valid": res.valid, "verdict": res.verdict.value if res.verdict else None,
+                    "graders_checked": res.graders_checked,
+                    "public_verifiable": res.public_verifiable, "reason": res.reason}
+        rv = verify_receipt(RunReceipt.model_validate(receipt), allowed_algs=allowed)
+        return {"valid": rv.valid, "alg": rv.alg, "runner_identity": rv.runner_identity,
+                "public_verifiable": rv.public_verifiable, "reason": rv.reason}
+    except ValueError as e:
+        return _err(f"malformed receipt: {e}")
 
 
 def _tool_ci_check(args: dict) -> dict:
     from .ci import inner_loop_stage, run_stage
 
-    stage = inner_loop_stage(args["repo"], with_lint=args.get("lint", False))
+    repo = args.get("repo")
+    if not repo or not isinstance(repo, str) or not os.path.isdir(os.path.abspath(repo)):
+        return _err("repo (existing directory) is required")
+    stage = inner_loop_stage(os.path.abspath(repo), with_lint=args.get("lint", False))
     res = run_stage(stage)
     return {
         "verdict": res.verdict.value,
@@ -73,11 +172,45 @@ def _tool_build_tool(args: dict) -> dict:
             "score": res.score, "reason": res.reason}
 
 
+# ---- JSON Schemas so MCP hosts present real arguments to agents ----
+_REPO = {"type": "string", "description": "absolute path to the repo"}
+_GATE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "repo": _REPO,
+        "stage": {"type": "string", "enum": list(_STAGES), "default": "inner_loop"},
+        "language": {"type": "string", "enum": ["python", "js", "go"], "default": "python"},
+        "diff_files": {"type": "array", "items": {"type": "string"},
+                       "description": "changed files; a grader must cover at least one"},
+        "options": {"type": "object", "description": "lint/types/security toggles"},
+        "attest": {"type": "string", "enum": list(_ATTEST), "default": "auto",
+                   "description": "auto: ed25519 if available else hmac; ed25519 fails closed if absent"},
+    },
+    "required": ["repo"],
+}
+_VERIFY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "receipt": {"type": "object", "description": "a gate receipt (has 'graders') or a RunReceipt"},
+        "require_public": {"type": "boolean", "default": False,
+                           "description": "reject HMAC; require ed25519 public verifiability"},
+    },
+    "required": ["receipt"],
+}
+_OBJ = {"type": "object"}
+
 TOOLS: dict[str, dict[str, Any]] = {
-    "verel_gate": {"fn": _tool_gate, "description": "Gate a list of verdict-bus Reports → verdict."},
-    "verel_ci_check": {"fn": _tool_ci_check, "description": "Run the inner-loop CI stage on a repo."},
-    "verel_recall": {"fn": _tool_recall, "description": "Recall records from a memory store."},
-    "verel_build_tool": {"fn": _tool_build_tool,
+    "verel_gate": {"fn": _tool_gate, "schema": _GATE_SCHEMA,
+                   "description": "Run graders on a repo → attested verdict + a verifiable receipt. "
+                                  "The agent cannot self-declare done."},
+    "verel_verify": {"fn": _tool_verify, "schema": _VERIFY_SCHEMA,
+                     "description": "Verify a receipt with no trust in its producer "
+                                    "(ed25519 = publicly verifiable)."},
+    "verel_ci_check": {"fn": _tool_ci_check, "schema": {"type": "object", "properties": {"repo": _REPO},
+                       "required": ["repo"]}, "description": "Run the inner-loop CI stage on a repo."},
+    "verel_recall": {"fn": _tool_recall, "schema": _OBJ,
+                     "description": "Recall records from a memory store."},
+    "verel_build_tool": {"fn": _tool_build_tool, "schema": _OBJ,
                          "description": "Build+verify+register a tool (needs LLM key)."},
 }
 
@@ -101,7 +234,7 @@ def serve() -> None:  # pragma: no cover - requires the optional `mcp` extra + a
     @server.list_tools()
     async def _list() -> list[types.Tool]:
         return [types.Tool(name=n, description=t["description"],
-                           inputSchema={"type": "object"}) for n, t in TOOLS.items()]
+                           inputSchema=t.get("schema", _OBJ)) for n, t in TOOLS.items()]
 
     @server.call_tool()
     async def _call(name: str, arguments: dict) -> list[types.TextContent]:
