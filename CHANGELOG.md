@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.29.1 — security: 3-round adversarial red-team (10 more findings closed)
+
+A follow-up to 0.29.0: three independent adversarial red-team rounds on the hardened code, fixing
+between rounds and not declaring clean until a full round came back empty. The rounds found **10
+further issues** (2 verified-PoC), each fixed and pinned by a regression test. The final confirming
+round could **not** forge an attested PASS or achieve code execution from untrusted input.
+
+- **MCP/library RCE (the 0.29.0 container fix didn't reach the library default):** `eval_tool_cases`
+  / `ToolSmith` still ran LLM/cross-tenant code **in-process** by default (a verified escape to real
+  builtins). The default is now real isolation (`best`); cross-tenant **import** (`import_skill` /
+  `measure_transfer`) and the MCP build path require the **container** tier (fail-closed without
+  bwrap). In-process (`none`) must be opted into explicitly (trusted code only).
+- **Receipt replay / input-binding:** `inputs_digest` was signed but never verified, and digested a
+  *label* not content — and even once verified it was **vacuous** with empty `covers` (every shipped
+  stage). Now the gate verifies it, it binds the **actual scanned bytes**, and it is **salted with a
+  per-run nonce** so a PASS receipt is unique to its run and can't be replayed. `result_digest` also
+  binds each issue's `fingerprint`.
+- **DoS:** a negative `Content-Length` slipped past the body cap (`read(-1)` → EOF) on all three HTTP
+  servers — now rejected.
+- **Planted signing key:** the key file was read with no owner/mode/symlink check (a planted key
+  forges signatures) — now `O_NOFOLLOW` + refuse foreign-owned / group-or-other-accessible → ephemeral
+  fail-closed.
+- **Fleet:** `FailureLedger.record`/`mark_fixed` read-modify-write is now lock-serialized (a
+  concurrent worker can't mask a regression); registry publish writes atomically; the saga's
+  forward-atomicity contract is documented.
+
+315 offline-CI tests (`tests/test_security.py` now pins 13 hardening regressions). ruff + mypy clean.
+
 ## 0.29.0 — security hardening: a full attack-surface audit + red-team
 
 A two-round security pass (a three-surface audit, then an adversarial red-team of the fixes) found
