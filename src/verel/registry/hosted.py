@@ -75,8 +75,8 @@ def _make_handler(registry: PublicRegistry, token: str | None):
                 return self._send(404, {"error": "not found"})
             try:
                 n = int(self.headers.get("Content-Length", "0"))
-                if n > _MAX_BODY:
-                    raise ValueError("request body too large")
+                if n < 0 or n > _MAX_BODY:  # negative length → read(-1) reads to EOF, defeating the cap
+                    raise ValueError("bad request body length")
                 body = json.loads(self.rfile.read(n) or b"{}")
                 art = SkillArtifact(**body["artifact"])
             except (ValueError, KeyError, TypeError, RecursionError, json.JSONDecodeError):

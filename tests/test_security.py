@@ -129,6 +129,53 @@ def test_worktree_rejects_traversal_task_id(tmp_path):
     assert mgr._wt_path("task-1").name == "task-1"           # a well-formed id is accepted
 
 
+def test_eval_tool_cases_default_is_isolated_not_in_process():
+    """Untrusted tool code must NOT run in the host process by default — only an explicit
+    isolation='none' may. A tool that mutates host env proves out-of-process execution (round-3 C1)."""
+    import os
+
+    from verel.toolsmith.smith import ToolCase, eval_tool_cases
+
+    os.environ.pop("VEREL_PWNED", None)
+    code = "import os\ndef f(x):\n    os.environ['VEREL_PWNED'] = '1'\n    return x"
+    eval_tool_cases(code, "f", [ToolCase(args=[1], expected=1)])   # ALL DEFAULTS
+    assert os.environ.get("VEREL_PWNED") is None                   # host env untouched → ran isolated
+
+
+def test_secret_rejects_insecure_planted_key(monkeypatch, tmp_path):
+    """A pre-existing key file that is group/other-accessible (a planted key) must be refused so an
+    attacker-known key can't be loaded to forge signatures — fall back to ephemeral (round-3 M)."""
+    monkeypatch.delenv("VEREL_Y_KEY", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    keydir = tmp_path / "verel"
+    keydir.mkdir()
+    planted = keydir / "y.key"
+    planted.write_bytes(b"attacker-known-key-value-0000001")
+    planted.chmod(0o644)                                           # group/other-readable → insecure
+    got = load_secret("VEREL_Y_KEY", "y")
+    assert got != b"attacker-known-key-value-0000001"              # refused; used an ephemeral key
+
+
+def test_negative_content_length_is_rejected():
+    """A negative Content-Length must be rejected, not passed to read(-1) which reads to EOF and
+    defeats the body-size cap (round-3 H)."""
+    import socket
+
+    from verel.memory.hosted import MemoryServer
+
+    srv = MemoryServer(":memory:").start()
+    try:
+        host, port = srv._httpd.server_address[:2]
+        s = socket.create_connection((host, port), timeout=5)
+        s.sendall(b"POST /all HTTP/1.1\r\nHost: x\r\nContent-Length: -1\r\n"
+                  b"Connection: close\r\n\r\n" + b"A" * 4096)
+        resp = s.recv(256)
+        s.close()
+        assert b"400" in resp                                      # rejected, not buffered to EOF
+    finally:
+        srv.stop()
+
+
 def test_forged_receipt_with_old_default_secret_is_rejected():
     """A receipt signed with the retired public default secret must NOT verify — the whole point
     of removing the default (audit C1)."""

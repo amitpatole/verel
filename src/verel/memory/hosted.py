@@ -63,8 +63,8 @@ def _make_handler(store: MemoryView, lock: threading.Lock, token: str | None):
 
         def _body(self) -> dict:
             n = int(self.headers.get("Content-Length", "0"))
-            if n > _MAX_BODY:
-                raise ValueError("request body too large")
+            if n < 0 or n > _MAX_BODY:  # negative length → read(-1) reads to EOF, defeating the cap
+                raise ValueError("bad request body length")
             return json.loads(self.rfile.read(n) or b"{}")
 
         def do_GET(self):  # noqa: N802

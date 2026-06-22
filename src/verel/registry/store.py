@@ -9,6 +9,7 @@ valuable as skills that actually transfer (which §8.7 / h2.py measures before w
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -35,7 +36,10 @@ class PublicRegistry:
             if existing.origin != artifact.origin:
                 raise ValueError(f"refusing to overwrite {artifact.content_hash} published by a "
                                  f"different origin {existing.origin!r}")
-        dest.write_text(artifact.model_dump_json(indent=2))
+        # write atomically so a concurrent reader never sees a half-written artifact
+        tmp = dest.with_name(f"{dest.name}.{os.getpid()}.tmp")
+        tmp.write_text(artifact.model_dump_json(indent=2))
+        tmp.replace(dest)
         return artifact
 
     def get(self, content_hash: str) -> SkillArtifact | None:

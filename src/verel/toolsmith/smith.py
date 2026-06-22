@@ -189,8 +189,12 @@ def eval_tool_cases(code: str, name: str, cases: list[ToolCase], *,
     cross-tenant registry import (§8.7) so transfer is judged the SAME way as local build.
 
     isolation: 'none' (in-process), 'subprocess' (rlimits), 'container' (bwrap), 'best'.
-    `sandbox=True` is the back-compat alias for isolation='subprocess'."""
-    mode = isolation or ("subprocess" if sandbox else "none")
+    `sandbox=True` is the back-compat alias for isolation='subprocess'.
+
+    SECURITY: the default is 'best' (real isolation), NEVER in-process — this function runs
+    LLM-scaffolded and cross-tenant code, and the in-process restricted-builtins guard is trivially
+    escaped. 'none' must be opted into EXPLICITLY (trusted code only, e.g. fast tests)."""
+    mode = isolation or ("subprocess" if sandbox else "best")
     probe = ToolRecord(name=name, code=code, side_effect=side_effect).sign()
     if not cases:
         return False, 0.0, "no held-out cases"
