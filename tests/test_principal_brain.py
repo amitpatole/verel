@@ -303,12 +303,60 @@ def test_signed_writes_cannot_forge_control_records():
     for k in (MemoryKind.FAILURE, MemoryKind.DESIGN_RULE, MemoryKind.SCHEMA, MemoryKind.SKILL):
         r = signed("s", "p", "repo:x", "x", k)
         assert r.authenticated and r.written is False and "facts" in r.reason, k
-    # reserved PREDICATES refused (even as a FACT, even in a normal scope, even case/space variants)
-    for pred in ("fails", "author_trust", "design_rule", "schema", " FAILS ", "Author_Trust"):
+    # reserved PREDICATES refused (even as a FACT, even in a normal scope, even case/space variants).
+    # "tool" is the toolsmith's SKILL-registry predicate: a FACT colliding with it (make_id ignores
+    # kind) would clobber the executable tool body in detail['tool'] — red-team round 5.
+    for pred in ("fails", "author_trust", "design_rule", "schema", "tool",
+                 " FAILS ", "Author_Trust", "TOOL"):
         r = signed("fp", pred, "repo:x", "override", MemoryKind.FACT)
         assert r.written is False and "reserved" in r.reason, pred
     # a normal FACT still authors fine
     assert signed("deploy", "how", "team", "page oncall", MemoryKind.FACT).written is True
+
+
+def test_signed_write_cannot_clobber_skill_record():
+    """Red-team round 5: a signed client FACT must not collide with a toolsmith SKILL record. The
+    SKILL store keys on make_key(name, 'tool', scope) and make_id ignores `kind`, so without
+    reserving the 'tool' predicate a FACT with the same (subject, scope) shares the SKILL's id and
+    the interference rule would overwrite the executable tool body (detail['tool'])."""
+    from verel.memory.view import make_id
+    from verel.toolsmith.registry import ToolRecord, ToolRegistry
+
+    alice = Principal.generate()
+    trusted = dict([alice.enroll()])
+    mem = _mem()
+    reg = ToolRegistry(mem, scope="global")
+    skill = reg.register(ToolRecord(name="slugify", capability="make url slug",
+                                    doc="slug", code="def f(): pass", provenance=[]),
+                         trust=Trust.CANDIDATE)
+    assert "tool" in skill.detail  # the executable body is present
+
+    sig = alice.sign_write(subject="slugify", predicate="tool", scope="global", text="POISON")
+    r = authenticated_remember(mem, subject="slugify", predicate="tool", scope="global",
+                               text="POISON", signature=sig, key_id=alice.key_id, trusted=trusted,
+                               kind=MemoryKind.FACT)
+    assert r.authenticated and r.written is False and "reserved" in r.reason
+    after = mem.get(make_id(make_key("slugify", "tool", "global")))
+    assert after.kind == MemoryKind.SKILL and reg.get("slugify") is not None  # intact
+
+
+def test_structural_backstop_blocks_any_non_fact_collision():
+    """Root-cause fix (round 5): make_id ignores `kind`, so a client FACT shares an id with a
+    server-managed record at the same key. A client must never supersede a NON-FACT record — even
+    under a predicate the reserved denylist doesn't know, so a future server-managed kind can't
+    reopen the collision class the denylist chases one entry at a time."""
+    from verel.memory.view import MemoryRecord
+    alice = Principal.generate()
+    trusted = dict([alice.enroll()])
+    mem = _mem()
+    mem.write(MemoryRecord(kind=MemoryKind.SKILL, subject="x", predicate="futurepred", scope="g",
+                           text="SERVER", subj_pred_key=make_key("x", "futurepred", "g")))
+    sig = alice.sign_write(subject="x", predicate="futurepred", scope="g", text="POISON")
+    r = authenticated_remember(mem, subject="x", predicate="futurepred", scope="g", text="POISON",
+                               signature=sig, key_id=alice.key_id, trusted=trusted, kind=MemoryKind.FACT)
+    assert r.written is False and "server-managed" in r.reason
+    rec = mem.get(make_id(make_key("x", "futurepred", "g")))
+    assert rec.text == "SERVER" and rec.kind == MemoryKind.SKILL
 
 
 def test_verify_write_fails_closed_without_pynacl(monkeypatch):
