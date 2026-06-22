@@ -37,6 +37,10 @@ _CHILD = textwrap.dedent(
             resource.setrlimit(resource.RLIMIT_FSIZE, (0, 0))   # cannot write files
         except (ValueError, OSError):
             pass
+        try:
+            resource.setrlimit(resource.RLIMIT_NPROC, (64, 64))  # bound fork bombs
+        except (ValueError, OSError):
+            pass
     except Exception:
         pass
 

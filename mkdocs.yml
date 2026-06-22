@@ -59,6 +59,7 @@ nav:
   - Home: index.md
   - Get started: getting-started.md
   - 5-minute tutorial: tutorial.md
+  - Use cases: use-cases.md
   - Real-world scenarios: examples.md
   - Guides:
       - Developer guide: usage.md
@@ -75,6 +76,7 @@ nav:
 exclude_docs: |
   VEREL_DESIGN.md
   CRITIC_CONVERGENCE.md
+  SUBSTRATE_DESIGN.md
 
 extra:
   social:
