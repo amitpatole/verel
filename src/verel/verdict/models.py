@@ -104,11 +104,12 @@ class RunReceipt(BaseModel):
     signature: str
 
     def signing_payload(self) -> str:
-        # `alg` is bound FIRST so a signature minted under one scheme can never be replayed as another
-        # (algorithm-confusion / downgrade): the bytes a verifier checks differ the moment `alg` differs.
+        # A domain tag ("runreceipt") FIRST gives cross-type separation from the gate-level envelope
+        # (both share the signer) so a signature can never be confused across receipt types; then
+        # `alg` so a signature minted under one scheme can't be replayed as another (downgrade).
         # Canonical (injective, length-prefixed) encoding — a bare "|".join was non-injective and let a
         # delimiter inside a field shift the binding's partition (red-team round 2). See verel._sign.
-        return canonical_payload(self.alg, self.suite_sha, self.inputs_digest,
+        return canonical_payload("runreceipt", self.alg, self.suite_sha, self.inputs_digest,
                                  self.coverage_assertion, self.runner_identity, self.result_digest)
 
 
@@ -253,9 +254,10 @@ class GateReceipt(BaseModel):
     signature: str = ""
 
     def signing_payload(self) -> str:
-        # `alg` first (anti-downgrade); fingerprint transitively binds every grader line.
-        return canonical_payload(self.alg, self.issued_by, self.verdict.value, self.fingerprint,
-                                 self.runner_identity)
+        # Domain tag ("gatereceipt") FIRST for cross-type separation from RunReceipt (shared signer),
+        # then `alg` (anti-downgrade); fingerprint transitively binds every grader line.
+        return canonical_payload("gatereceipt", self.alg, self.issued_by, self.verdict.value,
+                                 self.fingerprint, self.runner_identity)
 
 
 class GateReceiptVerification(BaseModel):
