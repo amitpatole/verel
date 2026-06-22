@@ -80,7 +80,7 @@ class InMemoryLeaseStore:
 
     def release(self, lease: Lease) -> None:
         cur = self._held.get(lease.key)
-        if cur is not None and cur.token == lease.token:
+        if cur is not None and cur.token == lease.token and cur.owner == lease.owner:
             del self._held[lease.key]
 
     def current_token(self, key: str) -> int:
@@ -95,9 +95,10 @@ class InMemoryLeaseStore:
         return lease.owner if lease is not None and now < lease.expires_at else None
 
     def complete(self, lease: Lease, state: str) -> None:
-        if lease.token != self._tokens.get(lease.key, 0):
+        cur = self._held.get(lease.key)
+        if lease.token != self._tokens.get(lease.key, 0) or cur is None or cur.owner != lease.owner:
             raise FencingError(
-                f"stale token for {lease.key!r}: {lease.token} < current "
+                f"stale token or wrong owner for {lease.key!r}: {lease.token} vs current "
                 f"{self._tokens.get(lease.key, 0)} — write rejected")
         self._outcome[lease.key] = state
         self._held.pop(lease.key, None)
@@ -157,8 +158,8 @@ class SqliteLeaseStore:
 
     def release(self, lease: Lease) -> None:
         with self._conn() as c:
-            c.execute("UPDATE leases SET expires_at=0 WHERE key=? AND token=?",
-                      (lease.key, lease.token))
+            c.execute("UPDATE leases SET expires_at=0 WHERE key=? AND token=? AND owner=?",
+                      (lease.key, lease.token, lease.owner))
 
     def current_token(self, key: str) -> int:
         with self._conn() as c:
@@ -176,10 +177,10 @@ class SqliteLeaseStore:
     def complete(self, lease: Lease, state: str) -> None:
         with self._conn() as c:
             c.execute("BEGIN IMMEDIATE")
-            row = c.execute("SELECT max_token FROM leases WHERE key=?", (lease.key,)).fetchone()
-            if row is None or lease.token != row[0]:
+            row = c.execute("SELECT max_token, owner FROM leases WHERE key=?", (lease.key,)).fetchone()
+            if row is None or lease.token != row[0] or lease.owner != row[1]:
                 c.execute("COMMIT")
-                raise FencingError(f"stale token for {lease.key!r}: write rejected")
+                raise FencingError(f"stale token or wrong owner for {lease.key!r}: write rejected")
             c.execute("UPDATE leases SET outcome=? WHERE key=?", (state, lease.key))
             c.execute("COMMIT")
 

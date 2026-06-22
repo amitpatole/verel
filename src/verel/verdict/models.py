@@ -124,11 +124,15 @@ class Report(BaseModel):
 
 
 def report_result_digest(report: Report) -> str:
-    """Digest of a report's graded OUTCOME — its verdict and the identifying fields of every issue.
-    A receipt signs this (§7.1), so a Report tampered after signing (e.g. issues stripped to force a
-    PASS) no longer matches its receipt and the gate rejects it."""
-    parts = sorted(f"{i.kind.value}\x1f{i.severity.value}\x1f{i.message}" for i in report.issues)
-    blob = report.verdict.value + "\x1e" + "\x1e".join(parts)
+    """Digest of a report's graded OUTCOME — bind EVERY field the gate trusts so a Report tampered
+    after signing is rejected (§7.1). That means not just verdict + issue (kind, severity, message)
+    but also `confidence` and `source` (the gate clamps severity by these) and `errored` (the
+    dead-gate path) — otherwise an attacker flips confidence HIGH→LOW to clamp a CRITICAL to WARNING
+    while the receipt still matches."""
+    parts = sorted(
+        f"{i.kind.value}\x1f{i.severity.value}\x1f{i.confidence.value}\x1f{i.source.value}\x1f{i.message}"
+        for i in report.issues)
+    blob = f"{report.verdict.value}\x1e{int(report.errored)}\x1e" + "\x1e".join(parts)
     return hashlib.blake2s(blob.encode()).hexdigest()[:16]
 
 

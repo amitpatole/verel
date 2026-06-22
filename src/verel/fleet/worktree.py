@@ -13,9 +13,20 @@ release (auto-cleaned). This is single-repo isolation; the cross-repo atomic sag
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+
+# A task id becomes a filesystem path and a git ref — constrain it so it can't traverse out of the
+# worktree root (`../`), be `.`/`..`, or start with `-` (git option injection).
+_VALID_TASK_ID = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]*\Z")
+
+
+def _check_task_id(task_id: str) -> str:
+    if not isinstance(task_id, str) or not _VALID_TASK_ID.match(task_id):
+        raise WorktreeError(f"invalid task_id {task_id!r}: must match [A-Za-z0-9_][A-Za-z0-9._-]*")
+    return task_id
 
 
 class WorktreeError(RuntimeError):
@@ -70,10 +81,10 @@ class WorktreeManager:
         self.root.mkdir(parents=True, exist_ok=True)
 
     def _lock_path(self, task_id: str) -> Path:
-        return self.root / f"{task_id}.lock"
+        return self.root / f"{_check_task_id(task_id)}.lock"
 
     def _wt_path(self, task_id: str) -> Path:
-        return self.root / task_id
+        return self.root / _check_task_id(task_id)
 
     def acquire_lease(self, task_id: str) -> None:
         """Exclusive advisory lock. O_CREAT|O_EXCL is atomic on POSIX, so two workers cannot
@@ -96,7 +107,8 @@ class WorktreeManager:
         try:
             if path.exists():
                 self._force_remove(task_id)
-            _git(self.repo, "worktree", "add", "-q", "-b", branch, str(path), base)
+            # `--` ends option parsing so a `-`-leading base can't be read as a git flag.
+            _git(self.repo, "worktree", "add", "-q", "-b", branch, "--", str(path), base)
         except WorktreeError:
             self.release_lease(task_id)
             raise

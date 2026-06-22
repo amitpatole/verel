@@ -29,7 +29,13 @@ class PublicRegistry:
             artifact.finalize()
         if not artifact.verify():
             raise ValueError(f"refusing to publish unsigned/tampered artifact {artifact.name!r}")
-        (self.root / f"{artifact.content_hash}.json").write_text(artifact.model_dump_json(indent=2))
+        dest = self.root / f"{artifact.content_hash}.json"
+        if dest.exists():  # a content hash belongs to its first publisher — no cross-origin overwrite
+            existing = SkillArtifact(**json.loads(dest.read_text()))
+            if existing.origin != artifact.origin:
+                raise ValueError(f"refusing to overwrite {artifact.content_hash} published by a "
+                                 f"different origin {existing.origin!r}")
+        dest.write_text(artifact.model_dump_json(indent=2))
         return artifact
 
     def get(self, content_hash: str) -> SkillArtifact | None:

@@ -76,26 +76,25 @@ def _make_handler(store: SqliteLeaseStore, token: str | None):
                 return self._send(401, {"error": "unauthorized"})
             try:
                 b = self._body()
-            except (ValueError, json.JSONDecodeError):
-                return self._send(400, {"error": "bad json"})
-            now = time.time()  # server is the clock authority
-            if self.path == "/acquire":
-                lease = store.acquire(b["key"], b["owner"], now=now, ttl=float(b["ttl"]))
-                return self._send(200, {"lease": _lease_json(lease)})
-            if self.path == "/renew":
-                lease = store.renew(Lease(b["key"], b["owner"], int(b["token"]), 0.0),
-                                    now=now, ttl=float(b["ttl"]))
-                return self._send(200, {"lease": _lease_json(lease)})
-            if self.path == "/release":
-                store.release(Lease(b["key"], b.get("owner", ""), int(b["token"]), 0.0))
-                return self._send(200, {"ok": True})
-            if self.path == "/complete":
-                try:
-                    store.complete(Lease(b["key"], b.get("owner", ""), int(b["token"]), 0.0), b["state"])
-                except FencingError as e:
-                    return self._send(409, {"error": str(e)})
-                return self._send(200, {"ok": True})
-            return self._send(404, {"error": "not found"})
+                now = time.time()  # server is the clock authority
+                if self.path == "/acquire":
+                    lease = store.acquire(b["key"], b["owner"], now=now, ttl=float(b["ttl"]))
+                    return self._send(200, {"lease": _lease_json(lease)})
+                if self.path == "/renew":
+                    lease = store.renew(Lease(b["key"], b["owner"], int(b["token"]), 0.0),
+                                        now=now, ttl=float(b["ttl"]))
+                    return self._send(200, {"lease": _lease_json(lease)})
+                if self.path == "/release":  # owner is required: terminal writes are owner-bound
+                    store.release(Lease(b["key"], b["owner"], int(b["token"]), 0.0))
+                    return self._send(200, {"ok": True})
+                if self.path == "/complete":
+                    store.complete(Lease(b["key"], b["owner"], int(b["token"]), 0.0), b["state"])
+                    return self._send(200, {"ok": True})
+                return self._send(404, {"error": "not found"})
+            except FencingError as e:  # stale token / wrong owner — fenced
+                return self._send(409, {"error": str(e)})
+            except (ValueError, KeyError, TypeError, RecursionError, json.JSONDecodeError):
+                return self._send(400, {"error": "bad request"})
 
     return Handler
 
