@@ -22,10 +22,10 @@ jobs:
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         with:
           enable-cache: false
-      - name: Create venv + install (core + dev)
+      - name: Create venv + install (core + dev + attest)
         run: |
           uv venv --python 3.11
-          uv pip install -e ".[dev]"
+          uv pip install -e ".[dev,attest]"   # attest = pynacl, so the ed25519 receipt tests RUN in CI
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
       - name: Lint (ruff)
         run: ruff check src tests examples

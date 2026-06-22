@@ -7,7 +7,9 @@ signature is necessary but NOT sufficient — the key_id must be TRUSTED (pinnin
 import json
 
 import pytest
-from nacl.signing import SigningKey
+
+pytest.importorskip("nacl", reason="ed25519 receipt tests need verel[attest] (pynacl)")
+from nacl.signing import SigningKey  # noqa: E402 - after importorskip guard
 
 from verel.verdict import (
     Confidence,
