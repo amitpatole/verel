@@ -30,6 +30,7 @@ import os
 import subprocess
 import threading
 import time
+import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -42,13 +43,30 @@ REFRESH = int(os.environ.get("REFRESH", "600"))  # seconds between live re-fetch
 PORT = int(os.environ.get("PORT", "8042"))  # 8042 dodges the LMDS docker-compose port range
 
 
-def _get(url: str, timeout: float = 12.0) -> dict | None:
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": "verel-metrics"})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.loads(r.read())
-    except Exception:  # noqa: BLE001 — a dead source degrades to None, never crashes the board
-        return None
+_UA = "verel-metrics-dashboard (+https://github.com/amitpatole/verel)"
+_PS_LAST = [0.0]  # last pypistats request time — pypistats rate-limits hard, so we space + retry
+
+
+def _get(url: str, timeout: float = 15.0, retries: int = 2) -> dict | None:
+    is_ps = "pypistats.org" in url
+    for attempt in range(retries + 1):
+        if is_ps:  # keep ≥1.5s between pypistats hits to stay under its rate limit
+            gap = 1.5 - (time.time() - _PS_LAST[0])
+            if gap > 0:
+                time.sleep(gap)
+            _PS_LAST[0] = time.time()
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": _UA})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            if e.code == 429 and attempt < retries:
+                time.sleep(3 * (attempt + 1))  # backoff and retry on rate-limit
+                continue
+            return None
+        except Exception:  # noqa: BLE001 — a dead source degrades to None, never crashes the board
+            return None
+    return None
 
 
 def _gh(path: str) -> dict | list | None:
@@ -75,20 +93,28 @@ def _agg(rows: list[dict] | None) -> dict[str, int]:
     return dict(sorted(agg.items(), key=lambda kv: -kv[1]))
 
 
+_LAST_PYPI: dict[str, dict] = {}  # last good per-package metrics — survive transient rate-limits
+
+
 def pypi_metrics(pkg: str) -> dict:
     pepy = _get(f"https://pepy.tech/api/v2/projects/{pkg}") or {}
     recent = (_get(f"https://pypistats.org/api/packages/{pkg}/recent") or {}).get("data", {})
     systems = _agg((_get(f"https://pypistats.org/api/packages/{pkg}/system") or {}).get("data"))
     pys = _agg((_get(f"https://pypistats.org/api/packages/{pkg}/python_minor") or {}).get("data"))
     info = (_get(f"https://pypi.org/pypi/{pkg}/json") or {}).get("info", {})
-    return {
+    new = {
         "total": pepy.get("total_downloads"),
-        "versions": len(pepy.get("versions", []) or []),
+        "versions": len(pepy.get("versions", []) or []) or None,
         "version": info.get("version"),
         "day": recent.get("last_day"), "week": recent.get("last_week"), "month": recent.get("last_month"),
         "systems": {k: v for k, v in systems.items() if k != "null"},
         "python": {k: v for k, v in pys.items() if k != "null"},
     }
+    # a 429 yields None/{} for some fields — keep the last good value instead of blanking the card
+    prev = _LAST_PYPI.get(pkg, {})
+    out = {k: (prev.get(k) if (v is None or v == {}) else v) for k, v in new.items()}
+    _LAST_PYPI[pkg] = out
+    return out
 
 
 def github_metrics(repo: str) -> dict:

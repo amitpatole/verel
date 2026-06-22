@@ -1,0 +1,31 @@
+# Verel × AgentVision live metrics dashboard — systemd unit (reference copy of the deployed unit).
+#
+# Install:
+#   sudo cp tools/verel-metrics.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now verel-metrics
+#   sudo firewall-cmd --permanent --add-port=8042/tcp && sudo firewall-cmd --reload
+#   # then open http://<LAN-ip>:8042
+#
+# Adjust User=, WorkingDirectory=, ExecStart=, and HOME= for your machine/checkout.
+# Manage: systemctl status verel-metrics · journalctl -u verel-metrics -f · sudo systemctl restart verel-metrics
+
+[Unit]
+Description=Verel x AgentVision live metrics dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=amitpatole
+WorkingDirectory=/home/amitpatole/WORKSPACE/Nirvana
+Environment=HOME=/home/amitpatole
+Environment=PORT=8042
+Environment=REFRESH=600
+Environment=PATH=/home/amitpatole/WORKSPACE/Nirvana/.venv/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/amitpatole/WORKSPACE/Nirvana/.venv/bin/python /home/amitpatole/WORKSPACE/Nirvana/tools/metrics_dashboard.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
