@@ -273,3 +273,59 @@ Build **Slice 0 (`gate` over MCP) + the attested receipt skeleton (Slice 3's cor
 conscience *and* the verifiable-receipt wedge in one increment, wired into one host and dogfooded. It's
 brain-only (no render target), proves the substrate thesis, and lands the differentiator immediately.
 `sight` (Slice 1) and the extension on-ramp (Slice 4) follow as their own gated releases.
+
+## 11. Slice 3 build plan — the ed25519 verifiable receipt (locked, in progress)
+
+> **Status:** decisions locked 2026-06-22; build started this session. Ships as its own gated,
+> CI-green release per the standing cadence. Security cadence (audit → 3-round red-team) is mandatory
+> here — this is crypto/attestation surface.
+
+### 11.1 Decisions locked
+| Question | Decision |
+|---|---|
+| Crypto library | **PyNaCl** (`nacl.signing` — libsodium, constant-time Ed25519). |
+| Packaging | **Optional extra `verel[attest]`**; lazy-imported. Default install stays HMAC-only and light. |
+| Missing-lib behavior | **Fail closed** — an ed25519 receipt with no `pynacl` present never verifies; clear "install verel[attest]" surfaced by the `verify` verb. |
+| Key distribution (v1) | **Local trusted-keys dir** (`~/.config/verel/trusted_keys/<key_id>.pub`) **+ inline-pinning**. The runner's *own* key is auto-trusted (zero-config local roundtrip). Registry / `.well-known` deferred to fast-follow. |
+| Trust model | **Pinning, never TOFU.** A valid ed25519 signature is necessary but **not** sufficient: `key_id` MUST resolve in the verifier's trusted set (dir or own key). An attacker-minted receipt self-certifies cryptographically but is rejected because its `key_id` is untrusted. |
+| `runner_identity` | For ed25519 it becomes `ed25519:<key_id>`, `key_id = urlsafe_b64(sha256(pubkey))[:16]`. |
+
+### 11.2 Two-tier model
+- **HMAC-SHA256** (existing) — fast, zero new lifecycle, *within* a trust domain (CI runner + gate share `VEREL_RUNNER_SECRET`). Unchanged, remains the default for all three minting sites.
+- **ed25519** (new) — public verifiability *across* trust domains. A second party verifies offline with only the producer's **public** key. This is the substrate wedge.
+
+### 11.3 Build steps (file by file)
+1. `pyproject.toml` — add `attest = ["pynacl>=1.5"]` optional extra.
+2. `verdict/models.py` — `RunReceipt` gains `alg: str = "hmac-sha256"` and `public_key: str = ""`
+   (inline pubkey, cross-checked, never trust-granting). **`signing_payload()` binds `alg` first**
+   (anti-downgrade/confusion). Receipts are ephemeral (minted + verified inside one `gate()` call),
+   so the payload-format change needs no migration.
+3. `_secrets.py` — extract the hardened keyfile I/O (`O_NOFOLLOW`/`O_EXCL`/`0600`/owner-check/
+   fail-closed-ephemeral) into a shared helper reused by both the HMAC secret and the ed25519 seed.
+4. `verdict/keys.py` (new) — persisted ed25519 seed (reusing 11.3.3), `key_id` derivation, the
+   trusted-key resolver (dir + own-key), `ed25519_sign` / `ed25519_verify`, and a `MissingAttestationDep`
+   raised when `pynacl` is absent.
+5. `verdict/gate.py` — `sign_receipt`/`verify_signature` dispatch on `alg`; **ed25519 verify enforces
+   `key_id ∈ trusted` and the inline-pubkey pin**; unknown alg / missing lib → fail closed. New
+   `verify_receipt(receipt) -> ReceiptVerification` (the public verb) and an `allowed_algs` policy knob
+   on `gate()` (default accepts both; ed25519 still gated by trust).
+6. `cli.py` — `verel verify <receipt.json>` prints valid/invalid, alg, runner, and whether it was
+   **publicly** verifiable (ed25519 + trusted key) vs shared-secret (HMAC).
+
+### 11.4 Attack vectors to eliminate (each regression-pinned)
+| Vector | Defense |
+|---|---|
+| **Untrusted-key acceptance (TOFU trap)** | valid ed25519 sig but `key_id` not in trusted set → **FAIL**. The single most important property. |
+| **Algorithm downgrade / confusion** | `alg` bound into the signed payload; verifier dispatches on `alg`; a sig made under one scheme never validates under another; unknown alg → fail closed. |
+| **Inline-pubkey swap** | inline `public_key` must hash to `key_id` **and** equal the authoritative trusted key; mismatch → FAIL. Inline pubkey is display/defense-in-depth, never a trust grant. |
+| **Missing `pynacl`** | ed25519 verify fails closed (gate FAILs); `verify` verb surfaces an explicit install hint, never silent green. |
+| **Result / input / replay tampering** | inherited unchanged from the existing receipt (result-binding, per-run-nonce input-binding, suite_sha, coverage) — re-pinned under ed25519. |
+| **Planted / foreign-owned seed file** | the ed25519 seed reuses `_secrets` hardening; a foreign-owned or group/other-readable seed → ephemeral key (verify fails closed), never trusted. |
+| **Empty / malformed signature** | fail closed (extends the existing HMAC test). |
+
+### 11.5 Definition of done
+A second party verifies a producer's receipt **offline with only the public key** (`verel verify`),
+the full attack table above is regression-pinned in `tests/`, an exploit script is run against the
+fixed code and shown blocked, **≥3 adversarial red-team rounds come back clean**, and lint + types +
+the full suite are green. Residual design risk named honestly (key distribution/registry deferred;
+rotation lifecycle; dependency/kernel trust).

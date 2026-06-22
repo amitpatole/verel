@@ -70,19 +70,29 @@ class GraderKind(str, Enum):
 
 
 class RunReceipt(BaseModel):
-    """Grader-execution attestation (§7.1). Required for graders in the `required` set."""
+    """Grader-execution attestation (§7.1). Required for graders in the `required` set.
+
+    Two-tier signing (§11): `alg="hmac-sha256"` (default) is fast and shared within a trust domain;
+    `alg="ed25519"` is publicly verifiable across domains — `runner_identity` carries `ed25519:<key_id>`
+    and `verify` needs only the producer's PUBLIC key, no shared secret."""
 
     suite_sha: str  # which frozen suite actually ran
     inputs_digest: str  # digest of the artifact/diff the grader saw
     coverage_assertion: str  # e.g. "scanned files: src/a.py,src/b.py" — must intersect the diff
-    runner_identity: str  # signing identity of the separate-trust-domain runner
+    runner_identity: str  # separate-trust-domain runner's identity ("ed25519:<key_id>" for ed25519)
     result_digest: str = ""  # digest of the graded OUTCOME (verdict + issues) — binds the receipt
     #                          to the Report it graded; a stripped/tampered Report fails the gate
-    signature: str  # over (suite_sha, inputs_digest, coverage_assertion, runner_identity, result_digest)
+    alg: str = "hmac-sha256"  # "hmac-sha256" | "ed25519" — BOUND INTO signing_payload (anti-downgrade)
+    # ed25519: inline urlsafe-b64 pubkey, PINNED (must hash to key_id); never trust-granting
+    public_key: str = ""
+    # signature over signing_payload(): (alg, suite_sha, inputs_digest, coverage, identity, result_digest)
+    signature: str
 
     def signing_payload(self) -> str:
+        # `alg` is bound FIRST so a signature minted under one scheme can never be replayed as another
+        # (algorithm-confusion / downgrade): the bytes a verifier checks differ the moment `alg` differs.
         return "|".join(
-            [self.suite_sha, self.inputs_digest, self.coverage_assertion,
+            [self.alg, self.suite_sha, self.inputs_digest, self.coverage_assertion,
              self.runner_identity, self.result_digest]
         )
 
@@ -183,3 +193,13 @@ class GateResult(BaseModel):
     verdict: Verdict
     reason: str = ""
     attributions: dict[str, GraderKind] = Field(default_factory=dict)  # fingerprint -> grader
+
+
+class ReceiptVerification(BaseModel):
+    """Result of the public `verify` verb (§11) — did a receipt check out, and could a stranger?"""
+
+    valid: bool
+    alg: str
+    runner_identity: str = ""
+    public_verifiable: bool = False  # True only for ed25519 verified against a trusted public key
+    reason: str = ""
