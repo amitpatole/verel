@@ -1,0 +1,16 @@
+# Daily per-country PyPI refresh (BigQuery) for the metrics dashboard — paired with the .timer.
+# Install: sudo cp tools/verel-metrics-country.{service,timer} /etc/systemd/system/
+#          sudo systemctl daemon-reload && sudo systemctl enable --now verel-metrics-country.timer
+# One query/day ≈ 6.6 GB scanned (well within BigQuery's 1 TB/month free tier).
+
+[Unit]
+Description=Refresh per-country PyPI downloads (BigQuery) for the metrics dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=amitpatole
+WorkingDirectory=/home/amitpatole/WORKSPACE/Nirvana
+Environment=HOME=/home/amitpatole
+ExecStart=/home/amitpatole/WORKSPACE/Nirvana/.venv/bin/python /home/amitpatole/WORKSPACE/Nirvana/tools/pypi_country.py

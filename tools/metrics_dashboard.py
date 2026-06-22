@@ -33,6 +33,7 @@ import time
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 # (PyPI package name, GitHub owner/repo, display label)
 PROJECTS = [
@@ -170,6 +171,60 @@ def _bars(d: dict[str, int], limit: int = 5) -> str:
     return rows or '<div class="muted">no data</div>'
 
 
+_COUNTRY_CACHE = Path(__file__).resolve().parent / "country_cache.json"
+_LABELS = {pkg: label for pkg, _repo, label in PROJECTS}
+
+_MAP_HEAD = '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/jsvectormap@1.5.3/dist/css/jsvectormap.min.css">'
+_MAP_LIBS = ('<script src="https://cdn.jsdelivr.net/npm/jsvectormap@1.5.3/dist/js/jsvectormap.min.js"></script>'
+             '<script src="https://cdn.jsdelivr.net/npm/jsvectormap@1.5.3/dist/maps/world.js"></script>')
+_MAP_JS = """
+(function(){
+  var C = window.COUNTRY; if(!C || !window.jsVectorMap) return;
+  var current = Object.keys(C.projects)[0]; var map=null;
+  function vals(p){ return C.projects[p] || {}; }
+  function build(p){
+    current = p;
+    var host = document.getElementById('map'); if(!host) return;
+    if(map){ try{ map.destroy(); }catch(e){} } host.innerHTML='';
+    map = new jsVectorMap({
+      selector:'#map', map:'world', zoomButtons:true, backgroundColor:'transparent',
+      regionStyle:{ initial:{ fill:'#1c1c2b', stroke:'#0a0a11', strokeWidth:0.4 }, hover:{ fill:'#5ad1e6' } },
+      series:{ regions:[{ attribute:'fill', scale:['#241f45','#6a5acd','#8b7cff','#5ad1e6'],
+        normalizeFunction:'polynomial', values: vals(p) }] },
+      onRegionTooltipShow:function(e,tt,code){
+        var v = vals(current)[code] || vals(current)[code && code.toUpperCase()] || 0;
+        tt.text('<b>'+tt.text()+'</b><br>'+v.toLocaleString()+' downloads', true);
+      }
+    });
+    document.querySelectorAll('.mtab').forEach(function(b){ b.classList.toggle('on', b.dataset.p===current); });
+  }
+  document.querySelectorAll('.mtab').forEach(function(b){ b.addEventListener('click', function(){ build(b.dataset.p); }); });
+  build(current);
+})();
+"""
+
+
+def country_payload() -> dict | None:
+    """Read tools/country_cache.json (written daily by pypi_country.py). Keys each country both
+    upper- and lower-case so it matches the map library regardless of its code casing."""
+    try:
+        raw = json.loads(_COUNTRY_CACHE.read_text())
+    except Exception:  # noqa: BLE001 — no cache yet → no map (run pypi_country.py first)
+        return None
+    projects, unknown = {}, {}
+    for pkg, lst in raw.get("countries", {}).items():
+        vals = {}
+        for c, n in lst:
+            if c == "??":
+                unknown[pkg] = n
+                continue
+            vals[c] = n
+            vals[c.lower()] = n
+        projects[pkg] = vals
+    return {"generated": raw.get("generated"), "window": raw.get("window_days"),
+            "labels": _LABELS, "projects": projects, "unknown": unknown}
+
+
 def render(d: dict) -> str:
     cards = ""
     for p in d["projects"]:
@@ -199,8 +254,28 @@ def render(d: dict) -> str:
           </div>
           <h3>Where (repo traffic referrers, 14d)</h3><ul class="refs">{refs}</ul>
         </section>"""
+    cp = country_payload()
+    if cp and cp["projects"]:
+        tabs = "".join(f'<button class="mtab" data-p="{pkg}">{lab.split()[0]}</button>'
+                       for pkg, lab in cp["labels"].items() if pkg in cp["projects"])
+        note = f"Hover a country for its {cp['window']}-day download count."
+        if any(cp["unknown"].get(p, 0) for p in cp["projects"]):  # only mention region-less if non-zero
+            unk = " · ".join(f'{cp["labels"][p].split()[0]} {_n(cp["unknown"][p])}'
+                             for p in cp["projects"] if cp["unknown"].get(p, 0))
+            note += f" Region-less (proxies/mirrors/CI): {unk}."
+        map_section = (
+            '<section class="card map-card"><div class="mhead">'
+            f'<h2>🌍 Downloads by country <span class="v">PyPI · {cp["window"]}d · BigQuery · {cp["generated"]}</span></h2>'
+            f'<div class="mtabs">{tabs}</div></div><div id="map"></div>'
+            f'<div class="mnote">{note}</div></section>')
+        map_embed = "<script>window.COUNTRY=" + json.dumps(cp) + ";</script>" + _MAP_LIBS + "<script>" + _MAP_JS + "</script>"
+        head = _MAP_HEAD
+    else:
+        map_section = ('<p class="ts" style="margin-top:18px">🌍 Country map: run '
+                       '<code>python tools/pypi_country.py</code> (BigQuery) to populate it.</p>')
+        map_embed = head = ""
     return f"""<!doctype html><html><head><meta charset="utf-8">
-<meta http-equiv="refresh" content="60"><title>Verel × AgentVision — live metrics</title>
+<meta http-equiv="refresh" content="120"><title>Verel × AgentVision — live metrics</title>{head}
 <style>
 :root{{--bg:#0a0a11;--card:#14141f;--line:#262633;--fg:#eceaf7;--mut:#a6a6c4;--acc:#8b7cff;--acc2:#5ad1e6;--good:#46d39a}}
 *{{box-sizing:border-box;margin:0;padding:0}}body{{background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.5}}
@@ -209,7 +284,7 @@ def render(d: dict) -> str:
 .cards{{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:22px}}
 .card{{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px}}
 .card h2{{font-size:21px}}.v{{color:var(--acc2);font-size:13px;font-weight:600}}
-.hero{{margin:14px 0}}.big{{font-size:46px;font-weight:850;background:linear-gradient(90deg,#cfc8ff,#8b7cff);-webkit-background-clip:text;background-clip:text;color:transparent}}
+.hero{{margin:14px 0}}.big{{font-size:46px;font-weight:850;color:#cfc8ff}}
 .sub{{color:var(--mut);font-size:13px}}
 .grid3,.grid4{{display:grid;gap:10px;margin:12px 0}}.grid3{{grid-template-columns:repeat(3,1fr)}}.grid4{{grid-template-columns:repeat(4,1fr)}}
 .stat{{background:#0e0e18;border:1px solid var(--line);border-radius:10px;padding:10px;text-align:center}}
@@ -219,14 +294,18 @@ h3 a{{color:var(--acc2);text-transform:none;letter-spacing:0}}
 .bar{{display:flex;align-items:center;gap:8px;margin:5px 0;font-size:13px}}.bk{{width:62px;color:var(--mut)}}.bt{{flex:1;background:#0e0e18;border-radius:6px;height:9px;overflow:hidden}}.bt i{{display:block;height:100%;background:linear-gradient(90deg,var(--acc),var(--acc2))}}.bv{{width:60px;text-align:right}}
 .refs{{list-style:none;font-size:14px}}.refs li{{padding:4px 0;border-bottom:1px solid var(--line)}}
 .muted{{color:var(--mut);font-size:13px}}
+.map-card{{padding:18px;margin-top:18px}}.mhead{{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}}
+.mtabs{{display:flex;gap:6px}}.mtab{{background:#0e0e18;border:1px solid var(--line);color:var(--mut);border-radius:8px;padding:5px 12px;font-size:13px;cursor:pointer}}.mtab.on{{border-color:var(--acc);color:#fff}}
+#map{{height:480px;margin-top:12px}}.mnote{{color:var(--mut);font-size:12px;margin-top:8px}}
+.jvm-tooltip{{background:#14141f!important;border:1px solid var(--line)!important;border-radius:8px!important;color:var(--fg)!important;padding:6px 10px!important}}
 @media(max-width:820px){{.cards{{grid-template-columns:1fr}}}}
 </style></head><body><div class="wrap">
 <h1>Verel × AgentVision — live adoption</h1>
-<div class="ts">updated {d['ts']} · auto-refresh 60s · cache {REFRESH}s · <a href="/api/metrics" style="color:var(--acc2)">JSON</a></div>
+<div class="ts">updated {d['ts']} · auto-refresh 120s · cache {REFRESH}s · <a href="/api/metrics" style="color:var(--acc2)">JSON</a></div>
 <div class="cards">{cards}</div>
-<p class="ts" style="margin-top:18px">PyPI downloads via pepy.tech + pypistats · GitHub via the traffic API.
-Country-level PyPI geography needs the BigQuery <code>pypi.file_downloads</code> dataset (not a free API).</p>
-</div></body></html>"""
+{map_section}
+<p class="ts" style="margin-top:18px">PyPI downloads via pepy.tech + pypistats · GitHub via the traffic API · country map via BigQuery <code>pypi.file_downloads</code> (refreshed daily).</p>
+</div>{map_embed}</body></html>"""
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -262,9 +341,8 @@ def _lan_ip() -> str:
 
 
 def main() -> None:
-    print("Fetching first snapshot (PyPI + GitHub)…")
-    cached()  # warm the cache so the first page load is instant
-    httpd = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
+    httpd = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)  # bind first so restarts are instant…
+    threading.Thread(target=cached, daemon=True).start()     # …then warm the cache in the background
     print(f"\n  Live metrics dashboard:  http://{_lan_ip()}:{PORT}")
     print(f"  (also http://localhost:{PORT})  ·  JSON at /api/metrics  ·  Ctrl-C to stop\n")
     try:

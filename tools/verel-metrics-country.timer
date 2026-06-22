@@ -1,0 +1,12 @@
+# Runs verel-metrics-country.service once a day (the dashboard reads the cached result instantly).
+
+[Unit]
+Description=Daily BigQuery country refresh for the metrics dashboard
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target
