@@ -399,10 +399,14 @@ def _tool_remember(args: dict) -> dict:
     if author:
         rec.with_detail(author=author)
     written = mem.write(rec)
+    if written.trust == Trust.VERIFIED:
+        reason = "corroborated an existing verified belief"   # same-text re-assertion of a verified fact
+    elif ev_ok:
+        reason = "attested grounding recorded — stays candidate (trust does not travel)"
+    else:
+        reason = "recorded as candidate"
     return {"id": written.id, "trust": written.trust.value, "scope": scope,
-            "evidence_verified": ev_ok,
-            "reason": ("attested grounding recorded — stays candidate (trust does not travel)"
-                       if ev_ok else "recorded as candidate")}
+            "evidence_verified": ev_ok, "reason": reason}
 
 
 def _tool_build_tool(args: dict) -> dict:
