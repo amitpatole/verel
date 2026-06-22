@@ -27,7 +27,7 @@ from urllib.parse import parse_qs, urlparse
 from ..fleet.lease import FencingError
 from .local import LocalMemory
 from .replicated import NotLeaderError
-from .view import MemoryKind, MemoryRecord, MemoryView
+from .view import MemoryKind, MemoryRecord, MemoryView, make_id, make_key
 
 _MAX_BODY = 16 * 1024 * 1024  # 16 MiB — reject oversized bodies before allocating (DoS guard)
 
@@ -36,11 +36,17 @@ def _rec_json(r: MemoryRecord | None) -> dict | None:
     return r.model_dump() if r is not None else None
 
 
+def _make_id_for(b: dict) -> str:
+    return make_id(make_key(str(b.get("subject", "")), str(b.get("predicate", "")),
+                            str(b.get("scope", "repo:default"))))
+
+
 def _kind(v) -> MemoryKind | None:
     return MemoryKind(v) if v else None
 
 
-def _make_handler(store: MemoryView, lock: threading.Lock, token: str | None):
+def _make_handler(store: MemoryView, lock: threading.Lock, token: str | None,
+                  trusted: dict[str, str] | None = None):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
         timeout = 30  # drop a slow/idle connection rather than pinning a thread (slowloris guard)
@@ -109,6 +115,23 @@ def _make_handler(store: MemoryView, lock: threading.Lock, token: str | None):
             if self.path == "/write":
                 r = store.write(MemoryRecord(**b["record"]), ts=b.get("ts", 0.0))
                 return self._send(200, {"record": _rec_json(r)})
+            if self.path == "/write_signed":
+                # multi-principal: the author is the AUTHENTICATED key_id (signature verified against
+                # an enrolled principal), never the caller's say-so. Trust does not travel.
+                from .principal import authenticated_remember
+                from .share import AuthorTrust
+                res = authenticated_remember(
+                    store, subject=str(b.get("subject", "")), predicate=str(b.get("predicate", "")),
+                    scope=str(b.get("scope", "repo:default")), text=str(b["text"]),
+                    signature=str(b.get("signature", "")), key_id=str(b.get("key_id", "")),
+                    trusted=trusted or {}, kind=_kind(b.get("kind")) or MemoryKind.FACT,
+                    author_trust=AuthorTrust(store), ts=b.get("ts", 0.0))
+                if not res.authenticated:
+                    return self._send(403, {"error": res.reason})
+                rid = store.get(_make_id_for(b))
+                return self._send(200, {"authenticated": res.authenticated, "written": res.written,
+                                        "author": res.author, "conflict": res.conflict,
+                                        "reason": res.reason, "record": _rec_json(rid)})
             if self.path == "/recall":
                 hits = store.recall(b["query"], scope=b.get("scope"), kind=_kind(b.get("kind")),
                                     k=b.get("k", 5), ts=b.get("ts", 0.0))
@@ -146,7 +169,7 @@ class MemoryServer:
 
     def __init__(self, db_path: str | Path | None = None, *, store: MemoryView | None = None,
                  host: str = "127.0.0.1", port: int = 0, auth_token: str | None = None,
-                 durable: bool = True):
+                 durable: bool = True, trusted_principals: dict[str, str] | None = None):
         if auth_token is None and host not in ("127.0.0.1", "::1", "localhost"):
             raise ValueError(f"refusing to bind {host!r} without auth_token — that exposes an "
                              "unauthenticated memory service; pass auth_token=... or bind 127.0.0.1")
@@ -155,9 +178,17 @@ class MemoryServer:
                 raise ValueError("MemoryServer needs a db_path or a store")
             store = LocalMemory(db_path, check_same_thread=False, durable=durable)
         self.store = store
+        # Enrolled principals (key_id → public_key_b64) — only their SIGNED writes (/write_signed) are
+        # accepted with an authenticated author. Bearer token = "can connect"; signature = "who wrote".
+        self.trusted_principals = dict(trusted_principals or {})
         self._lock = threading.Lock()
-        self._httpd = ThreadingHTTPServer((host, port), _make_handler(self.store, self._lock, auth_token))
+        self._httpd = ThreadingHTTPServer(
+            (host, port), _make_handler(self.store, self._lock, auth_token, self.trusted_principals))
         self._thread: threading.Thread | None = None
+
+    def enroll(self, key_id: str, public_key_b64: str) -> None:
+        """Trust a principal's signed writes (operator action). Reflected immediately (shared dict)."""
+        self.trusted_principals[key_id] = public_key_b64
 
     @property
     def url(self) -> str:
@@ -205,6 +236,23 @@ class RemoteMemory:
     def write(self, record: MemoryRecord, *, ts: float = 0.0) -> MemoryRecord:
         out = self._req("POST", "/write", {"record": record.model_dump(), "ts": ts})
         return self._rec(out["record"])  # type: ignore[return-value]
+
+    def remember_signed(self, principal, *, subject: str, predicate: str, scope: str, text: str,
+                        kind: MemoryKind = MemoryKind.FACT, ts: float = 0.0) -> dict:
+        """Author a belief on the shared brain as an AUTHENTICATED principal: sign the claim with the
+        principal's key; the server derives `author` from the verified key (forge-proof). Returns the
+        server's authn result {authenticated, written, author, conflict, reason, record}."""
+        sig = principal.sign_write(subject=subject, predicate=predicate, scope=scope, text=text)
+        try:
+            return self._req("POST", "/write_signed", {
+                "subject": subject, "predicate": predicate, "scope": scope, "text": text,
+                "kind": kind.value, "signature": sig, "key_id": principal.key_id, "ts": ts})
+        except urllib.error.HTTPError as e:
+            if e.code == 403:  # unauthenticated write rejected — surface it, don't raise
+                body = json.loads(e.read() or b"{}")
+                return {"authenticated": False, "written": False,
+                        "reason": body.get("error", "unauthenticated")}
+            raise
 
     def apply_replica(self, record: MemoryRecord) -> MemoryRecord:
         out = self._req("POST", "/apply", {"record": record.model_dump()})
