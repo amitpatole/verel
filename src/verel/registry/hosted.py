@@ -96,6 +96,9 @@ class RegistryServer:
 
     def __init__(self, root: str | Path, *, host: str = "127.0.0.1", port: int = 0,
                  auth_token: str | None = None):
+        if auth_token is None and host not in ("127.0.0.1", "::1", "localhost"):
+            raise ValueError(f"refusing to bind {host!r} without auth_token — that exposes an "
+                             "unauthenticated registry; pass auth_token=... or bind 127.0.0.1")
         self.registry = PublicRegistry(root)
         self._httpd = ThreadingHTTPServer((host, port), _make_handler(self.registry, auth_token))
         self._thread: threading.Thread | None = None
