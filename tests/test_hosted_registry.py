@@ -48,12 +48,16 @@ def test_trust_does_not_travel_import_reverifies(tmp_path):
         RemoteRegistry(srv.url).publish(_artifact())
         fetched = RemoteRegistry(srv.url).all()[0]
         # matching held-out cases -> re-verified (verified locally)
+        # sandbox=False: this is a TRUSTED test artifact, so re-verify in-process (the product
+        # default is the container tier, which fail-closes without bwrap — absent on CI runners).
         good = import_skill(fetched, ToolRegistry(LocalMemory(), scope="B"),
-                            target_cases=[ToolCase(args=["Hello World"], expected="hello-world")])
+                            target_cases=[ToolCase(args=["Hello World"], expected="hello-world")],
+                            sandbox=False)
         assert good.reverified
         # failing held-out cases -> installed only as a candidate (did NOT transfer)
         bad = import_skill(fetched, ToolRegistry(LocalMemory(), scope="C"),
-                           target_cases=[ToolCase(args=["Hello World"], expected="NOPE")])
+                           target_cases=[ToolCase(args=["Hello World"], expected="NOPE")],
+                           sandbox=False)
         assert not bad.reverified
     finally:
         srv.stop()

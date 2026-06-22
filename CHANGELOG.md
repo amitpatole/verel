@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.29.2 — CI fix for the v0.29.1 security release (no behavior change)
+
+The v0.29.1 hardening made cross-tenant `import_skill` default to the **container** isolation tier,
+which correctly **fails closed** when bubblewrap is absent. One test
+(`test_trust_does_not_travel_import_reverifies`) re-verified a *trusted* artifact without opting out,
+so it failed on bwrap-less CI runners. The test now passes `sandbox=False` (trusted test code runs
+in-process), matching the other registry tests. **No product/source change** — the secure
+container-default behavior is unchanged. 315 tests now green on CI (verified with bwrap masked).
+
 ## 0.29.1 — security: 3-round adversarial red-team (10 more findings closed)
 
 A follow-up to 0.29.0: three independent adversarial red-team rounds on the hardened code, fixing
