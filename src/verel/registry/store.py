@@ -9,9 +9,14 @@ valuable as skills that actually transfer (which §8.7 / h2.py measures before w
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from .artifact import SkillArtifact
+
+# Content hashes are blake2s hex digests; anything else (esp. '../' path traversal) is rejected
+# before it ever reaches the filesystem.
+_HASH_RE = re.compile(r"[0-9a-f]{1,64}\Z")
 
 
 class PublicRegistry:
@@ -28,6 +33,8 @@ class PublicRegistry:
         return artifact
 
     def get(self, content_hash: str) -> SkillArtifact | None:
+        if not _HASH_RE.match(content_hash):  # reject path traversal / non-hash lookups
+            return None
         p = self.root / f"{content_hash}.json"
         return SkillArtifact(**json.loads(p.read_text())) if p.exists() else None
 

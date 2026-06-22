@@ -47,6 +47,8 @@ DENIED_SYSCALLS: tuple[str, ...] = (
     "mount", "umount", "umount2",               # filesystem topology
     "pivot_root", "chroot",                     # root-of-fs games
     "unshare", "setns", "clone3",               # create / enter namespaces
+    "clone", "fork", "vfork",                   # spawn processes / fork-bomb (bwrap's own clone
+                                                # runs before this filter is applied to the payload)
     "socket", "socketcall",                     # any socket (net is netns-blocked too; in depth)
     "bpf",                                      # load BPF programs / maps
     "kexec_load", "kexec_file_load",            # load a replacement kernel

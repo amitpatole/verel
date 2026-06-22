@@ -15,6 +15,7 @@ writes are still fenced — a stale token's `complete` returns HTTP 409 and the 
 
 from __future__ import annotations
 
+import hmac
 import json
 import threading
 import time
@@ -26,16 +27,21 @@ from urllib.parse import parse_qs, urlparse
 
 from .lease import FencingError, Lease, SqliteLeaseStore
 
+_MAX_BODY = 1 * 1024 * 1024  # 1 MiB — lease payloads are tiny; reject oversized bodies (DoS guard)
+
 
 def _make_handler(store: SqliteLeaseStore, token: str | None):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
+        timeout = 30  # drop a slow/idle connection rather than pinning a thread (slowloris guard)
 
         def log_message(self, *_a):  # silence default stderr logging
             pass
 
         def _authed(self) -> bool:
-            return token is None or self.headers.get("Authorization") == f"Bearer {token}"
+            if token is None:
+                return True
+            return hmac.compare_digest(self.headers.get("Authorization", ""), f"Bearer {token}")
 
         def _send(self, code: int, body: dict) -> None:
             data = json.dumps(body).encode()
@@ -47,6 +53,8 @@ def _make_handler(store: SqliteLeaseStore, token: str | None):
 
         def _body(self) -> dict:
             n = int(self.headers.get("Content-Length", "0"))
+            if n > _MAX_BODY:
+                raise ValueError("request body too large")
             return json.loads(self.rfile.read(n) or b"{}")
 
         def do_GET(self):  # noqa: N802

@@ -15,6 +15,7 @@ control plane.) Stdlib only; an optional bearer token gates access.
 
 from __future__ import annotations
 
+import hmac
 import json
 import threading
 import urllib.error
@@ -28,6 +29,8 @@ from .local import LocalMemory
 from .replicated import NotLeaderError
 from .view import MemoryKind, MemoryRecord, MemoryView
 
+_MAX_BODY = 16 * 1024 * 1024  # 16 MiB — reject oversized bodies before allocating (DoS guard)
+
 
 def _rec_json(r: MemoryRecord | None) -> dict | None:
     return r.model_dump() if r is not None else None
@@ -40,12 +43,15 @@ def _kind(v) -> MemoryKind | None:
 def _make_handler(store: MemoryView, lock: threading.Lock, token: str | None):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
+        timeout = 30  # drop a slow/idle connection rather than pinning a thread (slowloris guard)
 
         def log_message(self, *_a):
             pass
 
         def _authed(self) -> bool:
-            return token is None or self.headers.get("Authorization") == f"Bearer {token}"
+            if token is None:
+                return True
+            return hmac.compare_digest(self.headers.get("Authorization", ""), f"Bearer {token}")
 
         def _send(self, code: int, body: dict) -> None:
             data = json.dumps(body).encode()
@@ -57,6 +63,8 @@ def _make_handler(store: MemoryView, lock: threading.Lock, token: str | None):
 
         def _body(self) -> dict:
             n = int(self.headers.get("Content-Length", "0"))
+            if n > _MAX_BODY:
+                raise ValueError("request body too large")
             return json.loads(self.rfile.read(n) or b"{}")
 
         def do_GET(self):  # noqa: N802
