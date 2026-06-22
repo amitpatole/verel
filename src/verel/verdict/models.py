@@ -130,7 +130,8 @@ def report_result_digest(report: Report) -> str:
     dead-gate path) — otherwise an attacker flips confidence HIGH→LOW to clamp a CRITICAL to WARNING
     while the receipt still matches."""
     parts = sorted(
-        f"{i.kind.value}\x1f{i.severity.value}\x1f{i.confidence.value}\x1f{i.source.value}\x1f{i.message}"
+        f"{i.kind.value}\x1f{i.severity.value}\x1f{i.confidence.value}\x1f{i.source.value}"
+        f"\x1f{i.fingerprint}\x1f{i.message}"
         for i in report.issues)
     blob = f"{report.verdict.value}\x1e{int(report.errored)}\x1e" + "\x1e".join(parts)
     return hashlib.blake2s(blob.encode()).hexdigest()[:16]

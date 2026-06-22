@@ -70,6 +70,7 @@ def gate(
     required: set[GraderKind] | None = None,
     frozen_suites: dict[GraderKind, str] | None = None,
     diff_files: set[str] | None = None,
+    inputs_digests: dict[GraderKind, str] | None = None,
 ) -> GateResult:
     required = required or set()
     frozen_suites = frozen_suites or {}
@@ -90,6 +91,11 @@ def gate(
                 return GateResult(verdict=Verdict.FAIL, reason=f"{r.grader.value}: missing/forged receipt")
             if rr.suite_sha != frozen_suites.get(r.grader):
                 return GateResult(verdict=Verdict.FAIL, reason=f"{r.grader.value}: stale/wrong suite_sha")
+            # INPUT BINDING: the receipt must match the bytes actually in front of us now, so a PASS
+            # receipt can't be replayed onto different code with the same filenames.
+            if inputs_digests is not None and rr.inputs_digest != inputs_digests.get(r.grader):
+                return GateResult(verdict=Verdict.FAIL,
+                                  reason=f"{r.grader.value}: receipt input mismatch (replayed/stale)")
             if not coverage_satisfied(rr.coverage_assertion, diff_files):
                 return GateResult(verdict=Verdict.FAIL, reason=f"{r.grader.value}: grader did not cover diff")
             # RESULT BINDING: the receipt must commit to the report's graded outcome, so an

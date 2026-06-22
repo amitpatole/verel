@@ -35,15 +35,22 @@ class ImportResult:
 
 
 def import_skill(artifact: SkillArtifact, into: ToolRegistry, *, target_cases: list[ToolCase],
-                 target_name: str | None = None, sandbox: bool = True) -> ImportResult:
-    """Install an artifact into `into`, then re-verify against the target tenant's cases."""
+                 target_name: str | None = None, isolation: str = "container",
+                 sandbox: bool | None = None) -> ImportResult:
+    """Install an artifact into `into`, then re-verify against the target tenant's cases.
+
+    SECURITY: the artifact's code is FOREIGN/untrusted ("trust does not travel" — its signature only
+    proves a secret-holder packaged it). So re-verification runs in the CONTAINER tier by default
+    (bwrap netns + read-only fs + seccomp), fail-closed without bwrap — exactly like the MCP build
+    path. `sandbox` is a back-compat override for TRUSTED local code only (e.g. fast tests)."""
     if not artifact.verify():
         return ImportResult(artifact.name, False, False, 0.0, "signature/content verification failed")
 
     name = target_name or artifact.name
+    mode = isolation if sandbox is None else ("subprocess" if sandbox else "none")
     passed, score, detail = eval_tool_cases(artifact.code, name, target_cases,
                                             side_effect=SideEffect(artifact.side_effect),
-                                            sandbox=sandbox)
+                                            isolation=mode)
     tool = ToolRecord(name=name, capability=artifact.capability, code=artifact.code,
                       side_effect=SideEffect(artifact.side_effect), eval_score=score,
                       provenance=[*artifact.provenance, f"imported:{artifact.content_hash}"])

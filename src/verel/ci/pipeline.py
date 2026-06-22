@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from ..memory.failure_ledger import FailureLedger, regression_report
 from ..verdict.gate import gate
 from ..verdict.models import GateResult, GraderKind, Report, Verdict
-from .graders import GraderSpec, Runner, run_grader, subprocess_runner, suite_sha
+from .graders import GraderSpec, Runner, content_digest, run_grader, subprocess_runner, suite_sha
 
 
 @dataclass
@@ -45,8 +45,10 @@ def run_stage(stage: Stage, *, diff_files: set[str] | None = None, runner: Runne
     diff_files = diff_files or set()
     flaky_signatures = flaky_signatures or set()
     reports = [run_grader(s, runner) for s in stage.graders]
-    # Pin frozen suites from the trusted stage config (not from grader runtime output).
+    # Pin frozen suites + the actual scanned-content digest from the trusted stage config (not from
+    # grader runtime output), so the gate rejects a stale/replayed receipt that doesn't match.
     frozen = {s.grader: suite_sha(s) for s in stage.graders}
+    inputs = {s.grader: content_digest(s.cwd, s.covers) for s in stage.graders}
 
     regressions = []
     if ledger is not None:
@@ -63,7 +65,8 @@ def run_stage(stage: Stage, *, diff_files: set[str] | None = None, runner: Runne
                     if d.action in (Action.RETRY, Action.QUARANTINE_FLAKY)}
         ledger.record(flat, ts=ts, volatile_fingerprints=volatile)
 
-    gr = gate(reports, required=stage.required, frozen_suites=frozen, diff_files=diff_files)
+    gr = gate(reports, required=stage.required, frozen_suites=frozen, diff_files=diff_files,
+              inputs_digests=inputs)
     return StageResult(stage.name, gr.verdict, gr, reports, regressions)
 
 

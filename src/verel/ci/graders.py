@@ -18,6 +18,7 @@ import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from hashlib import blake2s
+from pathlib import Path
 
 from ..verdict.fingerprint import assign
 from ..verdict.gate import sign_receipt
@@ -63,11 +64,26 @@ def suite_sha(spec: GraderSpec) -> str:
     return blake2s(json.dumps([spec.grader.value, spec.command]).encode()).hexdigest()[:16]
 
 
+def content_digest(cwd: str | None, covers: list[str]) -> str:
+    """Digest the ACTUAL bytes the grader scanned (not just the filenames), so a receipt is bound to
+    the input it graded — a PASS receipt can't be replayed onto different code with the same paths."""
+    h = blake2s()
+    for f in sorted(covers):
+        h.update(f.encode())
+        h.update(b"\0")
+        try:
+            h.update((Path(cwd or ".") / f).read_bytes())
+        except OSError:
+            h.update(b"<absent>")
+        h.update(b"\0")
+    return h.hexdigest()[:16]
+
+
 def _receipt(spec: GraderSpec, report: Report, runner_identity: str = "ci-runner") -> RunReceipt:
     covered = ",".join(spec.covers) or "(repo)"
     rr = RunReceipt(
         suite_sha=suite_sha(spec),
-        inputs_digest=blake2s(covered.encode()).hexdigest()[:16],
+        inputs_digest=content_digest(spec.cwd, spec.covers),
         coverage_assertion=f"scanned files: {covered}",
         runner_identity=runner_identity,
         result_digest=report_result_digest(report), signature="",
@@ -151,8 +167,9 @@ def run_grader(spec: GraderSpec, runner: Runner = subprocess_runner) -> Report:
         # ran-but-no-parseable-issues yet nonzero exit => the tool itself errored, not a clean fail
         errored=(rc != 0 and not issues),
     )
-    report.run_receipt = _receipt(spec, report)  # sign AFTER the result is known (binds to it)
-    return assign(report)
+    report = assign(report)                       # populate issue fingerprints BEFORE signing...
+    report.run_receipt = _receipt(spec, report)   # ...so the receipt binds the final result incl. them
+    return report
 
 
 # Convenience constructors for the common stdlib-ish toolchain.
