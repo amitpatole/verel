@@ -199,7 +199,7 @@ def test_import_skill_does_not_run_foreign_code_in_process():
 def test_receipt_input_binding_rejects_replay(tmp_path):
     """A signed PASS receipt is bound to the bytes it graded; replaying it onto different content
     with the same filename must FAIL at the gate (round-2 H1)."""
-    from verel.ci.graders import GraderSpec, _receipt, content_digest
+    from verel.ci.graders import GraderSpec, _receipt, bound_input_digest
     from verel.verdict.gate import gate
     from verel.verdict.models import GraderKind, Report, Verdict
 
@@ -207,9 +207,25 @@ def test_receipt_input_binding_rejects_replay(tmp_path):
     f.write_text("clean = 1\n")
     spec = GraderSpec(grader=GraderKind.SECURITY, command=["x"], cwd=str(tmp_path), covers=["app.py"])
     rep = Report(verdict=Verdict.PASS, summary="", grader=GraderKind.SECURITY)
-    rep.run_receipt = _receipt(spec, rep)                         # signed over the CLEAN content
+    rep.run_receipt = _receipt(spec, rep, nonce="run-A")         # signed over the CLEAN content
     f.write_text("import os; os.system('curl evil')\n")          # attacker swaps content, same path
-    current = {spec.grader: content_digest(spec.cwd, spec.covers)}
+    current = {spec.grader: bound_input_digest(spec.cwd, spec.covers, "run-A")}
+    res = gate([rep], required={GraderKind.SECURITY},
+               frozen_suites={GraderKind.SECURITY: rep.run_receipt.suite_sha}, inputs_digests=current)
+    assert res.verdict == Verdict.FAIL and "input mismatch" in res.reason
+
+
+def test_receipt_replay_across_runs_rejected_via_nonce(tmp_path):
+    """Even with EMPTY covers (where the content digest is a constant), a per-run nonce makes each
+    receipt run-specific — a PASS receipt from one run can't be replayed into another (round-2 H1-vacuous)."""
+    from verel.ci.graders import GraderSpec, _receipt, bound_input_digest
+    from verel.verdict.gate import gate
+    from verel.verdict.models import GraderKind, Report, Verdict
+
+    spec = GraderSpec(grader=GraderKind.SECURITY, command=["x"], cwd=str(tmp_path), covers=[])
+    rep = Report(verdict=Verdict.PASS, summary="", grader=GraderKind.SECURITY)
+    rep.run_receipt = _receipt(spec, rep, nonce="run-A")         # signed in run A
+    current = {spec.grader: bound_input_digest(spec.cwd, [], "run-B")}   # a different run's nonce
     res = gate([rep], required={GraderKind.SECURITY},
                frozen_suites={GraderKind.SECURITY: rep.run_receipt.suite_sha}, inputs_digests=current)
     assert res.verdict == Verdict.FAIL and "input mismatch" in res.reason
