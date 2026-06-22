@@ -171,6 +171,39 @@ def test_mcp_verify_malformed_receipt():
     assert "error" in dispatch("verel_verify", {"receipt": {"suite_sha": 123}})  # wrong type
 
 
+# --- coverage pins recommended by the round-3 blast-radius sweep -------------
+def test_run_stage_ed25519_thread_through(tmp_path):
+    """The MCP `attest` value threads run_stage → run_grader → _receipt; the per-grader receipts come
+    out ed25519 and the stage's own internal hollow-gate still passes (own-key auto-trust)."""
+    from verel.ci import Stage, pytest_spec, run_stage
+
+    stage = Stage("t", [pytest_spec(str(tmp_path))], required={GraderKind.TEST})
+    res = run_stage(stage, runner=lambda cmd, cwd=None: (0, "", ""), attest="ed25519")
+    assert res.verdict == Verdict.PASS
+    assert res.reports[0].run_receipt.alg == "ed25519"
+    gr = build_gate_receipt(res.verdict, res.reports, attest="ed25519")
+    assert verify_gate_receipt(gr, allowed_algs={"ed25519"}).valid
+
+
+def test_untagged_payload_signature_rejected():
+    """Pins the domain-separation guarantee: a signature over the OLD untagged payload (no
+    "runreceipt" tag) must be rejected, so a future refactor that drops the tag can't silently pass."""
+    import hashlib
+    import hmac
+
+    from verel._sign import canonical_payload
+    from verel.verdict.gate import _RUNNER_SECRET
+    from verel.verdict.keys import _NACL  # noqa: F401 - ensure module import side-effects
+
+    rr = RunReceipt(suite_sha="s", inputs_digest="i", coverage_assertion="c",
+                    runner_identity="r", result_digest="d", signature="")
+    old = canonical_payload(rr.alg, rr.suite_sha, rr.inputs_digest, rr.coverage_assertion,
+                            rr.runner_identity, rr.result_digest)  # no "runreceipt" domain tag
+    rr.signature = hmac.new(_RUNNER_SECRET, old.encode(), hashlib.sha256).hexdigest()
+    from verel.verdict import verify_signature
+    assert verify_signature(rr) is False
+
+
 # --- host-boundary: no agent input may crash the connection (red-team round 2) ----
 def test_mcp_gate_non_string_language_does_not_crash():
     """A JSON array/object `language` hits `language not in LANGS` (a dict membership test) and would
