@@ -82,7 +82,7 @@ def _make_handler(store: MemoryView, lock: threading.Lock, token: str | None):
                 return self._send(401, {"error": "unauthorized"})
             try:
                 b = self._body()
-            except (ValueError, json.JSONDecodeError):
+            except (ValueError, RecursionError, json.JSONDecodeError):
                 return self._send(400, {"error": "bad json"})
             with lock:  # the server is the single writer: serialize every access
                 # a replicated node fences/refuses writes when it isn't the leader; surface that as
@@ -93,6 +93,8 @@ def _make_handler(store: MemoryView, lock: threading.Lock, token: str | None):
                     return self._send(409, {"error": str(e)})
                 except NotLeaderError as e:
                     return self._send(421, {"error": str(e)})
+                except (KeyError, ValueError, TypeError) as e:  # malformed body → clean 400
+                    return self._send(400, {"error": f"bad request: {e}"})
 
         def _dispatch(self, b):  # noqa: C901 — flat command table
             if self.path == "/replicate":  # a leader replicating a record to this follower (fenced)

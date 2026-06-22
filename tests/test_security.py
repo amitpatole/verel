@@ -71,6 +71,64 @@ def test_servers_refuse_unauthenticated_non_loopback_bind(tmp_path):
     srv2._httpd.server_close()
 
 
+def test_lease_terminal_write_is_owner_bound():
+    """A fencing token is readable by any authenticated caller; terminal writes must ALSO require the
+    owner, so a token-holder can't hijack another task's outcome (red-team C2)."""
+    import pytest
+
+    from verel.fleet import InMemoryLeaseStore
+    from verel.fleet.lease import FencingError, Lease
+
+    s = InMemoryLeaseStore()
+    lease = s.acquire("task", "alice", now=0.0, ttl=10.0)
+    with pytest.raises(FencingError):                       # right token, wrong owner
+        s.complete(Lease("task", "mallory", lease.token, 0.0), "poisoned")
+    assert s.outcome("task") is None
+    s.complete(lease, "done")                               # the real owner succeeds
+    assert s.outcome("task") == "done"
+
+
+def test_result_digest_binds_confidence_and_errored():
+    """The attestation digest must cover every field the gate trusts — flipping confidence
+    HIGH→LOW (which clamps a CRITICAL to WARNING) or toggling `errored` must change the digest, or
+    a valid receipt could be paired with a downgraded report (red-team H1)."""
+    from verel.verdict.models import (
+        Confidence,
+        GraderKind,
+        Issue,
+        IssueKind,
+        Report,
+        Severity,
+        Verdict,
+        report_result_digest,
+    )
+
+    hi = Issue(kind=IssueKind.OVERFLOW, severity=Severity.CRITICAL, message="x",
+               source=GraderKind.SECURITY, confidence=Confidence.HIGH)
+    lo = hi.model_copy(update={"confidence": Confidence.LOW})
+    base = Report(verdict=Verdict.FAIL, summary="", issues=[hi], grader=GraderKind.SECURITY)
+    flipped = Report(verdict=Verdict.FAIL, summary="", issues=[lo], grader=GraderKind.SECURITY)
+    errored = Report(verdict=Verdict.FAIL, summary="", issues=[hi], grader=GraderKind.SECURITY, errored=True)
+    assert report_result_digest(base) != report_result_digest(flipped)   # confidence bound
+    assert report_result_digest(base) != report_result_digest(errored)   # errored bound
+
+
+def test_worktree_rejects_traversal_task_id(tmp_path):
+    """task_id becomes a filesystem path + git ref — reject traversal/option-injection (red-team M1)."""
+    import subprocess
+
+    import pytest
+
+    from verel.fleet.worktree import WorktreeError, WorktreeManager
+
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    mgr = WorktreeManager(str(tmp_path))
+    for bad in ("../escape", "..", "a/b", "-rf", "/abs", ".", "x/../../y"):
+        with pytest.raises(WorktreeError):
+            mgr._wt_path(bad)
+    assert mgr._wt_path("task-1").name == "task-1"           # a well-formed id is accepted
+
+
 def test_forged_receipt_with_old_default_secret_is_rejected():
     """A receipt signed with the retired public default secret must NOT verify — the whole point
     of removing the default (audit C1)."""

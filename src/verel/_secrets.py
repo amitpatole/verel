@@ -37,11 +37,17 @@ def load_secret(env_var: str, name: str) -> bytes:
             return path.read_bytes()
         path.parent.mkdir(parents=True, exist_ok=True)
         key = secrets.token_bytes(32)
-        path.write_bytes(key)
         try:
-            path.chmod(0o600)
-        except OSError:
-            pass
+            # Atomic create-or-fail at mode 0600 from the start: O_EXCL refuses to follow/overwrite a
+            # pre-existing file or symlink (no symlink attack, no chmod race), and a concurrent
+            # first-run loser re-reads the winner's key instead of clobbering it.
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            return path.read_bytes()
+        try:
+            os.write(fd, key)
+        finally:
+            os.close(fd)
         return key
     except OSError:
         return secrets.token_bytes(32)  # can't persist → ephemeral (cross-process verify fails closed)

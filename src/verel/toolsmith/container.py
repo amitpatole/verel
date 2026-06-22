@@ -99,5 +99,12 @@ def run_container(tool: ToolRecord, args=None, kwargs=None, *, timeout_s: float 
 
 
 def best_runner():
-    """Return the strongest available tool runner: container (bwrap) else rlimit subprocess."""
-    return run_container if bwrap_available() else run_sandboxed
+    """Return the strongest available tool runner: container (bwrap) else rlimit subprocess. The
+    subprocess fallback has NO network/seccomp isolation, so the downgrade is warned, not silent —
+    do not run untrusted/remote code through it (the MCP path requires the container tier outright)."""
+    if bwrap_available():
+        return run_container
+    warnings.warn("bwrap unavailable — falling back to the rlimit-only subprocess sandbox, which has "
+                  "no network or seccomp isolation; do not run untrusted code on this host",
+                  RuntimeWarning, stacklevel=2)
+    return run_sandboxed

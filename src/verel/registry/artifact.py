@@ -37,7 +37,9 @@ class SkillArtifact(BaseModel):
     signature: str = ""
 
     def _payload(self) -> str:
-        return f"{self.content_hash}|{self.name}|{self.origin}"
+        # side_effect is security-relevant (destructive vs read_only gates human review) — bind it
+        # into the signature so it can't be silently flipped on a re-published artifact.
+        return f"{self.content_hash}|{self.name}|{self.origin}|{self.side_effect}"
 
     def finalize(self) -> SkillArtifact:
         self.content_hash = content_hash(self.code)

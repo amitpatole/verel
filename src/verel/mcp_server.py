@@ -64,10 +64,11 @@ def _tool_build_tool(args: dict) -> dict:
         side_effect=SideEffect(args.get("side_effect", "read_only")),
         cases=[ToolCase(**c) for c in args.get("cases", [])],
     )
-    # SECURITY: this path builds and runs LLM/remote-supplied code. NEVER run it in-process
-    # (the restricted-namespace guard is trivially escaped) — force real isolation (bwrap
-    # container if available, else an rlimited subprocess).
-    res = ToolSmith(ToolRegistry(LocalMemory(), scope="global"), isolation="best").build(spec)
+    # SECURITY: this path builds and runs LLM/remote-supplied code. Require the CONTAINER tier
+    # (bwrap netns + read-only fs + seccomp). Do NOT fall back to "best"/subprocess — the rlimit
+    # subprocess tier has no network/seccomp isolation, so a bwrap-less host would otherwise become
+    # remote-code-execution-with-network. Without bwrap the build fails closed (code never runs).
+    res = ToolSmith(ToolRegistry(LocalMemory(), scope="global"), isolation="container").build(spec)
     return {"registered": res.registered, "trust": res.trust.value if res.trust else None,
             "score": res.score, "reason": res.reason}
 

@@ -79,7 +79,7 @@ def _make_handler(registry: PublicRegistry, token: str | None):
                     raise ValueError("request body too large")
                 body = json.loads(self.rfile.read(n) or b"{}")
                 art = SkillArtifact(**body["artifact"])
-            except (ValueError, KeyError, json.JSONDecodeError):
+            except (ValueError, KeyError, TypeError, RecursionError, json.JSONDecodeError):
                 return self._send(400, {"error": "bad artifact"})
             try:
                 registry.publish(art)  # verifies signature/content — refuses a tampered artifact
