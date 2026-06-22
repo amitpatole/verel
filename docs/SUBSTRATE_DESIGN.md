@@ -462,3 +462,38 @@ shared across principals*:
 exactly why #3/#4 are acceptable here; they (plus a receipt↔fact binding for a true cross-principal
 `verified`) are the **deferred multi-principal auth layer** the `hosted.py`/`RemoteMemory` direction
 already anticipates — that layer does not yet exist to audit.
+
+## 15. Slice 3 (brain, cont.) — the authenticated multi-principal brain (closes Findings 3 & 4)
+
+> **Status:** built this session. Turns the deferred items above into real controls so the **shared
+> remote brain** can be trusted across principals, not just one local operator.
+
+### 15.1 What shipped
+- **Finding 4 — trust-weighted ranking (`memory/view.py`).** `rank()` gains a small `W_TRUST` term
+  (`_TRUST_RANK`: verified 1.0 / candidate 0.0 / rejected −1.0), so at equal relevance a **verified**
+  memory edges out a poisoned **candidate** — while a much-more-relevant candidate still wins (relevance
+  dominates). Applies everywhere recall ranks (local, lattice, mem0).
+- **Finding 3 — authenticated principals (`memory/principal.py`).** A **principal is an ed25519
+  keypair** whose `key_id` *is* its identity (reuses `verdict.keys`). `Principal.sign_write` signs the
+  exact claim (`canonical_payload("memwrite", key_id, subject, predicate, scope, text)` — domain-tagged,
+  injective, so a signature can't be lifted onto a different fact). `verify_write` checks it against an
+  **enrolled** pubkey (pinning, never TOFU; the stored pubkey must hash to its key_id).
+  `authenticated_remember` writes on behalf of the verified principal: **`author` is the verified
+  key_id, never a caller string** — so `AuthorTrust` can no longer be forged, inflated, or
+  impersonated. A principal may **not** silently supersede *another* principal's VERIFIED belief.
+- **Wiring (`memory/hosted.py`).** `MemoryServer(trusted_principals=…)` + `enroll()`; a `/write_signed`
+  endpoint runs `authenticated_remember` (the bearer token = "can connect"; the signature = "who
+  wrote"). `RemoteMemory.remember_signed(principal, …)` signs and posts; an unauthenticated write is a
+  403 surfaced as a structured result.
+
+### 15.2 DoD — met
+Across the in-process HTTP server: an enrolled principal's signed write authenticates with `author ==
+key_id`; **signing with your own key while claiming another's key_id fails** (no impersonation); an
+unenrolled principal is rejected; a signature is bound to its claim (can't be lifted); a peer cannot
+overwrite another principal's verified belief; `AuthorTrust` keys on the verified id. 9 tests in
+`tests/test_principal_brain.py`. Security cadence applied next.
+
+**Still deferred (honest):** a receipt↔fact binding so a cross-principal `verified` tier (not just
+`candidate`) is earned by a fact-bound attestation; transport confidentiality (TLS) for a routable
+bind; and wiring the MCP `remember` verb to a configured remote principal (today MCP remember is the
+local brain). Key distribution/enrollment is operator-driven (publish pubkeys), same as receipt keys.

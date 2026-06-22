@@ -36,6 +36,8 @@ def tokens(s: str) -> set[str]:
 W_REL = 0.5  # lexical relevance to the query
 W_REC = 0.2  # retrieval_strength (recency/use)
 W_CONF = 0.3  # epistemic_confidence (belief in truth)
+W_TRUST = 0.15  # trust tier — a VERIFIED memory edges out an equally-relevant CANDIDATE (small, so
+#                 relevance still dominates; closes the trust-blind-ranking gap from the brain audit)
 
 # Prune thresholds (§5).
 PRUNE_RS = 0.15
@@ -124,10 +126,18 @@ def relevance(query: str, record: MemoryRecord) -> float:
     return len(q & hay) / len(q)
 
 
+# Trust tier as a ranking signal: a verified memory should surface above an equally-relevant
+# candidate; a (normally pre-filtered) rejected one sinks. Bounded to keep relevance dominant.
+_TRUST_RANK = {Trust.VERIFIED: 1.0, Trust.CANDIDATE: 0.0, Trust.REJECTED: -1.0}
+
+
 def rank(record: MemoryRecord, relevance: float) -> float:
-    """The DOCUMENTED ranking rule. Combines the two orthogonal signals + relevance; it
-    never multiplies confidence into strength or vice-versa."""
-    return W_REL * relevance + W_REC * record.retrieval_strength + W_CONF * record.epistemic_confidence
+    """The DOCUMENTED ranking rule. Combines the orthogonal signals + relevance + trust tier; it
+    never multiplies confidence into strength or vice-versa. The trust term is small, so a much more
+    relevant candidate still beats a barely-relevant verified one — but at equal relevance/confidence,
+    verified wins (so a poisoned candidate can't outrank a verified fact)."""
+    return (W_REL * relevance + W_REC * record.retrieval_strength
+            + W_CONF * record.epistemic_confidence + W_TRUST * _TRUST_RANK.get(record.trust, 0.0))
 
 
 def should_prune(r: MemoryRecord) -> bool:
