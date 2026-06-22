@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.32.0 — the authenticated multi-principal brain
+
+Turns the deferred multi-principal items from the 0.31.0 brain audit into real controls, so a **shared
+remote brain** can be trusted across principals — not just one local operator.
+
+- **Authenticated principals.** A principal is an **ed25519 keypair whose `key_id` IS its identity**
+  (`verel.memory.Principal`). A write is signed; the server derives `author` from the **verified** key,
+  never a caller-supplied string — so authoring as someone else requires their private key, and
+  `AuthorTrust` can't be forged, inflated, or impersonated (closes the brain-audit **Finding 3**).
+  Enrollment is pinning (operator publishes pubkeys), reusing the receipt key machinery.
+- **Trust-weighted recall.** `rank()` now folds in the trust tier — at equal relevance a **verified**
+  memory edges out a candidate, so a poisoned candidate can't outrank a verified fact (**Finding 4**).
+- **Hosted wiring.** `MemoryServer(trusted_principals=…)` + a `/write_signed` endpoint
+  (`RemoteMemory.remember_signed`); the replication channel (`/apply`, `/replicate`) now requires a
+  **separate cluster credential** (`X-Cluster-Token`) distinct from the client bearer.
+- **Hardened through a 7-round adversarial red-team** (the 7th came back clean): secure-by-default
+  signed-writes mode (a bearer token can connect + read, but only signed writes author; the raw
+  `/write` and all trust-mutation endpoints are refused); a **structural backstop** so a client `FACT`
+  can never supersede a server-managed non-`FACT` record (failure ledger, skills, induced
+  rules/schemas), plus a reserved-predicate/scope denylist for the one `FACT`-kind control record; a
+  principal can't overwrite or reattribute another's verified belief; and `graduate()` stamps a
+  collective author so a pre-empted key can't forge authorship of team knowledge. See
+  `docs/SUBSTRATE_DESIGN` §15.
+
+Residuals (honest): a cross-principal `verified` tier is still candidate-only (deferred, needs a
+fact-bound attestation); no TLS on a routable bind (operator's responsibility; non-loopback refuses
+without a token); the FACT-kind reserved-predicate denylist is a per-name maintenance obligation.
+
+413-test suite; ruff + mypy clean.
+
 ## 0.31.0 — the shared verified brain: recall/remember over MCP
 
 Completes the substrate's four hero verbs (`gate`, `sight`, `recall`/`remember`, `verify`): any agent
