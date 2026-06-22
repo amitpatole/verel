@@ -143,3 +143,59 @@ def test_signed_write_over_http(tmp_path):
         assert cli.remember_signed(eve, subject="x", predicate="y", scope="team", text="ok")["written"]
     finally:
         srv.stop()
+
+
+def test_signed_mode_blocks_unauthenticated_write_and_promote(tmp_path):
+    """Red-team round 1: the raw /write (forge author) and /promote (forge verified) endpoints must be
+    refused in signed-writes mode — else a bearer holder bypasses the principal layer entirely."""
+    import urllib.error
+
+    alice = Principal.generate()
+    srv = MemoryServer(db_path=str(tmp_path / "b.db"),
+                       trusted_principals=dict([alice.enroll()])).start()
+    try:
+        cli = RemoteMemory(srv.url)
+        forged = MemoryRecord(kind=MemoryKind.FACT, subject="x", predicate="y", text="poison",
+                              scope="team").with_detail(author=alice.key_id)
+        with pytest.raises(urllib.error.HTTPError) as e1:
+            cli.write(forged)
+        assert e1.value.code == 403
+        with pytest.raises(urllib.error.HTTPError) as e2:
+            cli.promote("anyid")
+        assert e2.value.code == 403
+        # signed write + reads still work
+        assert cli.remember_signed(alice, subject="a", predicate="b", scope="team", text="ok")["written"]
+        assert [r.text for r in cli.recall("ok", scope="team")] == ["ok"]
+    finally:
+        srv.stop()
+
+
+def test_enroll_after_open_start_auto_enables_signed_mode(tmp_path):
+    import urllib.error
+
+    alice = Principal.generate()
+    srv = MemoryServer(db_path=str(tmp_path / "c.db")).start()   # no principals → open mode
+    try:
+        cli = RemoteMemory(srv.url)
+        cli.write(MemoryRecord(kind=MemoryKind.FACT, subject="a", predicate="b", text="ok",
+                               scope="team"))   # open: raw write allowed
+        srv.enroll(*alice.enroll())             # enrolling flips enforcement ON (read live)
+        with pytest.raises(urllib.error.HTTPError) as e:
+            cli.write(MemoryRecord(kind=MemoryKind.FACT, subject="c", predicate="d", text="x",
+                                   scope="team"))
+        assert e.value.code == 403
+    finally:
+        srv.stop()
+
+
+def test_explicit_opt_out_keeps_raw_write_open(tmp_path):
+    """An operator can explicitly run single-principal-style even with principals enrolled."""
+    alice = Principal.generate()
+    srv = MemoryServer(db_path=str(tmp_path / "d.db"), trusted_principals=dict([alice.enroll()]),
+                       require_signed_writes=False).start()
+    try:
+        cli = RemoteMemory(srv.url)
+        cli.write(MemoryRecord(kind=MemoryKind.FACT, subject="a", predicate="b", text="ok",
+                               scope="team"))   # opt-out: raw write allowed
+    finally:
+        srv.stop()
