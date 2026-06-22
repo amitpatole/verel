@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.30.0 — the verification substrate: ed25519 public receipts + gate/sight/verify over MCP
+
+Verel becomes a **verification substrate any agent can call over MCP** — a conscience, a pair of
+eyes, and a receipt a *different* party can check. Three substrate slices, each shipped through the
+full audit → 3-round adversarial red-team cadence (fix between rounds; not clean until a round comes
+back empty).
+
+- **Publicly-verifiable receipts (ed25519).** `RunReceipt` gains a second signing tier: HMAC-SHA256
+  stays the default *within* a trust domain; **ed25519** adds public verifiability *across* domains —
+  a second party verifies a receipt **offline with only the producer's public key**, no shared secret.
+  Trust is **pinning, never TOFU**: a valid signature is necessary but not sufficient; the `key_id`
+  must be in the verifier's trusted set (the runner's own key, or a published
+  `~/.config/verel/trusted_keys/<key_id>.pub`). New `verify_receipt()` verb + `verel verify
+  <receipt.json>` CLI. Optional extra `verel[attest]` (PyNaCl); absent → ed25519 **fails closed**,
+  never silent green.
+- **`gate` over MCP (the conscience).** `verel_gate` *runs the real graders* on a repo and returns the
+  attested verdict + a signed, publicly-verifiable **gate-level receipt** that wraps the per-grader
+  receipts. An agent can no longer self-declare "done", and "an agent cannot fake green" becomes
+  checkable. New `verel_verify` MCP verb.
+- **`sight` over MCP (the eyes).** `verel_sight` renders a URL through AgentVision and returns an
+  **attested percept** — grounded observations with pixel bboxes, an `image_ref`, intent conformance,
+  and a verifiable receipt bound to the screenshot bytes. SSRF-safe by default (private-network guard
+  on; `allow_local` is an explicit opt-in); only `http(s)`.
+- **Hardening from the red-team rounds (all regression-pinned):** injective (length-prefixed) signing
+  payloads replacing non-injective `"|".join` across **every** signer (closed a real delimiter-injection
+  on the receipt and on the toolsmith/registry HMAC signers); strict base64; ASCII-only `key_id`;
+  cross-type domain separation (`runreceipt`/`gatereceipt`); the gate envelope signs the verdict +
+  `ceiling_clamped` + a percept `subject` (image_ref/matches_intent) so no trust-implying field is
+  unsigned; MCP host-boundary crash safety (no agent input can crash the connection; no `str(e)` leak).
+
+378-test suite; ruff + mypy clean. CI now installs `verel[attest]` so the ed25519 tests run.
+
 ## 0.29.2 — CI fix for the v0.29.1 security release (no behavior change)
 
 The v0.29.1 hardening made cross-tenant `import_skill` default to the **container** isolation tier,
