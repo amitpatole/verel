@@ -12,11 +12,13 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import os
 
 from pydantic import BaseModel, Field
 
-_SECRET = os.environ.get("VEREL_REGISTRY_SECRET", "verel-dev-registry-secret").encode()
+from .._secrets import load_secret
+
+# Registry artifact signing key — its own trust domain. No public default; see _secrets.load_secret.
+_SECRET = load_secret("VEREL_REGISTRY_SECRET", "registry_secret")
 
 
 def content_hash(code: str) -> str:
