@@ -359,6 +359,28 @@ def test_structural_backstop_blocks_any_non_fact_collision():
     assert rec.text == "SERVER" and rec.kind == MemoryKind.SKILL
 
 
+def test_graduate_does_not_inherit_a_preempted_author():
+    """Red-team round 6: graduate() writes collective team-knowledge to a client-reachable key. If a
+    principal pre-empts that key with a same-text FACT, the corroboration merge must NOT leave the
+    attacker's author on the graduated record (which would forge authorship + credit their
+    AuthorTrust). graduate stamps author='' so the merge overwrites it."""
+    from verel.memory import graduate
+    from verel.memory.share import author_of
+    from verel.memory.view import MemoryRecord
+    alice = Principal.generate()
+    trusted = dict([alice.enroll()])
+    mem = _mem()
+    for sc in ("repo:a", "repo:b"):
+        mem.write(MemoryRecord(kind=MemoryKind.FACT, subject="rule", predicate="x", text="retry 3x",
+                               scope=sc, trust=Trust.VERIFIED, subj_pred_key=make_key("rule", "x", sc)))
+    sig = alice.sign_write(subject="rule", predicate="x", scope="team", text="retry 3x")
+    authenticated_remember(mem, subject="rule", predicate="x", scope="team", text="retry 3x",
+                           signature=sig, key_id=alice.key_id, trusted=trusted)
+    graduate(mem, parent="team", children=["repo:a", "repo:b"], min_scopes=2)
+    grad = mem.get(make_id(make_key("rule", "x", "team")))
+    assert author_of(grad) != alice.key_id and author_of(grad) == ""
+
+
 def test_verify_write_fails_closed_without_pynacl(monkeypatch):
     """Coverage pin: with PyNaCl absent, verify_write must return False (never accept)."""
     from verel.verdict import keys

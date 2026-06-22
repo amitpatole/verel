@@ -114,6 +114,12 @@ def graduate(mem: MemoryView, *, parent: str, children: list[str],
             scope=parent, source="graduation", provenance=[r.id for r in recs],
             trust=Trust.CANDIDATE, epistemic_confidence=0.5, support_count=len(recs),
             subj_pred_key=make_key(subject, predicate, parent),
-        ).with_detail(grounding="graduated", graduated_from=spans, graduated_count=len(spans))
+            # author="" (collective — no single agent decreed it). Stamp it EXPLICITLY: graduate writes
+            # to a client-reachable key (non-reserved subject/predicate/parent), and if a principal has
+            # pre-empted that key with a same-text FACT, the corroboration merge would otherwise leave
+            # the attacker's `author` on the graduated record — forging authorship of team knowledge and
+            # crediting their AuthorTrust. Setting author here overwrites it on merge (the import_belief
+            # pattern). Any server FACT-writer on a client-reachable key MUST set an explicit author.
+        ).with_detail(grounding="graduated", graduated_from=spans, graduated_count=len(spans), author="")
         written.append(mem.write(rec, ts=ts))
     return written
