@@ -22,8 +22,10 @@ from .gate import (
     gating_failures,
     progressed,
     sign_receipt,
+    verify_receipt,
     verify_signature,
 )
+from .keys import MissingAttestationDep, attest_self
 from .models import (
     Confidence,
     GateResult,
@@ -32,6 +34,7 @@ from .models import (
     IssueKind,
     Observation,
     Percept,
+    ReceiptVerification,
     Report,
     RunReceipt,
     Severity,
@@ -55,7 +58,10 @@ __all__ = [
     "issue_signature",
     "progressed",
     "sign_receipt",
+    "verify_receipt",
     "verify_signature",
+    "attest_self",
+    "MissingAttestationDep",
     "Confidence",
     "GateResult",
     "GraderKind",
@@ -63,6 +69,7 @@ __all__ = [
     "IssueKind",
     "Observation",
     "Percept",
+    "ReceiptVerification",
     "Report",
     "RunReceipt",
     "Severity",

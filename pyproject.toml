@@ -25,6 +25,7 @@ dependencies = [
 [project.optional-dependencies]
 sight = ["agentvision[render]"]
 container = ["pyseccomp"]  # seccomp-bpf syscall filter for the §7.7 bwrap container runner
+attest = ["pynacl>=1.5"]  # ed25519 publicly-verifiable receipts (substrate §11); HMAC works without it
 mem0 = ["mem0ai>=2.0", "chromadb>=0.5"]
 mcp = ["mcp>=1.0", "anyio>=4"]
 dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.6", "mypy>=1.10"]

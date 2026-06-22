@@ -6,6 +6,7 @@ Subcommands (each lazily imports what it needs, so `verel doctor` works on a min
   verel fleet <goal> --artifacts a b   LLM manager fan-out → workers fix each artifact
   verel ci    <check|heal|...> --repo  agent-run CI (delegates to `python -m verel.ci`)
   verel heal  --repo PATH              self-healing CI: failing tests → agent fixes → pass
+  verel verify <receipt.json>          verify a run-receipt (ed25519 = publicly verifiable; §11)
   verel version
 """
 
@@ -83,6 +84,28 @@ def _heal(args) -> int:
     return 0 if res.healed else 1
 
 
+def _verify(args) -> int:
+    """Verify a receipt with NO trust in its producer: ed25519 needs only a trusted public key,
+    so a stranger can confirm an agent's `gate` verdict was real. Exit 0 iff valid."""
+    import json
+
+    from .verdict import RunReceipt, verify_receipt
+
+    allowed = {"ed25519"} if args.require_public else None
+    try:
+        with open(args.receipt, encoding="utf-8") as fh:
+            receipt = RunReceipt.model_validate(json.load(fh))
+    except (OSError, ValueError) as e:
+        print(f"-- could not read receipt: {e}")
+        return 2
+    res = verify_receipt(receipt, allowed_algs=allowed)
+    mark = "OK " if res.valid else "-- "
+    public = "public-verifiable" if res.public_verifiable else "shared-secret" if res.valid else "—"
+    print(f"{mark}{res.alg}  runner={res.runner_identity or '?'}  [{public}]")
+    print(f"   {res.reason}")
+    return 0 if res.valid else 1
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="verel", description="verified agents framework")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -108,6 +131,11 @@ def main(argv=None) -> int:
     ci = sub.add_parser("ci", help="agent-run CI (delegates to verel.ci)")
     ci.add_argument("ci_args", nargs=argparse.REMAINDER)
 
+    vf = sub.add_parser("verify", help="verify a run-receipt (ed25519 = publicly verifiable)")
+    vf.add_argument("receipt", help="path to a receipt JSON file")
+    vf.add_argument("--require-public", action="store_true",
+                    help="reject HMAC receipts; require ed25519 public verifiability")
+
     args = p.parse_args(argv)
     if args.cmd == "version":
         print(__version__)
@@ -123,6 +151,8 @@ def main(argv=None) -> int:
     if args.cmd == "ci":
         from .ci.__main__ import main as ci_main
         return ci_main(args.ci_args)
+    if args.cmd == "verify":
+        return _verify(args)
     return 2
 
 

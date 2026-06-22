@@ -44,17 +44,16 @@ def _read_existing_key(path: Path) -> bytes:
         os.close(fd)
 
 
-def load_secret(env_var: str, name: str) -> bytes:
-    """Resolve a signing secret: env var > persisted per-installation key > ephemeral key."""
-    configured = os.environ.get(env_var)
-    if configured:
-        return configured.encode()
+def load_or_create_keyfile(name: str, nbytes: int = 32) -> bytes:
+    """Persist-or-read a random key of `nbytes` at `<config>/<name>.key`, hardened against symlink /
+    chmod / planted-key attacks. Falls back to an ephemeral key (verify then fails CLOSED) if it can't
+    be persisted securely. Shared by the HMAC signing secret and the ed25519 runner seed (§11)."""
     path = _config_dir() / f"{name}.key"
     try:
         if path.exists():
             return _read_existing_key(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        key = secrets.token_bytes(32)
+        key = secrets.token_bytes(nbytes)
         try:
             # Atomic create-or-fail at mode 0600 from the start: O_EXCL refuses to follow/overwrite a
             # pre-existing file or symlink (no symlink attack, no chmod race), and a concurrent
@@ -68,4 +67,12 @@ def load_secret(env_var: str, name: str) -> bytes:
             os.close(fd)
         return key
     except OSError:
-        return secrets.token_bytes(32)  # can't persist / insecure key → ephemeral (verify fails closed)
+        return secrets.token_bytes(nbytes)  # can't persist / insecure key → ephemeral (fails closed)
+
+
+def load_secret(env_var: str, name: str) -> bytes:
+    """Resolve a signing secret: env var > persisted per-installation key > ephemeral key."""
+    configured = os.environ.get(env_var)
+    if configured:
+        return configured.encode()
+    return load_or_create_keyfile(name)

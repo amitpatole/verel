@@ -10,3 +10,6 @@ import os
 os.environ.setdefault("VEREL_RUNNER_SECRET", "test-runner-secret")
 os.environ.setdefault("VEREL_TOOL_SECRET", "test-tool-secret")
 os.environ.setdefault("VEREL_REGISTRY_SECRET", "test-registry-secret")
+# Fixed ed25519 seed (§11) so the runner's keypair is deterministic and nothing is written under the
+# user's config dir. 64 hex chars = 32 bytes.
+os.environ.setdefault("VEREL_RUNNER_ED25519_SEED", "11" * 32)
