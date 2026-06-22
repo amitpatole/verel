@@ -89,6 +89,22 @@ def test_sight_tamper_breaks_receipt(monkeypatch, tmp_path):
     assert dispatch("verel_verify", {"receipt": tampered})["valid"] is False
 
 
+def test_sight_intent_and_image_ref_are_signed(monkeypatch, tmp_path):
+    """Red-team round 2: matches_intent / image_ref are trust-implying — they must be bound into the
+    signed `subject`, so a relayed percept can't flip them while keeping a valid receipt."""
+    img = tmp_path / "a.png"
+    img.write_bytes(b"image-A")
+    _patch_perceive(monkeypatch, _fake_result(str(img)))
+    out = dispatch("verel_sight", {"url": "https://x.io", "attest": "ed25519"})
+    v = dispatch("verel_verify", {"receipt": out["receipt"]})
+    assert v["valid"] and "matches_intent=True" in v["subject"]
+    assert out["image_ref"] in v["subject"]            # the displayed image_ref is the attested one
+    # flip matches_intent inside the signed subject → envelope signature must break
+    forged = out["receipt"]
+    forged["subject"] = forged["subject"].replace("matches_intent=True", "matches_intent=False")
+    assert dispatch("verel_verify", {"receipt": forged})["valid"] is False
+
+
 # --- SSRF / input validation (fail closed) -----------------------------------
 def test_sight_requires_http_url():
     assert "error" in dispatch("verel_sight", {})

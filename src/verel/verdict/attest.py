@@ -68,11 +68,12 @@ def _fingerprint(verdict: Verdict, graders: list[GraderAttestation]) -> str:
 
 
 def build_gate_receipt(verdict: Verdict, reports: list[Report], *, issued_by: str | None = None,
-                       attest: str = "hmac") -> GateReceipt:
+                       attest: str = "hmac", subject: str = "") -> GateReceipt:
     """Assemble the gate-level receipt from a stage's reports (each carrying its signed RunReceipt)
     and SIGN the envelope (`attest`: "hmac" in-domain, or "ed25519" publicly verifiable). The
     envelope signature binds the aggregate verdict + the grader set — the grader receipts alone
-    don't (a real grader receipt could otherwise be paired with a flipped gate verdict)."""
+    don't (a real grader receipt could otherwise be paired with a flipped gate verdict). `subject`
+    binds extra attested context (e.g. a sight percept's image_ref + matches_intent)."""
     if issued_by is None:
         from .. import __version__
         issued_by = f"verel@{__version__}"
@@ -83,7 +84,7 @@ def build_gate_receipt(verdict: Verdict, reports: list[Report], *, issued_by: st
     ]
     clamped = any(_was_clamped(r) for r in reports)
     gr = GateReceipt(issued_by=issued_by, verdict=verdict, fingerprint=_fingerprint(verdict, graders),
-                     graders=graders, ceiling_clamped=clamped)
+                     graders=graders, ceiling_clamped=clamped, subject=subject)
     if attest == "ed25519":
         keys.attest_self(gr)                  # duck-typed: stamps ed25519 identity + signs the envelope
     else:
@@ -125,4 +126,5 @@ def verify_gate_receipt(receipt: GateReceipt, *,
         checked += 1
         public = public and v.public_verifiable
     return GateReceiptVerification(valid=True, verdict=receipt.verdict, graders_checked=checked,
-                                   public_verifiable=public, reason=f"{checked} precise grader(s) attested")
+                                   public_verifiable=public, subject=receipt.subject,
+                                   reason=f"{checked} precise grader(s) attested")
