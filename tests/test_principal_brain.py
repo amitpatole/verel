@@ -254,6 +254,36 @@ def test_signed_write_fields_are_bounded():
     assert r.authenticated and r.written is False and "too long" in r.reason
 
 
+def test_signed_write_cannot_tamper_reputation_ledger():
+    """A signed client write into the reserved `meta:authors` scope must NOT clobber an author's
+    standing — its (subject, predicate, scope) collides with the AuthorTrust ledger key, which would
+    otherwise supersede it via the interference rule and reset the victim's reputation to neutral."""
+    mem = _mem()
+    alice = Principal.generate()
+    trusted = dict([alice.enroll()])
+    at = AuthorTrust(mem)
+    victim = "VICTIM_KEYID"
+    for _ in range(5):
+        at.record(victim, ok=True)
+    assert at.standing(victim) == (5, 5)
+
+    # alice signs a write whose key collides with the victim's reputation record — try the exact
+    # reserved scope AND case/whitespace variants that normalize to it (make_key strips+lowercases).
+    for sc in ("meta:authors", " META:AUTHORS ", "Meta:Authors", "meta:authors "):
+        sig = alice.sign_write(subject=victim, predicate="author_trust", scope=sc, text="poison")
+        r = authenticated_remember(mem, subject=victim, predicate="author_trust", scope=sc,
+                                   text="poison", signature=sig, key_id=alice.key_id,
+                                   trusted=trusted, author_trust=at)
+        assert r.authenticated and r.written is False and "reserved scope" in r.reason, sc
+        assert at.standing(victim) == (5, 5), sc  # standing untouched
+
+    # a normal write to a non-reserved scope still goes through.
+    sig2 = alice.sign_write(subject="s", predicate="p", scope="repo:default", text="hi")
+    ok = authenticated_remember(mem, subject="s", predicate="p", scope="repo:default", text="hi",
+                                signature=sig2, key_id=alice.key_id, trusted=trusted)
+    assert ok.authenticated and ok.written
+
+
 def test_explicit_opt_out_keeps_raw_write_open(tmp_path):
     """An operator can explicitly run single-principal-style even with principals enrolled."""
     alice = Principal.generate()

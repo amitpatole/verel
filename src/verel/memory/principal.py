@@ -27,6 +27,14 @@ from .view import MemoryKind, MemoryRecord, MemoryView, Trust, make_id, make_key
 _MAX_TEXT = 20_000
 _MAX_FIELD = 512
 
+# The reputation ledger (`AuthorTrust`) lives in the SAME store, keyed on (author, "author_trust",
+# "meta:authors"). A client-authored belief whose (subject, predicate, scope) collides with that key
+# would supersede the ledger record via the interference rule — letting any enrolled principal wipe
+# (or otherwise tamper with) ANY author's standing. Reputation is server-managed, never client-
+# writable, so a signed write into this reserved scope is refused. (This is exactly the AuthorTrust
+# forgery/tank the principal layer exists to prevent — see the module docstring.)
+_RESERVED_SCOPE = "meta:authors"
+
 
 def _write_payload(key_id: str, subject: str, predicate: str, scope: str, text: str) -> str:
     """The bytes a principal signs to author a belief — binds the identity to the exact claim, so a
@@ -113,6 +121,13 @@ def authenticated_remember(into: MemoryView, *, subject: str, predicate: str, sc
     if len(text) > _MAX_TEXT or len(subject) > _MAX_FIELD or len(predicate) > _MAX_FIELD \
             or len(scope) > _MAX_FIELD:
         return AuthnWrite(True, False, key_id, False, False, "field too long")
+    # Compare on the NORMALIZED scope: make_key() lowercases/strips, so a case/whitespace variant
+    # (" Meta:Authors ") would otherwise dodge an exact-match guard yet still collide with the
+    # ledger's subj_pred_key. Normalize identically before refusing.
+    if scope.strip().lower() == _RESERVED_SCOPE:
+        # server-managed reputation ledger — a client write here would clobber an author's standing.
+        return AuthnWrite(True, False, key_id, False, False,
+                          "reserved scope — reputation is server-managed, not client-writable")
     author = key_id
     rid = make_id(make_key(subject, predicate, scope))
     existing = into.get(rid)
