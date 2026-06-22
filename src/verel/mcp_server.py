@@ -144,7 +144,9 @@ def _tool_sight(args: dict) -> dict:
     url = args.get("url")
     if not url or not isinstance(url, str):
         return _err("url (string) is required")
-    allow_local = bool(args.get("allow_local", False))
+    # STRICT: only a JSON boolean `true` disables the SSRF guard. `bool("false")` is True, so a
+    # truthy non-bool (the string "false", 1, []) must NOT silently open localhost/LAN. Fail closed.
+    allow_local = args.get("allow_local") is True
     scheme = url.split("://", 1)[0].lower() if "://" in url else ""
     if scheme not in ("http", "https"):
         # file://, gopher://, etc. are SSRF/LFI vectors — refuse at our layer too (defense in depth;
