@@ -490,7 +490,7 @@ already anticipates — that layer does not yet exist to audit.
 Across the in-process HTTP server: an enrolled principal's signed write authenticates with `author ==
 key_id`; **signing with your own key while claiming another's key_id fails** (no impersonation); an
 unenrolled principal is rejected; a signature is bound to its claim (can't be lifted); a peer cannot
-overwrite another principal's verified belief; `AuthorTrust` keys on the verified id. 9 tests in
+overwrite another principal's verified belief; `AuthorTrust` keys on the verified id. 23 tests in
 `tests/test_principal_brain.py`. Security cadence applied next.
 
 **Still deferred (honest):** a receipt↔fact binding so a cross-principal `verified` tier (not just
@@ -499,7 +499,8 @@ bind; and wiring the MCP `remember` verb to a configured remote principal (today
 local brain). Key distribution/enrollment is operator-driven (publish pubkeys), same as receipt keys.
 
 ### 15.3 Security cadence — the controls the red-team rounds added
-Six adversarial rounds hardened this surface; each found a real issue, fixed between rounds:
+Seven adversarial rounds hardened this surface; each of the first six found a real issue (fixed
+between rounds), and the seventh came back empty — clean. The controls:
 - **AUTHZ (signed-writes mode).** Enrolling principals turns on signed-writes mode (secure-by-default,
   read live so a later `enroll()` flips it on). A bearer token then means "can connect", not "can
   author/mutate": the allow-list is `{/write_signed, /recall, /all}`; the raw `/write` and all ten
@@ -519,3 +520,11 @@ Six adversarial rounds hardened this surface; each found a real issue, fixed bet
 - **Verified-belief integrity.** A principal can't overwrite **or** corroborate-and-reattribute
   another principal's verified belief (the author check fires regardless of text equivalence); signed
   fields are length-bounded; cross-protocol signature reuse is blocked by the `memwrite` domain tag.
+  A client signed write carries no `detail` at all (only subject/predicate/scope/text/kind), so the
+  pinned/ttl/tool detail-injection vectors are structurally absent.
+
+**Maintenance obligation (named residual).** The non-FACT structural backstop is predicate-independent,
+but the FACT-kind reserved-predicate list (`author_trust`, `fails`, `design_rule`, `schema`, `tool`) is
+per-name. Any **future** server pipeline that writes a FACT-kind control record on a client-reachable
+key MUST either add its predicate to that denylist or, like `graduate()`, stamp its control fields
+(notably `author`) explicitly. This is a design-discipline obligation, not a current exploitable gap.
