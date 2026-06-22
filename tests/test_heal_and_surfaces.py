@@ -77,11 +77,10 @@ def test_mcp_recall_tool_roundtrips_via_memory():
     assert out == {"records": []}
 
 
-def test_mcp_unknown_tool_raises():
-    import pytest
-
-    with pytest.raises(KeyError):
-        dispatch("nope", {})
+def test_mcp_unknown_tool_returns_error():
+    # The dispatch boundary is the MCP host connection — an unknown tool returns a structured error
+    # rather than raising (which would crash the connection). See tests/test_mcp_gate.py for the class.
+    assert "error" in dispatch("nope", {})
 
 
 def test_mcp_tool_catalog_is_complete():

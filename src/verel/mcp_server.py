@@ -66,6 +66,8 @@ def _tool_gate(args: dict) -> dict:
     if stage_name not in _STAGES:
         return _err(f"stage must be one of {_STAGES}, got {stage_name!r}")
     language = args.get("language", "python")
+    if not isinstance(language, str):
+        return _err("language must be a string")   # else `language not in LANGS` raises TypeError
     opts = args.get("options") or {}
     if not isinstance(opts, dict):
         return _err("options must be an object")
@@ -147,8 +149,11 @@ def _tool_ci_check(args: dict) -> dict:
 def _tool_recall(args: dict) -> dict:
     from .memory import LocalMemory
 
+    query = args.get("query")
+    if not isinstance(query, str):
+        return _err("query (string) is required")
     mem = LocalMemory(args.get("store", ":memory:"))
-    hits = mem.recall(args["query"], scope=args.get("scope"), k=args.get("k", 5))
+    hits = mem.recall(query, scope=args.get("scope"), k=args.get("k", 5))
     return {"records": [{"subject": h.subject, "text": h.text, "trust": h.trust.value,
                          "scope": h.scope} for h in hits]}
 
@@ -157,6 +162,8 @@ def _tool_build_tool(args: dict) -> dict:
     from .memory import LocalMemory
     from .toolsmith import SideEffect, ToolCase, ToolRegistry, ToolSmith, ToolSpec
 
+    if not isinstance(args.get("name"), str) or not isinstance(args.get("capability"), str):
+        return _err("name and capability (strings) are required")
     spec = ToolSpec(
         name=args["name"], capability=args["capability"],
         signature_hint=args.get("signature_hint", ""),
@@ -216,10 +223,16 @@ TOOLS: dict[str, dict[str, Any]] = {
 
 
 def dispatch(name: str, args: dict) -> dict:
-    """Call a tool by name. Pure entry point used by both tests and the MCP binding."""
+    """Call a tool by name. Pure entry point used by both tests and the MCP binding. NEVER raises:
+    the dispatch boundary is the MCP host connection, so an unknown tool or any unhandled tool
+    exception becomes a structured {"error": ...} rather than a crash. The error names only the tool
+    and the exception TYPE — never str(e) — so a stray exception can't leak a path/secret."""
     if name not in TOOLS:
-        raise KeyError(f"unknown tool {name!r}; known: {sorted(TOOLS)}")
-    return TOOLS[name]["fn"](args or {})
+        return _err(f"unknown tool {name!r}; known: {sorted(TOOLS)}")
+    try:
+        return TOOLS[name]["fn"](args or {})
+    except Exception as e:  # host-boundary backstop — a tool bug must not kill the connection
+        return _err(f"{name} failed: {type(e).__name__}")
 
 
 def serve() -> None:  # pragma: no cover - requires the optional `mcp` extra + a host

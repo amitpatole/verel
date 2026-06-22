@@ -255,9 +255,11 @@ class GateReceipt(BaseModel):
 
     def signing_payload(self) -> str:
         # Domain tag ("gatereceipt") FIRST for cross-type separation from RunReceipt (shared signer),
-        # then `alg` (anti-downgrade); fingerprint transitively binds every grader line.
+        # then `alg` (anti-downgrade); fingerprint transitively binds every grader line. `ceiling_clamped`
+        # is bound too — it's a safety signal (was an advisory finding held back from gating a
+        # destructive act), so a relayed receipt must not let it be flipped undetected (red-team round 2).
         return canonical_payload("gatereceipt", self.alg, self.issued_by, self.verdict.value,
-                                 self.fingerprint, self.runner_identity)
+                                 self.fingerprint, self.runner_identity, str(int(self.ceiling_clamped)))
 
 
 class GateReceiptVerification(BaseModel):
