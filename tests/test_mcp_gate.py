@@ -81,6 +81,15 @@ def test_gate_receipt_precise_relabel_attack_blocked():
     assert verify_gate_receipt(gr).valid is False
 
 
+def test_gate_receipt_ceiling_clamped_is_signed():
+    """Red-team round 2: ceiling_clamped is a safety signal — flipping it on a relayed receipt must
+    break the envelope signature, not pass undetected."""
+    gr = build_gate_receipt(Verdict.PASS, [_attested_report(attest="ed25519")], attest="ed25519")
+    assert verify_gate_receipt(gr).valid
+    gr.ceiling_clamped = not gr.ceiling_clamped
+    assert verify_gate_receipt(gr).valid is False
+
+
 def test_gate_receipt_precise_grader_missing_receipt_fails():
     rep = _attested_report()
     rep.run_receipt = None
@@ -160,3 +169,30 @@ def test_mcp_verify_single_run_receipt():
 def test_mcp_verify_malformed_receipt():
     assert "error" in dispatch("verel_verify", {})
     assert "error" in dispatch("verel_verify", {"receipt": {"suite_sha": 123}})  # wrong type
+
+
+# --- host-boundary: no agent input may crash the connection (red-team round 2) ----
+def test_mcp_gate_non_string_language_does_not_crash():
+    """A JSON array/object `language` hits `language not in LANGS` (a dict membership test) and would
+    raise TypeError past the ValueError guard — must return an error, not crash the host."""
+    for bad in ([["python"]], {"a": 1}, 5, None):
+        out = dispatch("verel_gate", {"repo": "/tmp", "language": bad})
+        assert "error" in out
+
+
+def test_mcp_dispatch_never_raises():
+    assert "error" in dispatch("verel_nope", {})           # unknown tool → error, not KeyError
+    assert "error" in dispatch("verel_recall", {})         # missing required arg → error
+    assert "error" in dispatch("verel_build_tool", {})     # missing required arg → error
+
+
+def test_mcp_dispatch_backstop_does_not_leak(monkeypatch):
+    """The host-boundary backstop names only the tool + exception type, never str(e)."""
+    import verel.mcp_server as m
+
+    def boom(_args):
+        raise RuntimeError("/secret/path/leak")
+    monkeypatch.setitem(m.TOOLS, "verel_gate", {**m.TOOLS["verel_gate"], "fn": boom})
+    out = dispatch("verel_gate", {"repo": "/tmp"})
+    assert "error" in out and "/secret/path/leak" not in out["error"]
+    assert "RuntimeError" in out["error"]
