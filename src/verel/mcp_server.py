@@ -353,18 +353,13 @@ def _tool_recall(args: dict) -> dict:
 
 
 def _tool_remember(args: dict) -> dict:
-    """Write to the shared brain — trust does NOT travel. A claim enters as a CANDIDATE and only
-    becomes VERIFIED by passing the importer's own check (a verifiable `evidence` receipt); the
-    caller's self-asserted confidence is ignored, and AuthorTrust weights repeat contributors so one
-    noisy agent can't poison the swarm."""
-    from .memory import (
-        AuthorTrust,
-        MemoryKind,
-        MemoryRecord,
-        import_belief,
-        make_id,
-        make_key,
-    )
+    """Write to the shared brain — trust does NOT travel. A claim enters as a CANDIDATE; the caller's
+    self-asserted trust/confidence is ignored. A verifiable `evidence` receipt records ATTESTED
+    GROUNDING (provenance + grounding tag) but does NOT promote to verified: the receipt attests a run,
+    not this fact, so auto-promoting would trust the caller's unbound association (red-team round 2,
+    finding 1). The `verified` tier is earned by a fact-bound attestation / held-out eval elsewhere.
+    A VERIFIED belief is protected from being silently overwritten here (finding 2)."""
+    from .memory import MemoryKind, MemoryRecord, Trust, make_id, make_key
 
     fact = args.get("fact")
     if not isinstance(fact, dict) or not isinstance(fact.get("text"), str) or not fact["text"].strip():
@@ -385,18 +380,29 @@ def _tool_remember(args: dict) -> dict:
     if ev_ok:
         provenance.append(f"attested:{ev_ref}")
     elif isinstance(evidence, str) and evidence.strip():
-        provenance.append(f"evidence:{evidence[:200]}")
+        # strip the provenance record-separator so an evidence note can't split the provenance list
+        provenance.append("evidence:" + evidence[:200].replace("\x1f", " "))
 
     mem = _brain()
-    claim = MemoryRecord(kind=MemoryKind.FACT, subject=subject, predicate=predicate,
-                         text=fact["text"], scope=scope, provenance=provenance)
-    # the importer's check IS the attestation check — trust does not travel.
-    result = import_belief(mem, claim, verify=lambda _rec: ev_ok, author=author,
-                           author_trust=AuthorTrust(mem))
-    rec = mem.get(make_id(make_key(subject, predicate, scope)))
-    return {"id": rec.id if rec else "", "trust": rec.trust.value if rec else "candidate",
-            "reverified": result.reverified, "evidence_verified": ev_ok, "scope": scope,
-            "author_prior": round(result.prior, 3), "reason": result.reason}
+    rid = make_id(make_key(subject, predicate, scope))
+    existing = mem.get(rid)
+    if (existing is not None and existing.trust == Trust.VERIFIED
+            and existing.text.strip().lower() != fact["text"].strip().lower()):
+        # PROTECT a verified belief: an ordinary remember must not silently supersede it (a real
+        # contradiction goes through a revision/contradict flow with evidence, not a bare write).
+        return {"id": existing.id, "trust": "verified", "scope": scope, "evidence_verified": ev_ok,
+                "conflict": True, "reason": "conflicts with a verified belief — not overwritten"}
+
+    rec = MemoryRecord(kind=MemoryKind.FACT, subject=subject, predicate=predicate, text=fact["text"],
+                       scope=scope, provenance=provenance, source="remember", trust=Trust.CANDIDATE)
+    rec.with_detail(grounding=("attested" if ev_ok else "asserted"))
+    if author:
+        rec.with_detail(author=author)
+    written = mem.write(rec)
+    return {"id": written.id, "trust": written.trust.value, "scope": scope,
+            "evidence_verified": ev_ok,
+            "reason": ("attested grounding recorded — stays candidate (trust does not travel)"
+                       if ev_ok else "recorded as candidate")}
 
 
 def _tool_build_tool(args: dict) -> dict:
