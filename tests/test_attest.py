@@ -197,6 +197,74 @@ def test_unicode_keyid_charset_rejected():
     assert verify_signature(rr) is False
 
 
+# --- same-class injection on the adjacent HMAC signers (red-team round 3) ----
+def test_toolsmith_signature_injection_blocked():
+    """A bare '|'.join let a '|' in the untrusted code / name reuse-key shift the partition, so one
+    signature validated a DIFFERENT (name, code) pair. The injective payload must block it."""
+    from verel.toolsmith.registry import ToolRecord
+    a = ToolRecord(name="a", version=1, code="b|2|c")
+    a.sign()
+    forged = ToolRecord(name="a|1|b", version=2, code="c")  # different name AND code
+    forged.signature = a.signature
+    assert a.verify() is True
+    assert forged.verify() is False
+
+
+def test_artifact_signature_injection_blocked():
+    from verel.registry.artifact import SkillArtifact
+    a = SkillArtifact(name="n", origin="o|x", code="def f():\n    return 1").finalize()
+    assert a.verify() is True
+    forged = SkillArtifact(name="n|o", origin="x", code=a.code)
+    forged.content_hash = a.content_hash
+    forged.signature = a.signature
+    assert forged.verify() is False
+
+
+# --- coverage gaps named by the round-3 holistic sweep -----------------------
+def test_seed_validation_rejects_bad_input_without_leaking(monkeypatch):
+    from verel.verdict.keys import MissingAttestationDep, _seed
+    monkeypatch.setenv("VEREL_RUNNER_ED25519_SEED", "nothex" * 4)
+    with pytest.raises(MissingAttestationDep) as e:
+        _seed()
+    assert "nothex" not in str(e.value)               # never echo the seed material
+    monkeypatch.setenv("VEREL_RUNNER_ED25519_SEED", "ab")  # valid hex, wrong length
+    with pytest.raises(MissingAttestationDep) as e2:
+        _seed()
+    assert "ab" not in str(e2.value).replace("32", "")
+
+
+def test_verify_receipt_allowed_algs_policy_at_verb_level():
+    rr = _self_signed(_report())
+    res = verify_receipt(rr, allowed_algs={"hmac-sha256"})  # reject ed25519 by policy
+    assert res.valid is False and "not permitted" in res.reason
+
+
+def test_resolve_trusted_key_rejects_mismatched_pub(trusted_dir):
+    """A .pub whose contents do NOT hash to its filename key_id must not grant trust."""
+    sk, kid = _foreign_keypair()
+    other, _ = _foreign_keypair(0x42)
+    (trusted_dir / f"{kid}.pub").write_text(keys._b64e(bytes(other.verify_key)))  # wrong key under kid
+    rr = _foreign_signed(_report(), sk, kid, inline=False)
+    assert verify_signature(rr) is False
+
+
+def test_cli_require_public_rejects_hmac(tmp_path, capsys):
+    from verel.cli import main
+    from verel.verdict.gate import sign_receipt
+    rr = _base_receipt(_report())
+    rr.runner_identity = "ci-runner"
+    rr.signature = sign_receipt(rr)                   # HMAC receipt
+    path = tmp_path / "r.json"
+    path.write_text(json.dumps(rr.model_dump()))
+    assert main(["verify", str(path)]) == 0           # accepted by default
+    assert main(["verify", str(path), "--require-public"]) == 1  # rejected by policy
+
+
+def test_cli_unreadable_receipt_exits_2(tmp_path):
+    from verel.cli import main
+    assert main(["verify", str(tmp_path / "nope.json")]) == 2
+
+
 def test_result_binding_under_ed25519_via_gate():
     issue = Issue(kind=IssueKind.OVERFLOW, severity=Severity.ERROR, message="x",
                   source=GraderKind.SECURITY, confidence=Confidence.HIGH)
