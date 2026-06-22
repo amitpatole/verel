@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.31.0 — the shared verified brain: recall/remember over MCP
+
+Completes the substrate's four hero verbs (`gate`, `sight`, `recall`/`remember`, `verify`): any agent
+over MCP can now read and write a **shared verified brain** — and trust does not travel.
+
+- **`verel_recall(query, scope, kind, k)`** reads via the scope lattice — resolves DOWN (self < team <
+  org < global; most specific wins) and surfaces trust/confidence/support/provenance/fingerprint so a
+  caller can weight what it gets.
+- **`verel_remember(fact, scope, evidence, author)`** writes a CANDIDATE. The caller's self-asserted
+  trust/confidence is **ignored**; a verifiable `evidence` receipt records **attested grounding**
+  (provenance + tag) but does **not** auto-promote to verified — the receipt attests a run, not the
+  fact, so promoting on the caller's unbound association would be trust *travelling*. A forged receipt
+  cannot launder trust, and a VERIFIED belief is protected from silent overwrite.
+- The brain is **one persistent store per server** (`VEREL_MEMORY_STORE` or `~/.config/verel/brain.db`),
+  fixed and **not agent-controllable** (no arbitrary file read/write); inputs bounded; parameterized SQL.
+- Shipped through audit → 3-round adversarial red-team: store/input/DoS clean; the trust hard-guarantee
+  (no `verified` without a genuine runner-signed receipt) holds; two soft-trust paths fixed (no unbound
+  auto-promote; verified-overwrite protection). The unauthenticated-author and trust-blind-ranking items
+  are documented as the **deferred multi-principal remote-brain auth layer** (`docs/SUBSTRATE_DESIGN`
+  §14.3) — acceptable under the local single-principal model.
+
+390-test suite; ruff + mypy clean.
+
 ## 0.30.0 — the verification substrate: ed25519 public receipts + gate/sight/verify over MCP
 
 Verel becomes a **verification substrate any agent can call over MCP** — a conscience, a pair of
