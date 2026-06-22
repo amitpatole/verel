@@ -7,10 +7,11 @@ Aggregates public adoption metrics and serves an auto-refreshing dashboard:
   * GitHub — stars / forks / watchers / open issues, clone & view traffic, and the
     referring sites ("where" repo traffic comes from) via the traffic API.
 
-Run:  python tools/metrics_dashboard.py            # serves on 0.0.0.0:8787
-      PORT=9000 REFRESH=300 python tools/metrics_dashboard.py
+Run:  python tools/metrics_dashboard.py            # serves on 0.0.0.0:8042
+      PORT=9123 REFRESH=300 python tools/metrics_dashboard.py
 
-Open  http://<your-LAN-ip>:8787  from any device on the network.
+Open  http://<your-LAN-ip>:8042  from any device on the network.
+(Default 8042 avoids the LMDS docker-compose port range; override with PORT=.)
 
 Notes
   * GitHub data uses your local `gh` auth (gh CLI must be logged in). Traffic
@@ -38,7 +39,7 @@ PROJECTS = [
     ("agentvision", "amitpatole/agent-vision", "AgentVision 👁️"),
 ]
 REFRESH = int(os.environ.get("REFRESH", "600"))  # seconds between live re-fetches
-PORT = int(os.environ.get("PORT", "8787"))
+PORT = int(os.environ.get("PORT", "8042"))  # 8042 dodges the LMDS docker-compose port range
 
 
 def _get(url: str, timeout: float = 12.0) -> dict | None:
