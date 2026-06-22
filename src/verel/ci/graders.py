@@ -29,6 +29,7 @@ from ..verdict.models import (
     RunReceipt,
     Severity,
     Verdict,
+    report_result_digest,
 )
 
 # (cmd, cwd) -> (returncode, stdout, stderr)
@@ -62,13 +63,14 @@ def suite_sha(spec: GraderSpec) -> str:
     return blake2s(json.dumps([spec.grader.value, spec.command]).encode()).hexdigest()[:16]
 
 
-def _receipt(spec: GraderSpec, runner_identity: str = "ci-runner") -> RunReceipt:
+def _receipt(spec: GraderSpec, report: Report, runner_identity: str = "ci-runner") -> RunReceipt:
     covered = ",".join(spec.covers) or "(repo)"
     rr = RunReceipt(
         suite_sha=suite_sha(spec),
         inputs_digest=blake2s(covered.encode()).hexdigest()[:16],
         coverage_assertion=f"scanned files: {covered}",
-        runner_identity=runner_identity, signature="",
+        runner_identity=runner_identity,
+        result_digest=report_result_digest(report), signature="",
     )
     rr.signature = sign_receipt(rr)
     return rr
@@ -145,10 +147,11 @@ def run_grader(spec: GraderSpec, runner: Runner = subprocess_runner) -> Report:
     report = Report(
         verdict=Verdict.FAIL if issues else (Verdict.PASS if rc == 0 else Verdict.FAIL),
         summary=f"{spec.grader.value}: {len(issues)} issue(s), exit={rc}",
-        issues=issues, grader=spec.grader, run_receipt=_receipt(spec),
+        issues=issues, grader=spec.grader,
         # ran-but-no-parseable-issues yet nonzero exit => the tool itself errored, not a clean fail
         errored=(rc != 0 and not issues),
     )
+    report.run_receipt = _receipt(spec, report)  # sign AFTER the result is known (binds to it)
     return assign(report)
 
 

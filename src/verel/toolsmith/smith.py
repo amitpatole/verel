@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 from ..agents import llm
 from ..memory.view import Trust
 from ..verdict.gate import gate, sign_receipt
-from ..verdict.models import GraderKind, Report, RunReceipt, Verdict
+from ..verdict.models import GraderKind, Report, RunReceipt, Verdict, report_result_digest
 from .registry import AUTO_PROMOTABLE, SideEffect, ToolRecord, ToolRegistry, load_callable
 
 _FENCE = re.compile(r"```(?:[a-zA-Z0-9_+-]*)?\n(.*?)```", re.DOTALL)
@@ -111,12 +111,13 @@ class ToolSmith:
         return eval_tool_cases(code, spec.name, spec.cases, side_effect=spec.side_effect,
                                sandbox=self.sandbox, isolation=self.isolation)
 
-    def _receipt(self, spec: ToolSpec) -> RunReceipt:
+    def _receipt(self, spec: ToolSpec, report: Report) -> RunReceipt:
         rr = RunReceipt(
             suite_sha=spec.suite_sha(),
             inputs_digest=hashlib.blake2s(spec.name.encode()).hexdigest()[:16],
             coverage_assertion=f"scanned files: tool:{spec.name}",
-            runner_identity=self.runner_identity, signature="",
+            runner_identity=self.runner_identity,
+            result_digest=report_result_digest(report), signature="",
         )
         rr.signature = sign_receipt(rr)
         return rr
@@ -138,7 +139,8 @@ class ToolSmith:
         # Attested gate: the eval ran the frozen suite and covered the tool (hollow-gate guard).
         report = Report(verdict=Verdict.PASS if passed else Verdict.FAIL,
                         summary=f"tool eval {detail} (score={score:.2f})",
-                        grader=GraderKind.CONTRACT, run_receipt=self._receipt(spec))
+                        grader=GraderKind.CONTRACT)
+        report.run_receipt = self._receipt(spec, report)  # sign AFTER the result is known
         gr = gate([report], required={GraderKind.CONTRACT},
                   frozen_suites={GraderKind.CONTRACT: spec.suite_sha()},
                   diff_files={f"tool:{spec.name}"})
