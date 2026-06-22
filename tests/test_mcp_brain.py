@@ -95,6 +95,15 @@ def test_remember_requires_fact_text():
     assert "error" in dispatch("verel_remember", {"fact": {"text": "   "}})        # blank text
 
 
+def test_brain_inputs_are_bounded():
+    """Red-team round 1: unbounded fact.text / query would balloon the store/memory."""
+    assert "error" in dispatch("verel_remember", {"fact": {"text": "x" * 20_001}})
+    assert "error" in dispatch("verel_recall", {"query": "q" * 4_001})
+    # over-long subject/predicate/author are truncated (not an error), the fact still writes
+    out = dispatch("verel_remember", {"fact": {"subject": "s" * 9000, "text": "ok"}})
+    assert out["id"] and out["trust"] == "candidate"
+
+
 def test_brain_store_not_agent_controllable():
     """The `store` arg from the old API must NOT repoint the brain (arbitrary file write). It's ignored;
     the brain stays the env/default store."""
