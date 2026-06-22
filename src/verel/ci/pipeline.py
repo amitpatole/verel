@@ -39,14 +39,15 @@ class StageResult:
 
 def run_stage(stage: Stage, *, diff_files: set[str] | None = None, runner: Runner = subprocess_runner,
               ledger: FailureLedger | None = None, ts: float = 0.0,
-              flaky_signatures: set[str] | None = None) -> StageResult:
+              flaky_signatures: set[str] | None = None, attest: str = "hmac") -> StageResult:
     """Run all graders in a stage, gate them, and (if a ledger is given) apply the
-    failure-memory regression check + record new gating failures."""
+    failure-memory regression check + record new gating failures. `attest` selects the receipt
+    scheme: "hmac" (default) or "ed25519" (publicly verifiable, needs verel[attest])."""
     diff_files = diff_files or set()
     flaky_signatures = flaky_signatures or set()
     import secrets
     nonce = secrets.token_hex(8)   # per-run salt → a receipt can't be replayed into another run
-    reports = [run_grader(s, runner, nonce=nonce) for s in stage.graders]
+    reports = [run_grader(s, runner, nonce=nonce, attest=attest) for s in stage.graders]
     # Pin frozen suites + the nonce-salted scanned-content digest from the trusted stage config (not
     # from grader runtime output), so the gate rejects a stale/replayed receipt that doesn't match.
     frozen = {s.grader: suite_sha(s) for s in stage.graders}

@@ -65,11 +65,10 @@ def test_self_heal_escalates_when_fixer_gives_up():
 
 # ---- MCP dispatch (no `mcp` package needed) ----
 def test_mcp_gate_tool():
-    out = dispatch("verel_gate", {"reports": [
-        {"verdict": "fail", "summary": "", "grader": "test",
-         "issues": [{"kind": "other", "severity": "error", "message": "x", "source": "test",
-                     "fingerprint": "f1"}]}]})
-    assert out["verdict"] == "fail"
+    # verel_gate now RUNS graders on a repo and returns an attested verdict (§3/§4); the full
+    # contract is covered in tests/test_mcp_gate.py. Here just pin the fail-closed input guard.
+    assert "error" in dispatch("verel_gate", {})
+    assert "error" in dispatch("verel_gate", {"repo": "/no/such/dir"})
 
 
 def test_mcp_recall_tool_roundtrips_via_memory():

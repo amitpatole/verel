@@ -44,6 +44,11 @@ class MissingAttestationDep(RuntimeError):
     """Raised when an ed25519 operation is attempted without PyNaCl installed."""
 
 
+def available() -> bool:
+    """True iff ed25519 (PyNaCl) is installed — i.e. receipts can be minted publicly verifiable."""
+    return _NACL
+
+
 def _require_nacl() -> None:
     if not _NACL:
         raise MissingAttestationDep(

@@ -87,7 +87,7 @@ def bound_input_digest(cwd: str | None, covers: list[str], nonce: str = "") -> s
 
 
 def _receipt(spec: GraderSpec, report: Report, runner_identity: str = "ci-runner",
-             nonce: str = "") -> RunReceipt:
+             nonce: str = "", attest: str = "hmac") -> RunReceipt:
     covered = ",".join(spec.covers) or "(repo)"
     rr = RunReceipt(
         suite_sha=suite_sha(spec),
@@ -96,7 +96,13 @@ def _receipt(spec: GraderSpec, report: Report, runner_identity: str = "ci-runner
         runner_identity=runner_identity,
         result_digest=report_result_digest(report), signature="",
     )
-    rr.signature = sign_receipt(rr)
+    if attest == "ed25519":
+        # Mint a PUBLICLY-verifiable receipt (substrate §11): a second party can confirm this grader
+        # ran with only the runner's public key. attest_self stamps the ed25519 identity + signs.
+        from ..verdict import keys
+        keys.attest_self(rr)
+    else:
+        rr.signature = sign_receipt(rr)
     return rr
 
 
@@ -151,9 +157,11 @@ _PARSERS = {
 # ---------------------------------------------------------------------------
 # Runner.
 # ---------------------------------------------------------------------------
-def run_grader(spec: GraderSpec, runner: Runner = subprocess_runner, *, nonce: str = "") -> Report:
+def run_grader(spec: GraderSpec, runner: Runner = subprocess_runner, *, nonce: str = "",
+               attest: str = "hmac") -> Report:
     """Execute a grader and map its output into an attested verdict-bus Report. `nonce` salts the
-    receipt's input binding so it can't be replayed into a different run (set by `run_stage`)."""
+    receipt's input binding so it can't be replayed into a different run (set by `run_stage`).
+    `attest` selects the receipt scheme: "hmac" (default, in-domain) or "ed25519" (publicly verifiable)."""
     parse = spec.parser or _PARSERS.get(spec.grader)
     if parse is None:
         return Report(verdict=Verdict.FAIL, grader=spec.grader, errored=True,
@@ -177,7 +185,7 @@ def run_grader(spec: GraderSpec, runner: Runner = subprocess_runner, *, nonce: s
         errored=(rc != 0 and not issues),
     )
     report = assign(report)                       # populate issue fingerprints BEFORE signing...
-    report.run_receipt = _receipt(spec, report, nonce=nonce)  # ...binding final result + per-run nonce
+    report.run_receipt = _receipt(spec, report, nonce=nonce, attest=attest)  # ...bind result + nonce
     return report
 
 
