@@ -23,7 +23,7 @@ import re
 from dataclasses import dataclass, field
 
 from ..verdict.gate import gate, sign_receipt
-from ..verdict.models import GraderKind, Report, RunReceipt, Verdict
+from ..verdict.models import GraderKind, Report, RunReceipt, Verdict, report_result_digest
 from .view import MemoryRecord, MemoryView
 
 PROMOTE_F1 = 0.8  # held-out F1 threshold to promote candidate -> verified
@@ -119,15 +119,16 @@ class PromotionGate:
         self.runner_identity = runner_identity
         self.f1_threshold = f1_threshold
 
-    def _receipt(self, rule_id: str) -> RunReceipt:
+    def _receipt(self, rule_id: str, report: Report) -> RunReceipt:
         rr = RunReceipt(
             suite_sha=self.corpus.sha(),
             inputs_digest=hashlib.blake2s(rule_id.encode()).hexdigest()[:16],
             coverage_assertion=f"scanned files: rule:{rule_id}",
             runner_identity=self.runner_identity,
+            result_digest=report_result_digest(report),
             signature="",
         )
-        rr.signature = sign_receipt(rr)  # separate-trust-domain runner signs
+        rr.signature = sign_receipt(rr)  # separate-trust-domain runner signs (binds to the result)
         return rr
 
     def consider(self, rule: MemoryRecord) -> PromotionResult:
@@ -143,8 +144,8 @@ class PromotionGate:
             verdict=Verdict.PASS if passed else Verdict.FAIL,
             summary=f"held-out eval F1={f1:.2f} (>= {self.f1_threshold} to promote); {stats}",
             grader=GraderKind.CONTRACT,
-            run_receipt=self._receipt(rule.id),
         ).model_copy(update={"errored": False})
+        report.run_receipt = self._receipt(rule.id, report)  # sign AFTER the result is known
 
         # Gate through the verdict bus WITH attestation (hollow-gate guard applies).
         gr = gate([report], required={GraderKind.CONTRACT},

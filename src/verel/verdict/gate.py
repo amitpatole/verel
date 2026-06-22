@@ -20,6 +20,7 @@ from .models import (
     RunReceipt,
     Severity,
     Verdict,
+    report_result_digest,
 )
 
 # Per-runner signing key. Set VEREL_RUNNER_SECRET to share it across a trust domain (e.g. a CI
@@ -91,6 +92,11 @@ def gate(
                 return GateResult(verdict=Verdict.FAIL, reason=f"{r.grader.value}: stale/wrong suite_sha")
             if not coverage_satisfied(rr.coverage_assertion, diff_files):
                 return GateResult(verdict=Verdict.FAIL, reason=f"{r.grader.value}: grader did not cover diff")
+            # RESULT BINDING: the receipt must commit to the report's graded outcome, so an
+            # attacker can't pair a valid receipt with a tampered Report (e.g. issues stripped → PASS).
+            if rr.result_digest != report_result_digest(r):
+                return GateResult(verdict=Verdict.FAIL,
+                                  reason=f"{r.grader.value}: receipt does not match graded result (tampered)")
 
     # (b) advisory + low-confidence clamp via EXPLICIT CEILING.
     gating: list[tuple[Severity, object]] = []

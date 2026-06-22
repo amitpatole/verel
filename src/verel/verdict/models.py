@@ -9,6 +9,7 @@ Faithful to docs/VEREL_DESIGN.md §7.1.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from enum import Enum
 
@@ -75,11 +76,14 @@ class RunReceipt(BaseModel):
     inputs_digest: str  # digest of the artifact/diff the grader saw
     coverage_assertion: str  # e.g. "scanned files: src/a.py,src/b.py" — must intersect the diff
     runner_identity: str  # signing identity of the separate-trust-domain runner
-    signature: str  # over (suite_sha, inputs_digest, coverage_assertion, runner_identity)
+    result_digest: str = ""  # digest of the graded OUTCOME (verdict + issues) — binds the receipt
+    #                          to the Report it graded; a stripped/tampered Report fails the gate
+    signature: str  # over (suite_sha, inputs_digest, coverage_assertion, runner_identity, result_digest)
 
     def signing_payload(self) -> str:
         return "|".join(
-            [self.suite_sha, self.inputs_digest, self.coverage_assertion, self.runner_identity]
+            [self.suite_sha, self.inputs_digest, self.coverage_assertion,
+             self.runner_identity, self.result_digest]
         )
 
 
@@ -117,6 +121,15 @@ class Report(BaseModel):
     run_receipt: RunReceipt | None = None  # required for graders in `required` set
     artifacts: dict[str, str] = Field(default_factory=dict)
     schema_version: str = "2.0"
+
+
+def report_result_digest(report: Report) -> str:
+    """Digest of a report's graded OUTCOME — its verdict and the identifying fields of every issue.
+    A receipt signs this (§7.1), so a Report tampered after signing (e.g. issues stripped to force a
+    PASS) no longer matches its receipt and the gate rejects it."""
+    parts = sorted(f"{i.kind.value}\x1f{i.severity.value}\x1f{i.message}" for i in report.issues)
+    blob = report.verdict.value + "\x1e" + "\x1e".join(parts)
+    return hashlib.blake2s(blob.encode()).hexdigest()[:16]
 
 
 class Observation(BaseModel):
