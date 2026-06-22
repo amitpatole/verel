@@ -188,6 +188,72 @@ def test_enroll_after_open_start_auto_enables_signed_mode(tmp_path):
         srv.stop()
 
 
+def test_apply_replica_forgery_blocked_in_signed_mode(tmp_path):
+    """Red-team round 2 CRITICAL: /apply is a verbatim upsert — in signed mode it must require the
+    CLUSTER credential, not a bearer token, else a bearer holder forges trust=verified + author."""
+    import urllib.error
+
+    alice = Principal.generate()
+    srv = MemoryServer(db_path=str(tmp_path / "b.db"),
+                       trusted_principals=dict([alice.enroll()])).start()
+    try:
+        cli = RemoteMemory(srv.url)   # bearer only, no cluster token
+        forged = MemoryRecord(kind=MemoryKind.FACT, subject="x", predicate="y", text="poison",
+                              scope="team", trust=Trust.VERIFIED).with_detail(author=alice.key_id)
+        with pytest.raises(urllib.error.HTTPError) as e:
+            cli.apply_replica(forged)
+        assert e.value.code == 403
+    finally:
+        srv.stop()
+
+
+def test_cluster_token_gates_replication(tmp_path):
+    alice = Principal.generate()
+    srv = MemoryServer(db_path=str(tmp_path / "c.db"), trusted_principals=dict([alice.enroll()]),
+                       cluster_token="CLUSTER-SECRET").start()
+    try:
+        good = RemoteMemory(srv.url, cluster_token="CLUSTER-SECRET")
+        good.apply_replica(MemoryRecord(kind=MemoryKind.FACT, subject="s", predicate="p",
+                                        text="replicated", scope="team"))
+        assert [x.text for x in RemoteMemory(srv.url).recall("replicated", scope="team")] == ["replicated"]
+        import urllib.error
+        bad = RemoteMemory(srv.url, cluster_token="WRONG")
+        with pytest.raises(urllib.error.HTTPError) as e:
+            bad.apply_replica(MemoryRecord(kind=MemoryKind.FACT, subject="z", predicate="z",
+                                           text="x", scope="team"))
+        assert e.value.code == 403
+    finally:
+        srv.stop()
+
+
+def test_cross_principal_cannot_reattribute_verified_via_case_variant():
+    """Red-team round 2 LOW: a case/whitespace variant of another principal's verified belief must
+    not corroborate-and-rewrite its author."""
+    from verel.memory.share import author_of
+    alice, bob = Principal.generate(), Principal.generate()
+    trusted = dict([alice.enroll(), bob.enroll()])
+    mem = _mem()
+    authenticated_remember(mem, subject="db", predicate="eng", scope="s", text="Postgres",
+                           signature=alice.sign_write(subject="db", predicate="eng", scope="s", text="Postgres"),
+                           key_id=alice.key_id, trusted=trusted)
+    mem.promote(make_id(make_key("db", "eng", "s")))
+    r = authenticated_remember(mem, subject="db", predicate="eng", scope="s", text="POSTGRES",
+                               signature=bob.sign_write(subject="db", predicate="eng", scope="s", text="POSTGRES"),
+                               key_id=bob.key_id, trusted=trusted)
+    assert r.conflict is True
+    assert author_of(mem.get(make_id(make_key("db", "eng", "s")))) == alice.key_id
+
+
+def test_signed_write_fields_are_bounded():
+    alice = Principal.generate()
+    trusted = dict([alice.enroll()])
+    big = "x" * 20_001
+    sig = alice.sign_write(subject="s", predicate="p", scope="team", text=big)
+    r = authenticated_remember(_mem(), subject="s", predicate="p", scope="team", text=big,
+                               signature=sig, key_id=alice.key_id, trusted=trusted)
+    assert r.authenticated and r.written is False and "too long" in r.reason
+
+
 def test_explicit_opt_out_keeps_raw_write_open(tmp_path):
     """An operator can explicitly run single-principal-style even with principals enrolled."""
     alice = Principal.generate()

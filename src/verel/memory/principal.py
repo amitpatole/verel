@@ -23,6 +23,10 @@ from ..verdict import keys
 from .share import AuthorTrust, author_of, import_belief
 from .view import MemoryKind, MemoryRecord, MemoryView, Trust, make_id, make_key
 
+# Bound a signed write's fields so a verbatim-stored record can't bloat the brain (server-side DoS).
+_MAX_TEXT = 20_000
+_MAX_FIELD = 512
+
 
 def _write_payload(key_id: str, subject: str, predicate: str, scope: str, text: str) -> str:
     """The bytes a principal signs to author a belief — binds the identity to the exact claim, so a
@@ -106,11 +110,17 @@ def authenticated_remember(into: MemoryView, *, subject: str, predicate: str, sc
                         signature=signature, trusted=trusted):
         return AuthnWrite(False, False, "", False, False, "unauthenticated — signature invalid or "
                           "principal not enrolled")
+    if len(text) > _MAX_TEXT or len(subject) > _MAX_FIELD or len(predicate) > _MAX_FIELD \
+            or len(scope) > _MAX_FIELD:
+        return AuthnWrite(True, False, key_id, False, False, "field too long")
     author = key_id
     rid = make_id(make_key(subject, predicate, scope))
     existing = into.get(rid)
+    # A principal may neither overwrite NOR corroborate-and-reattribute ANOTHER principal's VERIFIED
+    # belief — the author check fires regardless of text equivalence (a case/whitespace variant would
+    # otherwise hit the corroboration merge and silently rewrite the stored `author`). Cross-principal
+    # agreement on a verified belief needs a dedicated signed-corroborate flow, not a bare write.
     if (existing is not None and existing.trust == Trust.VERIFIED
-            and existing.text.strip().lower() != text.strip().lower()
             and author_of(existing) != author):
         return AuthnWrite(True, False, author, False, True,
                           "conflicts with another principal's verified belief — not overwritten")

@@ -45,16 +45,20 @@ def _kind(v) -> MemoryKind | None:
     return MemoryKind(v) if v else None
 
 
-# In signed-writes mode these are the ONLY POST paths a (bearer-authenticated) client may hit:
-# authored writes must be signed (/write_signed), reads are fine, and replication is the cluster's
-# own fenced channel. Everything else (/write with an arbitrary author, /promote → verified, the
-# corroborate/contradict/annotate/flag mutators) would let a mere bearer holder forge authorship or
-# trust, defeating the principal layer — so they are refused.
-_SIGNED_MODE_POST = frozenset({"/write_signed", "/recall", "/all", "/apply", "/replicate"})
+# In signed-writes mode these are the ONLY POST paths a (bearer-authenticated) CLIENT may hit:
+# authored writes must be signed (/write_signed); reads are fine. Everything else (/write with an
+# arbitrary author, /promote → verified, the corroborate/contradict/annotate/flag mutators) would let
+# a mere bearer holder forge authorship or trust, defeating the principal layer — so they are refused.
+_SIGNED_MODE_POST = frozenset({"/write_signed", "/recall", "/all"})
+# The replication channel is a CLUSTER operation, not a client one: `apply_replica` is a verbatim
+# upsert (trust + author taken as-is), so a bearer holder hitting it forges anything. It requires a
+# CLUSTER credential distinct from the client bearer token (X-Cluster-Token).
+_CLUSTER_POST = frozenset({"/apply", "/replicate"})
 
 
 def _make_handler(store: MemoryView, lock: threading.Lock, token: str | None,
-                  trusted: dict[str, str] | None = None, require_override: bool | None = None):
+                  trusted: dict[str, str] | None = None, require_override: bool | None = None,
+                  cluster_token: str | None = None):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
         timeout = 30  # drop a slow/idle connection rather than pinning a thread (slowloris guard)
@@ -66,6 +70,15 @@ def _make_handler(store: MemoryView, lock: threading.Lock, token: str | None,
             if token is None:
                 return True
             return hmac.compare_digest(self.headers.get("Authorization", ""), f"Bearer {token}")
+
+        def _cluster_authed(self, require_signed: bool) -> bool:
+            """The replication channel (/apply, /replicate) needs the CLUSTER credential, not the
+            client bearer. If a cluster token is configured it must match (constant-time). If none is
+            configured, the channel is allowed only in LEGACY (non-signed) mode — a multi-principal
+            server with no cluster token must not expose a verbatim-upsert path to bearer clients."""
+            if cluster_token is not None:
+                return hmac.compare_digest(self.headers.get("X-Cluster-Token", ""), cluster_token)
+            return not require_signed
 
         def _send(self, code: int, body: dict) -> None:
             data = json.dumps(body).encode()
@@ -101,7 +114,11 @@ def _make_handler(store: MemoryView, lock: threading.Lock, token: str | None,
             # Effective mode is read LIVE: explicit override wins, else ON whenever any principal is
             # enrolled (so a later enroll() auto-enables enforcement, no stale-closure bypass).
             require_signed = bool(trusted) if require_override is None else require_override
-            if require_signed and self.path not in _SIGNED_MODE_POST:
+            if self.path in _CLUSTER_POST:
+                # verbatim-upsert replication channel — needs the cluster credential, never a bearer.
+                if not self._cluster_authed(require_signed):
+                    return self._send(403, {"error": "replication requires the cluster credential"})
+            elif require_signed and self.path not in _SIGNED_MODE_POST:
                 # multi-principal: a bearer token alone can't forge authorship or trust — authored
                 # writes must be SIGNED; trust transitions come from server-side eval, not a client call.
                 return self._send(403, {"error": "signed-writes mode: use /write_signed"})
@@ -185,7 +202,7 @@ class MemoryServer:
     def __init__(self, db_path: str | Path | None = None, *, store: MemoryView | None = None,
                  host: str = "127.0.0.1", port: int = 0, auth_token: str | None = None,
                  durable: bool = True, trusted_principals: dict[str, str] | None = None,
-                 require_signed_writes: bool | None = None):
+                 require_signed_writes: bool | None = None, cluster_token: str | None = None):
         if auth_token is None and host not in ("127.0.0.1", "::1", "localhost"):
             raise ValueError(f"refusing to bind {host!r} without auth_token — that exposes an "
                              "unauthenticated memory service; pass auth_token=... or bind 127.0.0.1")
@@ -201,10 +218,11 @@ class MemoryServer:
         # trust-mutation endpoints are refused), unless the operator explicitly opts out. Read live in
         # the handler, so a later enroll() also flips it on.
         self._require_override = require_signed_writes
+        self.cluster_token = cluster_token
         self._lock = threading.Lock()
         self._httpd = ThreadingHTTPServer(
             (host, port), _make_handler(self.store, self._lock, auth_token, self.trusted_principals,
-                                        self._require_override))
+                                        self._require_override, cluster_token))
         self._thread: threading.Thread | None = None
 
     def enroll(self, key_id: str, public_key_b64: str) -> None:
@@ -235,15 +253,19 @@ class RemoteMemory:
     A drop-in for `LocalMemory`/`mem0`, so `lattice_recall`, `graduate`, consolidation, and the
     promotion gate all work against the shared store unchanged."""
 
-    def __init__(self, base_url: str, *, auth_token: str | None = None, timeout: float = 15.0):
+    def __init__(self, base_url: str, *, auth_token: str | None = None, timeout: float = 15.0,
+                 cluster_token: str | None = None):
         self.base = base_url.rstrip("/")
         self.token = auth_token
+        self.cluster_token = cluster_token   # needed only for the replication channel (/apply)
         self.timeout = timeout
 
     def _req(self, method: str, path: str, body: dict | None = None) -> dict:
         headers = {"Content-Type": "application/json"}
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
+        if self.cluster_token:
+            headers["X-Cluster-Token"] = self.cluster_token
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(self.base + path, data=data, headers=headers, method=method)
         with urllib.request.urlopen(req, timeout=self.timeout) as r:
@@ -324,15 +346,19 @@ class ReplicaClient:
     follower `MemoryServer`s on other machines. `replicate` raises `FencingError` on a 409 so a
     deposed leader's in-flight write is rejected at the follower, exactly as in-process."""
 
-    def __init__(self, base_url: str, *, auth_token: str | None = None, timeout: float = 10.0):
+    def __init__(self, base_url: str, *, auth_token: str | None = None, timeout: float = 10.0,
+                 cluster_token: str | None = None):
         self.base = base_url.rstrip("/")
         self.token = auth_token
+        self.cluster_token = cluster_token   # the cluster credential the follower requires for /replicate
         self.timeout = timeout
 
     def apply_replica_fenced(self, record: dict, token: int) -> None:
         headers = {"Content-Type": "application/json"}
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
+        if self.cluster_token:
+            headers["X-Cluster-Token"] = self.cluster_token
         data = json.dumps({"record": record, "token": token}).encode()
         req = urllib.request.Request(self.base + "/replicate", data=data, headers=headers, method="POST")
         try:
