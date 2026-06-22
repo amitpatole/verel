@@ -145,6 +145,9 @@ class MemoryServer:
     def __init__(self, db_path: str | Path | None = None, *, store: MemoryView | None = None,
                  host: str = "127.0.0.1", port: int = 0, auth_token: str | None = None,
                  durable: bool = True):
+        if auth_token is None and host not in ("127.0.0.1", "::1", "localhost"):
+            raise ValueError(f"refusing to bind {host!r} without auth_token — that exposes an "
+                             "unauthenticated memory service; pass auth_token=... or bind 127.0.0.1")
         if store is None:
             if db_path is None:
                 raise ValueError("MemoryServer needs a db_path or a store")

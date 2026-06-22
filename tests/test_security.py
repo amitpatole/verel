@@ -47,6 +47,30 @@ def test_no_public_default_signing_secret(monkeypatch, tmp_path):
     assert load_secret("VEREL_X_KEY", "x") == k1              # persisted: stable cross-process on one host
 
 
+def test_servers_refuse_unauthenticated_non_loopback_bind(tmp_path):
+    """A server must not bind a routable interface without an auth token — that would expose an
+    unauthenticated service to the network (audit N3). Loopback stays zero-config."""
+    import pytest
+
+    from verel.fleet.control_plane import ControlPlaneServer
+    from verel.memory.hosted import MemoryServer
+    from verel.registry.hosted import RegistryServer
+
+    with pytest.raises(ValueError, match="auth_token"):
+        MemoryServer(":memory:", host="0.0.0.0")
+    with pytest.raises(ValueError, match="auth_token"):
+        ControlPlaneServer(str(tmp_path / "cp.db"), host="0.0.0.0")
+    with pytest.raises(ValueError, match="auth_token"):
+        RegistryServer(tmp_path / "reg", host="0.0.0.0")
+    # loopback with no token is fine (the common local case); release the socket without the
+    # serve_forever/shutdown dance (the server was never started).
+    srv = MemoryServer(":memory:", host="127.0.0.1")
+    srv._httpd.server_close()
+    # a non-loopback bind WITH a token is allowed
+    srv2 = MemoryServer(":memory:", host="0.0.0.0", auth_token="t")
+    srv2._httpd.server_close()
+
+
 def test_forged_receipt_with_old_default_secret_is_rejected():
     """A receipt signed with the retired public default secret must NOT verify — the whole point
     of removing the default (audit C1)."""

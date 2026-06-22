@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import shutil
 import tempfile
+import warnings
 
 from .registry import ToolRecord
 from .sandbox import _CHILD, SandboxError, exec_child, run_sandboxed
@@ -33,6 +34,10 @@ def _bwrap_cmd() -> list[str]:
     cmd = ["bwrap", "--unshare-all", "--die-with-parent",
            "--ro-bind", "/usr", "/usr", "--ro-bind", "/bin", "/bin", "--ro-bind", "/lib", "/lib"]
     # /lib64 and /etc exist on most distros but not all (e.g. pure-merged-usr); bind if present.
+    # NOTE: binding /etc exposes the host's /etc (passwd/group/resolv) read-only to the sandbox —
+    # low-sensitivity in this no-network, read-only, no-secret-mount jail, but do not place secrets
+    # under /etc on a host that runs untrusted tools (narrowing to the linker files CPython needs is
+    # a future hardening).
     import os
 
     for p in ("/lib64", "/etc"):
@@ -44,7 +49,8 @@ def _bwrap_cmd() -> list[str]:
 
 def run_container(tool: ToolRecord, args=None, kwargs=None, *, timeout_s: float = 5.0,
                   cpu_s: int = 3, mem_bytes: int = 256 * 1024 * 1024, seccomp: bool = True,
-                  seccomp_profile: str = PROFILE_DENYLIST, seccomp_allow=None):
+                  seccomp_profile: str = PROFILE_DENYLIST, seccomp_allow=None,
+                  require_seccomp: bool = False):
     """Execute `tool` inside a bwrap namespace sandbox (no net, read-only fs, ephemeral tmp), and
     — when `seccomp` is requested and a libseccomp binding is present — under a seccomp-bpf filter
     applied to the sandboxed process. `seccomp_profile`:
@@ -59,6 +65,14 @@ def run_container(tool: ToolRecord, args=None, kwargs=None, *, timeout_s: float 
 
     child = _CHILD.format(cpu=cpu_s, mem=mem_bytes)
     cmd = _bwrap_cmd()
+
+    # Don't let a requested seccomp filter silently vanish: if it was asked for but libseccomp
+    # isn't available, either fail closed (require_seccomp) or warn loudly (default).
+    if seccomp and not seccomp_available():
+        if require_seccomp:
+            raise SandboxError("seccomp filter required but no libseccomp binding is available")
+        warnings.warn("seccomp requested but libseccomp is unavailable — running with namespace "
+                      "isolation only, no syscall filter", RuntimeWarning, stacklevel=2)
 
     sec_file = None
     pass_fds: tuple[int, ...] = ()
