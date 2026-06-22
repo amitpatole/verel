@@ -6,7 +6,7 @@ verdict. AgentVision proved this for vision; Verel generalizes it to all senses.
 
 from __future__ import annotations
 
-from .attest import build_gate_receipt, verify_gate_receipt
+from .attest import build_gate_receipt, mint_report_receipt, verify_gate_receipt
 from .constants import (
     ADVISORY_CEIL,
     ADVISORY_GRADERS,
@@ -66,6 +66,7 @@ __all__ = [
     "verify_signature",
     "attest_self",
     "build_gate_receipt",
+    "mint_report_receipt",
     "verify_gate_receipt",
     "MissingAttestationDep",
     "Confidence",

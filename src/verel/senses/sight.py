@@ -222,14 +222,22 @@ def _report_verdict(issues: list[Issue]) -> Verdict:
 
 
 async def perceive(source: str, *, backend: str = "local", agent_id: str = "",
-                   full_page: bool = True, **analyze_kwargs) -> SightResult:
+                   full_page: bool = True, allow_local: bool = False,
+                   settings_overrides: dict | None = None, **analyze_kwargs) -> SightResult:
     """Render + analyze `source` through AgentVision, return the Verel SightResult.
 
     Thin wrapper over `agentvision.analyze(...)`. Requires `verel[sight]`.
+
+    SSRF: AgentVision's `block_private_networks` guard is left ON by default — `source` is
+    attacker/agent-controlled, so localhost/LAN/metadata endpoints are refused. `allow_local=True`
+    is an EXPLICIT opt-in (e.g. an agent verifying its own dev server) that disables the guard.
     """
     from agentvision import analyze, load_settings
 
-    settings = load_settings(vision_backend=backend)
+    overrides = dict(settings_overrides or {})
+    if allow_local:
+        overrides["block_private_networks"] = False   # explicit opt-in only — default fails closed
+    settings = load_settings(vision_backend=backend, **overrides)
     av_report = await analyze(source, settings=settings, full_page=full_page, **analyze_kwargs)
     return from_agentvision(av_report, agent_id=agent_id, artifact_id=source)
 

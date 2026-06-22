@@ -391,3 +391,34 @@ Dogfooded: `verel_gate` on a real repo returns a PASS verdict with an ed25519 re
 fingerprint. Input handling fails closed (missing/again-non-dir repo, unknown stage/language/attest,
 PyNaCl-absent). Covered by `tests/test_mcp_gate.py` (14 tests). Security cadence (MCP input surface)
 applied below.
+
+## 13. Slice 1 build — `sight` over MCP (the eyes, attested)
+
+> **Status:** built this session. The eyes are now an MCP verb that returns an attested percept —
+> grounded observations with pixel bboxes + an image_ref + a verifiable receipt.
+
+### 13.1 What shipped
+- **`verel_sight(url, intent, viewport, backend, allow_local, attest)`** (`mcp_server.py`) — renders a
+  URL through AgentVision (`senses.sight.perceive`) and returns `{verdict, summary, image_ref,
+  image_path, observations[{message, bbox, severity, source, confidence, precise, fingerprint}],
+  matches_intent, intent_satisfied, intent_total, ceiling_clamped, attest, receipt,
+  receipt_public_verifiable}`. `bbox` is AgentVision's pixel BBox (`{x,y,w,h}`); `image_ref` is
+  `percept://<blake2s of the screenshot>`.
+- **Attested percept** — `verdict.mint_report_receipt` signs each per-source-grader Report
+  (DOM/OCR/CV precise, VISION advisory), binding `inputs_digest` to the **screenshot bytes** (a percept
+  receipt can't be replayed onto a different render). `build_gate_receipt` wraps them into the same
+  signed, publicly-verifiable envelope as `gate`. So an agent's "it renders / matches intent" claim is
+  checkable by a second party — `verel_verify` confirms it.
+- **SSRF-safe by default** — the URL is agent-controlled, so AgentVision's `block_private_networks`
+  guard stays ON; `allow_local=true` is an explicit opt-in (an agent verifying its own dev server).
+  Only `http(s)` is accepted (file/gopher refused at our layer too). ed25519 auto when `verel[attest]`,
+  else hmac; `attest="ed25519"` fails closed without PyNaCl. `verel[sight]` absent → clear install hint.
+- Sync↔async bridge (`_run_async`) so `dispatch` can drive the async `perceive` under the server's loop
+  or in tests.
+
+### 13.2 DoD — met (dogfooded LIVE)
+`verel_sight https://example.com` rendered, returned a PASS with an **ed25519** receipt, and
+`verel_verify` confirmed it publicly (1 precise grader attested). Hermetic coverage in
+`tests/test_mcp_sight.py` (9 tests, `perceive` monkeypatched): attestation + image-binding + tamper,
+SSRF/scheme rejection, `allow_local` default-off, viewport parse, AgentVision-absent + PyNaCl-absent
+fail-closed, bbox parsing. Security cadence (SSRF + the new input surface) applied next.

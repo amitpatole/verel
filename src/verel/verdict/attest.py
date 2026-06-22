@@ -20,8 +20,27 @@ from .models import (
     GateReceiptVerification,
     GraderAttestation,
     Report,
+    RunReceipt,
     Verdict,
+    report_result_digest,
 )
+
+
+def mint_report_receipt(report: Report, *, suite_sha: str, inputs_digest: str,
+                        coverage_assertion: str, attest: str = "hmac",
+                        runner_identity: str = "sight-runner") -> RunReceipt:
+    """Attach a signed RunReceipt to `report`, binding its graded outcome. Used by senses (e.g. sight)
+    that produce Reports outside the CI grader path but still need attestation (§4). `attest`: "hmac"
+    or "ed25519" (publicly verifiable)."""
+    rr = RunReceipt(suite_sha=suite_sha, inputs_digest=inputs_digest,
+                    coverage_assertion=coverage_assertion, runner_identity=runner_identity,
+                    result_digest=report_result_digest(report), signature="")
+    if attest == "ed25519":
+        keys.attest_self(rr)
+    else:
+        rr.signature = sign_receipt(rr)
+    report.run_receipt = rr
+    return rr
 
 
 def _was_clamped(report: Report) -> bool:

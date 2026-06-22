@@ -5,6 +5,7 @@ The tool DISPATCH layer (`TOOLS`, `dispatch`) is pure and testable without the `
 `serve()` binds it to a real MCP stdio server (the optional `verel[mcp]` extra). Hero verbs:
 
   verel_gate         RUN the graders on a repo → attested verdict + a verifiable receipt (§3/§4)
+  verel_sight        render a URL → attested percept (bboxes + image_ref + receipt) — the eyes
   verel_verify       verify a receipt with NO trust in its producer (ed25519 = public; §11)
   verel_ci_check     run the inner-loop CI stage on a repo → verdict + issues
   verel_recall       recall from a memory store → records
@@ -106,6 +107,123 @@ def _tool_gate(args: dict) -> dict:
     }
 
 
+def _run_async(coro):
+    """Run an async coroutine from the sync dispatch layer, whether or not a loop is already running
+    (the MCP server binds an anyio loop; tests call dispatch directly)."""
+    import asyncio
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)          # no loop in this thread → safe
+    import concurrent.futures  # inside a running loop → run in a fresh worker thread
+    with concurrent.futures.ThreadPoolExecutor(1) as ex:
+        return ex.submit(lambda: asyncio.run(coro)).result()
+
+
+def _bbox(locator: str | None) -> dict | None:
+    """AgentVision serializes its pixel BBox into Issue.locator as JSON {x,y,width,height}."""
+    if not locator:
+        return None
+    try:
+        d = json.loads(locator)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(d, dict):
+        return None
+    return {"x": d.get("x"), "y": d.get("y"),
+            "w": d.get("width", d.get("w")), "h": d.get("height", d.get("h"))}
+
+
+def _tool_sight(args: dict) -> dict:
+    """Give an agent EYES: render a URL and return an ATTESTED percept — grounded observations with
+    pixel bboxes, an image_ref, intent conformance, and a verifiable receipt (§3/§4). Most agents are
+    blind; this answers 'does it actually render / match what we set out to build?' — verifiably."""
+    import hashlib
+
+    url = args.get("url")
+    if not url or not isinstance(url, str):
+        return _err("url (string) is required")
+    allow_local = bool(args.get("allow_local", False))
+    scheme = url.split("://", 1)[0].lower() if "://" in url else ""
+    if scheme not in ("http", "https"):
+        # file://, gopher://, etc. are SSRF/LFI vectors — refuse at our layer too (defense in depth;
+        # AgentVision also blocks file scheme + private networks by default).
+        return _err("url must be http(s)")
+
+    intent = args.get("intent")
+    if intent is not None and not isinstance(intent, str):
+        return _err("intent must be a string")
+    backend = args.get("backend", "local")
+    if not isinstance(backend, str):
+        return _err("backend must be a string")
+    attest, aerr = _resolve_attest(args.get("attest", "auto"))
+    if aerr:
+        return _err(aerr)
+
+    overrides: dict = {}
+    vp = args.get("viewport")
+    if vp is not None:
+        if not isinstance(vp, str) or "x" not in vp.lower():
+            return _err("viewport must be like '1280x800'")
+        try:
+            w, h = (int(x) for x in vp.lower().split("x", 1))
+        except ValueError:
+            return _err("viewport must be like '1280x800'")
+        overrides["default_viewport_width"], overrides["default_viewport_height"] = w, h
+
+    from .senses.sight import perceive  # lazy module; AgentVision itself is imported at render time
+
+    kwargs: dict = {}
+    try:
+        if intent:
+            from agentvision import Brief
+            kwargs["brief"] = Brief(text=intent)
+        result = _run_async(perceive(url, backend=backend, allow_local=allow_local,
+                                     settings_overrides=overrides, **kwargs))
+    except ImportError:
+        return _err("sight requires AgentVision — install it with `pip install verel[sight]`")
+
+    from .verdict import build_gate_receipt, mint_report_receipt, verify_gate_receipt
+
+    p = result.percept
+    img = p.image_path
+    img_bytes = b""
+    if img and os.path.isfile(img):
+        with open(img, "rb") as fh:
+            img_bytes = fh.read()
+    image_ref = "percept://" + hashlib.blake2s(img_bytes or url.encode()).hexdigest()[:16]
+    # Bind the receipt to WHAT WAS SEEN: the screenshot bytes (falling back to the url) — so a percept
+    # receipt can't be replayed onto a different render.
+    suite_sha = hashlib.blake2s(f"sight:{url}:{backend}:{vp}".encode()).hexdigest()[:16]
+    inputs_digest = hashlib.blake2s(img_bytes or url.encode()).hexdigest()[:16]
+    for rep in result.reports:
+        mint_report_receipt(rep, suite_sha=suite_sha, inputs_digest=inputs_digest,
+                            coverage_assertion=f"rendered: {url}", attest=attest)
+    receipt = build_gate_receipt(p.verdict, result.reports, attest=attest)
+    checked = verify_gate_receipt(receipt)
+
+    return {
+        "verdict": p.verdict.value,
+        "summary": p.summary,
+        "image_ref": image_ref,
+        "image_path": img,
+        "observations": [
+            {"message": o.message, "bbox": _bbox(o.locator), "severity": o.severity.value,
+             "source": o.source.value, "confidence": o.confidence.value,
+             "precise": o.locator_precise, "fingerprint": o.fingerprint}
+            for o in p.observations
+        ],
+        "matches_intent": p.matches_intent,
+        "intent_satisfied": p.intent_satisfied,
+        "intent_total": p.intent_total,
+        "ceiling_clamped": receipt.ceiling_clamped,
+        "attest": attest,
+        "receipt_public_verifiable": checked.public_verifiable,
+        "receipt": receipt.model_dump(mode="json"),
+    }
+
+
 def _tool_verify(args: dict) -> dict:
     """Verify a receipt with no trust in its producer. Accepts a gate-level receipt (has `graders`)
     or a single RunReceipt (has `suite_sha`). `require_public` rejects HMAC (demands ed25519)."""
@@ -195,6 +313,20 @@ _GATE_SCHEMA = {
     },
     "required": ["repo"],
 }
+_SIGHT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "url": {"type": "string", "description": "http(s) URL to render and grade"},
+        "intent": {"type": "string", "description": "what the UI should be — graded for conformance"},
+        "viewport": {"type": "string", "description": "WxH, e.g. '1280x800'"},
+        "backend": {"type": "string", "default": "local",
+                    "description": "vision backend; 'local' = no-LLM structural checks (default)"},
+        "allow_local": {"type": "boolean", "default": False,
+                        "description": "EXPLICIT opt-in to render localhost/LAN (SSRF guard off)"},
+        "attest": {"type": "string", "enum": list(_ATTEST), "default": "auto"},
+    },
+    "required": ["url"],
+}
 _VERIFY_SCHEMA = {
     "type": "object",
     "properties": {
@@ -210,6 +342,9 @@ TOOLS: dict[str, dict[str, Any]] = {
     "verel_gate": {"fn": _tool_gate, "schema": _GATE_SCHEMA,
                    "description": "Run graders on a repo → attested verdict + a verifiable receipt. "
                                   "The agent cannot self-declare done."},
+    "verel_sight": {"fn": _tool_sight, "schema": _SIGHT_SCHEMA,
+                    "description": "Render a URL and return an attested percept: grounded observations "
+                                   "with pixel bboxes + an image_ref + a verifiable receipt."},
     "verel_verify": {"fn": _tool_verify, "schema": _VERIFY_SCHEMA,
                      "description": "Verify a receipt with no trust in its producer "
                                     "(ed25519 = publicly verifiable)."},
