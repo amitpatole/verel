@@ -16,15 +16,17 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import os
 import signal
 from enum import Enum
 
 from pydantic import BaseModel, Field
 
+from .._secrets import load_secret
 from ..memory.view import MemoryKind, MemoryRecord, MemoryView, Trust, make_key
 
-_SECRET = os.environ.get("VEREL_RUNNER_SECRET", "verel-dev-runner-secret").encode()
+# Tool-code signing key — a SEPARATE trust domain from the gate's runner secret (a leak of one must
+# not forge the other). No public default; see _secrets.load_secret.
+_SECRET = load_secret("VEREL_TOOL_SECRET", "tool_secret")
 
 
 class SideEffect(str, Enum):

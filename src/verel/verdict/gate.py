@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import os
 
+from .._secrets import load_secret
 from .constants import ADVISORY_CEIL, ADVISORY_GRADERS, GATING_SEVERITY, SEV_ORDER
 from .models import (
     Confidence,
@@ -22,8 +22,10 @@ from .models import (
     Verdict,
 )
 
-# Dev default; production injects a real per-runner key from the separate trust domain.
-_RUNNER_SECRET = os.environ.get("VEREL_RUNNER_SECRET", "verel-dev-runner-secret").encode()
+# Per-runner signing key. Set VEREL_RUNNER_SECRET to share it across a trust domain (e.g. a CI
+# runner that signs and a separate gate that verifies); otherwise a persistent per-installation
+# random key is used (no public default — see _secrets.load_secret).
+_RUNNER_SECRET = load_secret("VEREL_RUNNER_SECRET", "runner_secret")
 
 
 # ---------------------------------------------------------------------------
