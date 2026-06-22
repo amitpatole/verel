@@ -53,10 +53,11 @@ def _b64e(raw: bytes) -> str:
 
 
 def _b64d(s: str) -> bytes:
-    # tolerate missing padding; reject any non-alphabet byte (validate=True) so a malformed
-    # signature/pubkey fails cleanly instead of silently decoding to garbage.
+    # tolerate missing padding, but REJECT any non-alphabet byte (validate=True) so a malformed
+    # signature/pubkey raises cleanly instead of silently discarding stray chars and decoding to
+    # garbage. urlsafe alphabet via altchars="-_". Raises binascii.Error / ValueError on bad input.
     pad = "=" * (-len(s) % 4)
-    return base64.urlsafe_b64decode(s + pad)
+    return base64.b64decode(s + pad, altchars=b"-_", validate=True)
 
 
 def key_id_for(public_key: bytes) -> str:
