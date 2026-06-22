@@ -181,6 +181,15 @@ def test_malformed_signature_b64_fails_closed():
     assert verify_signature(rr) is False
 
 
+def test_signature_with_embedded_garbage_rejected():
+    """Strict base64 (validate=True): a stray non-alphabet byte must RAISE, not be silently
+    discarded into a shorter-but-valid decode. Pins the _b64d hardening from red-team round 1."""
+    rr = _self_signed(_report())
+    sig = rr.signature
+    rr.signature = sig[:8] + "*" + sig[8:]          # inject a non-alphabet char mid-signature
+    assert verify_signature(rr) is False
+
+
 def test_short_signature_fails_closed():
     rr = _self_signed(_report())
     rr.signature = keys._b64e(b"tooshort")
