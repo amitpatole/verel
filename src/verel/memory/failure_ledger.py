@@ -9,6 +9,8 @@ alone, not because someone remembered to re-add a test.
 
 from __future__ import annotations
 
+import threading
+
 from ..verdict.constants import GATING_SEVERITY, SEV_ORDER
 from ..verdict.models import (
     Confidence,
@@ -25,6 +27,11 @@ from .view import MemoryKind, MemoryRecord, MemoryView, make_key
 def _gating_issues(report: Report) -> list[Issue]:
     g = SEV_ORDER.index(GATING_SEVERITY)
     return [i for i in report.issues if SEV_ORDER.index(i.severity) >= g]
+
+
+# Serializes the ledger's get→modify→write across threads (the fleet shares one store across
+# workers), so a concurrent record()/mark_fixed() interleave can't mask a regression.
+_LEDGER_LOCK = threading.Lock()
 
 
 class FailureLedger:
@@ -45,29 +52,31 @@ class FailureLedger:
         the anti-"junk drawer" behaviour the design's interference rule aims at."""
         volatile_fingerprints = volatile_fingerprints or set()
         recorded = []
-        for i in _gating_issues(report):
-            existing = self.mem.get(self.mem_id(i.fingerprint))
-            times = (existing.detail.get("times_seen", 0) + 1) if existing else 1
-            status = "open"
-            if existing and existing.detail.get("status") == "fixed":
-                status = "reintroduced"  # was fixed, now back — a regression event
-            rec = MemoryRecord(
-                kind=MemoryKind.FAILURE,
-                subject=i.fingerprint,
-                predicate="fails",
-                text=i.message,
-                scope=self.scope,
-                subj_pred_key=self._key(i.fingerprint),
-                source=i.source.value if hasattr(i.source, "value") else str(i.source),
-                provenance=[f"percept:{i.fingerprint}"],
-            ).with_detail(
-                fingerprint=i.fingerprint, kind=i.kind.value, locator=i.locator,
-                status=status, times_seen=times,
-            )
-            if i.fingerprint in volatile_fingerprints:
-                rec.with_detail(volatile=True)  # transient/flaky → expires unless it recurs
-            self.mem.write(rec, ts=ts)
-            recorded.append(i.fingerprint)
+        # serialize the get→write so a concurrent worker (shared store) can't mask a regression
+        with _LEDGER_LOCK:
+            for i in _gating_issues(report):
+                existing = self.mem.get(self.mem_id(i.fingerprint))
+                times = (existing.detail.get("times_seen", 0) + 1) if existing else 1
+                status = "open"
+                if existing and existing.detail.get("status") == "fixed":
+                    status = "reintroduced"  # was fixed, now back — a regression event
+                rec = MemoryRecord(
+                    kind=MemoryKind.FAILURE,
+                    subject=i.fingerprint,
+                    predicate="fails",
+                    text=i.message,
+                    scope=self.scope,
+                    subj_pred_key=self._key(i.fingerprint),
+                    source=i.source.value if hasattr(i.source, "value") else str(i.source),
+                    provenance=[f"percept:{i.fingerprint}"],
+                ).with_detail(
+                    fingerprint=i.fingerprint, kind=i.kind.value, locator=i.locator,
+                    status=status, times_seen=times,
+                )
+                if i.fingerprint in volatile_fingerprints:
+                    rec.with_detail(volatile=True)  # transient/flaky → expires unless it recurs
+                self.mem.write(rec, ts=ts)
+                recorded.append(i.fingerprint)
         return recorded
 
     def mem_id(self, fingerprint: str):
@@ -77,18 +86,19 @@ class FailureLedger:
 
     def mark_fixed(self, fingerprints: list[str], *, ts: float = 0.0) -> int:
         n = 0
-        for fp in fingerprints:
-            rec = self.mem.get(self.mem_id(fp))
-            if rec is None:
-                continue
-            rec.with_detail(status="fixed", fixed_ts=ts)
-            self.mem.write(rec, ts=ts)  # same key -> corroborates; status now fixed
-            # a confirmed fix is verified, PERMANENT knowledge — promote and PIN it so the
-            # regression guard can catch a reintroduction however long later (no decay/prune).
-            self.mem.promote(rec.id)
-            if hasattr(self.mem, "pin"):
-                self.mem.pin(rec.id)
-            n += 1
+        with _LEDGER_LOCK:  # serialize with record() so a fix/reintroduce interleave can't be lost
+            for fp in fingerprints:
+                rec = self.mem.get(self.mem_id(fp))
+                if rec is None:
+                    continue
+                rec.with_detail(status="fixed", fixed_ts=ts)
+                self.mem.write(rec, ts=ts)  # same key -> corroborates; status now fixed
+                # a confirmed fix is verified, PERMANENT knowledge — promote and PIN it so the
+                # regression guard can catch a reintroduction however long later (no decay/prune).
+                self.mem.promote(rec.id)
+                if hasattr(self.mem, "pin"):
+                    self.mem.pin(rec.id)
+                n += 1
         return n
 
     def check_regressions(self, report: Report) -> list[MemoryRecord]:

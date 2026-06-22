@@ -79,11 +79,19 @@ def content_digest(cwd: str | None, covers: list[str]) -> str:
     return h.hexdigest()[:16]
 
 
-def _receipt(spec: GraderSpec, report: Report, runner_identity: str = "ci-runner") -> RunReceipt:
+def bound_input_digest(cwd: str | None, covers: list[str], nonce: str = "") -> str:
+    """The receipt's input binding: the scanned-content digest SALTED with a per-run nonce. The
+    content digest alone is vacuous when `covers` is empty (a constant); the nonce makes every run's
+    receipt unique, so a PASS receipt can't be replayed into a later run regardless of `covers`."""
+    return blake2s(f"{content_digest(cwd, covers)}:{nonce}".encode()).hexdigest()[:16]
+
+
+def _receipt(spec: GraderSpec, report: Report, runner_identity: str = "ci-runner",
+             nonce: str = "") -> RunReceipt:
     covered = ",".join(spec.covers) or "(repo)"
     rr = RunReceipt(
         suite_sha=suite_sha(spec),
-        inputs_digest=content_digest(spec.cwd, spec.covers),
+        inputs_digest=bound_input_digest(spec.cwd, spec.covers, nonce),
         coverage_assertion=f"scanned files: {covered}",
         runner_identity=runner_identity,
         result_digest=report_result_digest(report), signature="",
@@ -143,8 +151,9 @@ _PARSERS = {
 # ---------------------------------------------------------------------------
 # Runner.
 # ---------------------------------------------------------------------------
-def run_grader(spec: GraderSpec, runner: Runner = subprocess_runner) -> Report:
-    """Execute a grader and map its output into an attested verdict-bus Report."""
+def run_grader(spec: GraderSpec, runner: Runner = subprocess_runner, *, nonce: str = "") -> Report:
+    """Execute a grader and map its output into an attested verdict-bus Report. `nonce` salts the
+    receipt's input binding so it can't be replayed into a different run (set by `run_stage`)."""
     parse = spec.parser or _PARSERS.get(spec.grader)
     if parse is None:
         return Report(verdict=Verdict.FAIL, grader=spec.grader, errored=True,
@@ -168,7 +177,7 @@ def run_grader(spec: GraderSpec, runner: Runner = subprocess_runner) -> Report:
         errored=(rc != 0 and not issues),
     )
     report = assign(report)                       # populate issue fingerprints BEFORE signing...
-    report.run_receipt = _receipt(spec, report)   # ...so the receipt binds the final result incl. them
+    report.run_receipt = _receipt(spec, report, nonce=nonce)  # ...binding final result + per-run nonce
     return report
 
 

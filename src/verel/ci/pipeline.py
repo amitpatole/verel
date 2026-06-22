@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from ..memory.failure_ledger import FailureLedger, regression_report
 from ..verdict.gate import gate
 from ..verdict.models import GateResult, GraderKind, Report, Verdict
-from .graders import GraderSpec, Runner, content_digest, run_grader, subprocess_runner, suite_sha
+from .graders import GraderSpec, Runner, bound_input_digest, run_grader, subprocess_runner, suite_sha
 
 
 @dataclass
@@ -44,11 +44,13 @@ def run_stage(stage: Stage, *, diff_files: set[str] | None = None, runner: Runne
     failure-memory regression check + record new gating failures."""
     diff_files = diff_files or set()
     flaky_signatures = flaky_signatures or set()
-    reports = [run_grader(s, runner) for s in stage.graders]
-    # Pin frozen suites + the actual scanned-content digest from the trusted stage config (not from
-    # grader runtime output), so the gate rejects a stale/replayed receipt that doesn't match.
+    import secrets
+    nonce = secrets.token_hex(8)   # per-run salt → a receipt can't be replayed into another run
+    reports = [run_grader(s, runner, nonce=nonce) for s in stage.graders]
+    # Pin frozen suites + the nonce-salted scanned-content digest from the trusted stage config (not
+    # from grader runtime output), so the gate rejects a stale/replayed receipt that doesn't match.
     frozen = {s.grader: suite_sha(s) for s in stage.graders}
-    inputs = {s.grader: content_digest(s.cwd, s.covers) for s in stage.graders}
+    inputs = {s.grader: bound_input_digest(s.cwd, s.covers, nonce) for s in stage.graders}
 
     regressions = []
     if ledger is not None:

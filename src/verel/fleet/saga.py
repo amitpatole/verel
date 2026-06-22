@@ -58,6 +58,11 @@ def run_saga(steps: list[SagaStep]) -> SagaResult:
     fail_idx: int | None = None
     fail_err = ""
 
+    # CONTRACT: a step's `forward` must be internally ATOMIC — apply its side effect only on success,
+    # never side-effect-then-raise. The saga compensates only steps whose forward RETURNED (a failed
+    # forward is assumed to have applied nothing); it cannot tell whether a raising forward partially
+    # applied. A step that can't be atomic must make its own `compensate` safe to run after a partial
+    # forward. (Direction-safe either way: a leak is a cleanup gap, never a forged success.)
     for i, step in enumerate(steps):
         try:
             results[step.name] = step.forward()
