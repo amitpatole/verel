@@ -1,10 +1,10 @@
-# Daily per-country PyPI refresh (BigQuery) for the metrics dashboard — paired with the .timer.
+# Daily per-country PyPI refresh (BigQuery) → then re-sync the HF Space landing-page map.
 # Install: sudo cp tools/verel-metrics-country.{service,timer} /etc/systemd/system/
 #          sudo systemctl daemon-reload && sudo systemctl enable --now verel-metrics-country.timer
-# One query/day ≈ 6.6 GB scanned (well within BigQuery's 1 TB/month free tier).
+# One BigQuery/day ≈ 6.6 GB scanned (well within the 1 TB/month free tier).
 
 [Unit]
-Description=Refresh per-country PyPI downloads (BigQuery) for the metrics dashboard
+Description=Daily PyPI country refresh (BigQuery) + HF Space map re-sync
 After=network-online.target
 Wants=network-online.target
 
@@ -13,4 +13,7 @@ Type=oneshot
 User=amitpatole
 WorkingDirectory=/home/amitpatole/WORKSPACE/Nirvana
 Environment=HOME=/home/amitpatole
+# 1) refresh the country cache from BigQuery, then 2) push the snapshot to the HF landing page.
+# Sequential ExecStart: if the BigQuery pull fails, the HF sync is skipped (no stale upload).
 ExecStart=/home/amitpatole/WORKSPACE/Nirvana/.venv/bin/python /home/amitpatole/WORKSPACE/Nirvana/tools/pypi_country.py
+ExecStart=/home/amitpatole/WORKSPACE/Nirvana/.venv/bin/python /home/amitpatole/WORKSPACE/Nirvana/tools/sync_hf_map.py
