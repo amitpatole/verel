@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://pypi.org/project/verel/"><img src="https://img.shields.io/pypi/v/verel?color=8b7cff&label=pip%20install%20verel" alt="PyPI"></a>
   <a href="https://amitpatole.github.io/verel/"><img src="https://img.shields.io/badge/docs-amitpatole.github.io-5ad1e6" alt="Docs"></a>
-  <img src="https://img.shields.io/badge/tests-309%20passing-46d39a" alt="tests">
+  <img src="https://img.shields.io/badge/tests-315%20passing-46d39a" alt="tests">
   <img src="https://img.shields.io/badge/ruff%20%2B%20mypy-clean-5ad1e6" alt="lint">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT">
   <img src="https://img.shields.io/badge/LLM-Ollama%20Cloud%20%C2%B7%20OpenAI-8b7cff" alt="LLM">
@@ -131,7 +131,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: amitpatole/verel@v0.29.0
+      - uses: amitpatole/verel@v0.29.1
         with:
           repo: .
           install: "-e .[dev]"     # your project deps so its tests import
@@ -141,7 +141,7 @@ jobs:
 
 ```yaml
 - repo: https://github.com/amitpatole/verel
-  rev: v0.29.0
+  rev: v0.29.1
   hooks: [{ id: verel-precommit }]
 ```
 
