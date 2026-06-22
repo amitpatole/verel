@@ -422,3 +422,43 @@ applied below.
 `tests/test_mcp_sight.py` (9 tests, `perceive` monkeypatched): attestation + image-binding + tamper,
 SSRF/scheme rejection, `allow_local` default-off, viewport parse, AgentVision-absent + PyNaCl-absent
 fail-closed, bbox parsing. Security cadence (SSRF + the new input surface) applied next.
+
+## 14. Slice 2 build — `recall` / `remember` over MCP (the shared verified brain)
+
+> **Status:** built this session. Two MCP verbs over ONE persistent shared brain so a Cursor session,
+> a Claude Code session, and a CI agent compound into and draw from the same verified memory.
+
+### 14.1 What shipped
+- **`verel_recall(query, scope, kind, k)`** — reads via `memory.lattice_recall`: resolves DOWN the scope
+  lattice (self < team < org < global; most specific wins) and surfaces
+  trust/confidence/support/provenance/fingerprint so a caller can weight what it gets. `k` bounded.
+- **`verel_remember(fact, scope, evidence, author)`** — writes a CANDIDATE; **trust does not travel**
+  (the caller's self-asserted trust/confidence is ignored). A verifiable `evidence` receipt records
+  **attested grounding** (provenance + grounding tag) but does NOT promote to verified.
+- **Brain store is fixed per-server** (`VEREL_MEMORY_STORE` env or `~/.config/verel/brain.db`),
+  **not agent-controllable** — a tool arg can't repoint it (no arbitrary file read/write). Inputs
+  bounded (`_MAX_TEXT`/`_MAX_QUERY`/`_MAX_FIELD`); parameterized SQL (no injection).
+
+### 14.2 DoD — met
+A fact remembered without evidence is a candidate; recall resolves it across the lattice with trust
+surfaced; a fact remembered with a genuine gate receipt records attested grounding; a **forged receipt
+cannot launder trust** (stays candidate). 12 tests in `tests/test_mcp_brain.py`.
+
+### 14.3 Red-team log + the local/remote trust boundary (honest)
+Two independent round-2 agents. Store/input/DoS: **CLEAN** (no arbitrary path, no SQL injection,
+bounds enforced, no fail-open, concurrency sound). Trust model: the **hard guarantee holds** — no
+`verified` without a genuine runner-signed receipt; caller-asserted trust ignored; REJECTED filtered.
+It surfaced four soft-trust paths, all *harmless under one local principal, blocking once the brain is
+shared across principals*:
+
+| # | Finding | Status |
+|---|---|---|
+| 1 | A valid-but-UNRELATED receipt could promote a false fact (trust laundering). | **FIXED** — attested evidence records grounding only; no auto-promote (a real `verified` needs a fact-bound attestation). |
+| 2 | An unattested CANDIDATE could silently supersede a VERIFIED fact (interference rule). | **FIXED** — `remember` refuses to overwrite a verified belief (returns `conflict`; a real change goes through a revision/contradict flow). |
+| 3 | `author` is an unauthenticated free string → AuthorTrust forgery/inflation. | **DEFERRED** — needs an authenticated principal (derive `author` from a signing key). AuthorTrust is therefore NOT used by the local `remember`; it's the **remote-brain** mechanism. (§9.3) |
+| 4 | `rank()` ignores the trust tier → a candidate can outrank a verified fact. | **DEFERRED** — recall surfaces `trust` per record so a caller can weight it; folding trust into core `rank()` (used by promotion/consolidation) is a remote-brain ranking item. (§9.3) |
+
+**Residual named:** the local brain is single-principal (one operator's agents on one machine), which is
+exactly why #3/#4 are acceptable here; they (plus a receipt↔fact binding for a true cross-principal
+`verified`) are the **deferred multi-principal auth layer** the `hosted.py`/`RemoteMemory` direction
+already anticipates — that layer does not yet exist to audit.

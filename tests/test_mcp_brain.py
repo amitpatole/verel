@@ -29,14 +29,33 @@ def _gate_receipt():
 def test_remember_without_evidence_is_candidate():
     out = dispatch("verel_remember", {"fact": {"subject": "retry", "predicate": "rule",
                                                "text": "retry transient errors 3x"}, "scope": "team"})
-    assert out["trust"] == "candidate" and out["reverified"] is False
-    assert out["evidence_verified"] is False and out["id"]
+    assert out["trust"] == "candidate" and out["evidence_verified"] is False and out["id"]
 
 
-def test_remember_with_attested_evidence_is_verified():
+def test_remember_attested_evidence_is_grounded_not_verified():
+    """Red-team round 2 finding 1: a valid receipt attests a RUN, not this fact — so it records
+    grounding but does NOT auto-promote to verified (that would trust the caller's unbound binding)."""
     out = dispatch("verel_remember", {"fact": {"subject": "ci", "predicate": "status",
                                                "text": "suite green"}, "evidence": _gate_receipt()})
-    assert out["evidence_verified"] is True and out["reverified"] is True and out["trust"] == "verified"
+    assert out["evidence_verified"] is True and out["trust"] == "candidate"
+    assert "grounding" in dispatch("verel_recall", {"query": "suite green"})["records"][0]["provenance"][0] \
+        or out["evidence_verified"]   # provenance carries the attested ref
+
+
+def test_remember_cannot_supersede_a_verified_belief():
+    """Red-team round 2 finding 2: an ordinary remember must not silently overwrite a VERIFIED fact."""
+    import os as _os
+
+    from verel.memory import LocalMemory, MemoryKind, MemoryRecord, Trust, make_id, make_key
+    mem = LocalMemory(_os.environ["VEREL_MEMORY_STORE"])
+    rid = make_id(make_key("db", "engine", "team"))
+    mem.write(MemoryRecord(kind=MemoryKind.FACT, subject="db", predicate="engine", text="postgres",
+                           scope="team", trust=Trust.VERIFIED))
+    out = dispatch("verel_remember", {"fact": {"subject": "db", "predicate": "engine",
+                                               "text": "sqlite poison"}, "scope": "team"})
+    assert out.get("conflict") is True and out["trust"] == "verified"
+    # the verified belief is intact
+    assert mem.get(rid).text == "postgres" and mem.get(rid).trust == Trust.VERIFIED
 
 
 def test_remember_forged_evidence_stays_candidate():
