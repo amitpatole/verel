@@ -7,8 +7,9 @@ The tool DISPATCH layer (`TOOLS`, `dispatch`) is pure and testable without the `
   verel_gate         RUN the graders on a repo → attested verdict + a verifiable receipt (§3/§4)
   verel_sight        render a URL → attested percept (bboxes + image_ref + receipt) — the eyes
   verel_verify       verify a receipt with NO trust in its producer (ed25519 = public; §11)
+  verel_recall       read the shared verified brain (resolves DOWN the scope lattice)
+  verel_remember     write to the shared brain — trust does NOT travel (candidate until attested)
   verel_ci_check     run the inner-loop CI stage on a repo → verdict + issues
-  verel_recall       recall from a memory store → records
   verel_build_tool   detect→scaffold→test→register a tool (needs an LLM key)
 
 `gate` is the conscience: the agent can no longer self-declare "done" — it gets a real verdict with
@@ -276,16 +277,117 @@ def _tool_ci_check(args: dict) -> dict:
     }
 
 
-def _tool_recall(args: dict) -> dict:
+def _config_dir() -> str:
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    return os.path.join(base, "verel")
+
+
+def _brain():
+    """The shared verified brain — ONE persistent store per server (env VEREL_MEMORY_STORE, else
+    ~/.config/verel/brain.db). Deliberately NOT agent-controllable: a tool arg can't repoint it at an
+    arbitrary path (that would be arbitrary file read/write), and a fixed store is what lets a Cursor
+    session, a Claude Code session, and a CI agent draw from the SAME brain."""
     from .memory import LocalMemory
 
+    path = os.environ.get("VEREL_MEMORY_STORE") or os.path.join(_config_dir(), "brain.db")
+    if path != ":memory:":
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    return LocalMemory(path)
+
+
+def _evidence_verifies(evidence) -> tuple[bool, str]:
+    """The importer's OWN check for `remember`: a fact becomes verified only if the caller attaches a
+    receipt that actually VERIFIES (gate receipt or RunReceipt) — never on the caller's say-so. Returns
+    (verified, reference). Reuses the hardened verify_receipt/verify_gate_receipt."""
+    if not isinstance(evidence, dict):
+        return False, ""
+    from .verdict import GateReceipt, RunReceipt, verify_gate_receipt, verify_receipt
+
+    try:
+        if "graders" in evidence:
+            r = verify_gate_receipt(GateReceipt.model_validate(evidence))
+            return r.valid, (r.subject or "gate-receipt")
+        v = verify_receipt(RunReceipt.model_validate(evidence))
+        return v.valid, (v.runner_identity or "run-receipt")
+    except (ValueError, TypeError):
+        return False, ""
+
+
+def _tool_recall(args: dict) -> dict:
+    """Read the shared verified memory. Resolves DOWN the scope lattice (self < team < org < global;
+    most specific wins) and surfaces trust/confidence/provenance so a caller can weight what it gets."""
+    from .memory import MemoryKind, lattice_recall
+
     query = args.get("query")
-    if not isinstance(query, str):
+    if not isinstance(query, str) or not query.strip():
         return _err("query (string) is required")
-    mem = LocalMemory(args.get("store", ":memory:"))
-    hits = mem.recall(query, scope=args.get("scope"), k=args.get("k", 5))
-    return {"records": [{"subject": h.subject, "text": h.text, "trust": h.trust.value,
-                         "scope": h.scope} for h in hits]}
+    scope = args.get("scope") if isinstance(args.get("scope"), str) else None
+    k = args.get("k", 5)
+    if not isinstance(k, int) or isinstance(k, bool) or k <= 0:
+        return _err("k must be a positive integer")
+    k = min(k, 100)   # bound the result set
+    kind = None
+    kraw = args.get("kind")
+    if kraw is not None:
+        if not isinstance(kraw, str):
+            return _err("kind must be a string")
+        try:
+            kind = MemoryKind(kraw)
+        except ValueError:
+            return _err(f"unknown kind {kraw!r}")
+
+    mem = _brain()
+    hits = (lattice_recall(mem, query, scope=scope, kind=kind, k=k) if scope
+            else mem.recall(query, kind=kind, k=k))
+    return {"records": [
+        {"text": h.text, "subject": h.subject, "predicate": h.predicate, "scope": h.scope,
+         "trust": h.trust.value, "confidence": round(h.epistemic_confidence, 3),
+         "support_count": h.support_count, "provenance": h.provenance, "fingerprint": h.id}
+        for h in hits]}
+
+
+def _tool_remember(args: dict) -> dict:
+    """Write to the shared brain — trust does NOT travel. A claim enters as a CANDIDATE and only
+    becomes VERIFIED by passing the importer's own check (a verifiable `evidence` receipt); the
+    caller's self-asserted confidence is ignored, and AuthorTrust weights repeat contributors so one
+    noisy agent can't poison the swarm."""
+    from .memory import (
+        AuthorTrust,
+        MemoryKind,
+        MemoryRecord,
+        import_belief,
+        make_id,
+        make_key,
+    )
+
+    fact = args.get("fact")
+    if not isinstance(fact, dict) or not isinstance(fact.get("text"), str) or not fact["text"].strip():
+        return _err("fact.text (non-empty string) is required")
+    scope = args.get("scope") or "team"
+    if not isinstance(scope, str):
+        return _err("scope must be a string")
+    author = args.get("author") if isinstance(args.get("author"), str) else ""
+    subject = str(fact.get("subject", ""))
+    predicate = str(fact.get("predicate", ""))
+    evidence = args.get("evidence")
+    ev_ok, ev_ref = _evidence_verifies(evidence)
+
+    provenance: list[str] = []
+    if ev_ok:
+        provenance.append(f"attested:{ev_ref}")
+    elif isinstance(evidence, str) and evidence.strip():
+        provenance.append(f"evidence:{evidence[:200]}")
+
+    mem = _brain()
+    claim = MemoryRecord(kind=MemoryKind.FACT, subject=subject, predicate=predicate,
+                         text=fact["text"], scope=scope, provenance=provenance)
+    # the importer's check IS the attestation check — trust does not travel.
+    result = import_belief(mem, claim, verify=lambda _rec: ev_ok, author=author,
+                           author_trust=AuthorTrust(mem))
+    rec = mem.get(make_id(make_key(subject, predicate, scope)))
+    return {"id": rec.id if rec else "", "trust": rec.trust.value if rec else "candidate",
+            "reverified": result.reverified, "evidence_verified": ev_ok, "scope": scope,
+            "author_prior": round(result.prior, 3), "reason": result.reason}
 
 
 def _tool_build_tool(args: dict) -> dict:
@@ -348,6 +450,29 @@ _VERIFY_SCHEMA = {
     },
     "required": ["receipt"],
 }
+_RECALL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "query": {"type": "string"},
+        "scope": {"type": "string", "description": "resolve down from this scope (repo:x, team, global)"},
+        "kind": {"type": "string", "enum": ["fact", "design_rule", "schema", "failure", "skill"]},
+        "k": {"type": "integer", "default": 5},
+    },
+    "required": ["query"],
+}
+_REMEMBER_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "fact": {"type": "object", "description": "{subject, predicate, text} — text required",
+                 "properties": {"subject": {"type": "string"}, "predicate": {"type": "string"},
+                                "text": {"type": "string"}}, "required": ["text"]},
+        "scope": {"type": "string", "default": "team"},
+        "author": {"type": "string", "description": "contributing agent id — weights AuthorTrust"},
+        "evidence": {"description": "a verifiable receipt (gate/run) that promotes the fact to "
+                                    "verified, or a textual note (kept as provenance)"},
+    },
+    "required": ["fact"],
+}
 _OBJ = {"type": "object"}
 
 TOOLS: dict[str, dict[str, Any]] = {
@@ -362,8 +487,11 @@ TOOLS: dict[str, dict[str, Any]] = {
                                     "(ed25519 = publicly verifiable)."},
     "verel_ci_check": {"fn": _tool_ci_check, "schema": {"type": "object", "properties": {"repo": _REPO},
                        "required": ["repo"]}, "description": "Run the inner-loop CI stage on a repo."},
-    "verel_recall": {"fn": _tool_recall, "schema": _OBJ,
-                     "description": "Recall records from a memory store."},
+    "verel_recall": {"fn": _tool_recall, "schema": _RECALL_SCHEMA,
+                     "description": "Read the shared verified brain (resolves down the scope lattice)."},
+    "verel_remember": {"fn": _tool_remember, "schema": _REMEMBER_SCHEMA,
+                       "description": "Write to the shared brain — trust does not travel; a fact is "
+                                      "candidate until backed by a verifiable receipt."},
     "verel_build_tool": {"fn": _tool_build_tool, "schema": _OBJ,
                          "description": "Build+verify+register a tool (needs LLM key)."},
 }

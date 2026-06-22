@@ -71,10 +71,11 @@ def test_mcp_gate_tool():
     assert "error" in dispatch("verel_gate", {"repo": "/no/such/dir"})
 
 
-def test_mcp_recall_tool_roundtrips_via_memory():
-    # empty in-memory store -> no hits, but the tool runs and returns the shape
-    out = dispatch("verel_recall", {"query": "anything", "store": ":memory:"})
-    assert out == {"records": []}
+def test_mcp_recall_tool_roundtrips_via_memory(tmp_path, monkeypatch):
+    # the brain is a fixed per-server store (not an agent arg); point it at a temp db for the test.
+    monkeypatch.setenv("VEREL_MEMORY_STORE", str(tmp_path / "brain.db"))
+    out = dispatch("verel_recall", {"query": "anything"})
+    assert out == {"records": []}   # empty brain → no hits, correct shape
 
 
 def test_mcp_unknown_tool_returns_error():
