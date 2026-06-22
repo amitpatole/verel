@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.29.0 — security hardening: a full attack-surface audit + red-team
+
+A two-round security pass (a three-surface audit, then an adversarial red-team of the fixes) found
+and closed **21 issues**, several with working proof-of-concept exploits. Every fix is verified
+against the exploit and pinned by a regression test (`tests/test_security.py`). **Upgrading is
+recommended.**
+
+**Attestation integrity (the core guarantee).**
+- No more **public default signing secrets** — keys resolve from an env var, else a persistent
+  per-installation random key, else fail closed (`verel._secrets`). The old `verel-dev-*-secret`
+  defaults let anyone forge an attested PASS. Tool signing moved to its own key domain.
+- Run receipts now **bind the graded result** (verdict + every issue field the gate trusts:
+  severity, confidence, source, plus `errored`) into the signature, so a valid receipt can't be
+  paired with a tampered `Report` (stripping issues, or downgrading a CRITICAL via confidence).
+
+**Untrusted / agent code.**
+- The MCP `verel_build_tool` path now **requires the container tier** (bwrap netns + read-only fs +
+  seccomp) and fails closed without it — no silent fallback to the rlimit-only subprocess tier
+  (which had no network/seccomp isolation → RCE-with-network on bwrap-less hosts).
+- The default seccomp denylist now blocks `clone`/`fork`/`vfork`; the subprocess tier sets
+  `RLIMIT_NPROC`; seccomp no longer silently fails open when libseccomp is absent.
+
+**Network services (memory / control-plane / registry).**
+- Request-body **size caps** + handler timeouts (OOM / slowloris), **constant-time** bearer-token
+  comparison, clean 400s for malformed/deeply-nested bodies, and a **refusal to bind a non-loopback
+  interface without an auth token**.
+- Registry lookup validates the content hash (path traversal); artifact `side_effect` is now signed
+  and cross-origin overwrites are refused.
+
+**Fleet.**
+- Lease terminal writes (`complete`/`release`) are **owner-bound**, not token-only (a readable token
+  could otherwise hijack another task's outcome). `task_id` is validated before it becomes a path /
+  git ref; `git worktree add` is hardened against option injection.
+
+**Behavior changes to know when upgrading:**
+- Cross-machine receipt/tool verification now needs a **shared `VEREL_RUNNER_SECRET` / `VEREL_TOOL_SECRET` /
+  `VEREL_REGISTRY_SECRET`** (no default to fall back on).
+- A server bound to a non-loopback host **must** be given `auth_token=...` or it refuses to start.
+- MCP tool-building **requires bubblewrap**; without it the build fails closed.
+
+309 offline-CI tests (+ `tests/test_security.py`). ruff + mypy clean.
+
 ## 0.28.0 — quorum reads: a point read survives the leader being down
 
 Strong reads (0.27) route to the leader — so a read **fails when the leader is unavailable**. Quorum
