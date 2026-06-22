@@ -27,13 +27,18 @@ from .view import MemoryKind, MemoryRecord, MemoryView, Trust, make_id, make_key
 _MAX_TEXT = 20_000
 _MAX_FIELD = 512
 
-# The reputation ledger (`AuthorTrust`) lives in the SAME store, keyed on (author, "author_trust",
-# "meta:authors"). A client-authored belief whose (subject, predicate, scope) collides with that key
-# would supersede the ledger record via the interference rule — letting any enrolled principal wipe
-# (or otherwise tamper with) ANY author's standing. Reputation is server-managed, never client-
-# writable, so a signed write into this reserved scope is refused. (This is exactly the AuthorTrust
-# forgery/tank the principal layer exists to prevent — see the module docstring.)
-_RESERVED_SCOPE = "meta:authors"
+# A client signed-write may only AUTHOR a plain belief. Server-side pipelines key CONTROL-BEARING
+# state on specific (predicate, scope) conventions in the SAME store: the AuthorTrust reputation
+# ledger (author_trust / meta:authors), the failure-regression ledger (predicate "fails"), and the
+# induced design-rules/schemas (design_rule / schema). A client write that collides with one of those
+# keys would clobber or forge that state via the interference rule (make_id ignores `kind`, so the
+# collision is purely on the normalized subject|predicate|scope). And FAILURE/DESIGN_RULE/SCHEMA/SKILL
+# are EARNED or INDUCED, never directly authored. So a signed write is constrained to kind=FACT with a
+# non-reserved predicate/scope; everything else is server-managed and refused. (Compare on the same
+# strip().lower() normalization `make_key` applies, so a case/whitespace variant can't dodge it.)
+_CLIENT_KIND = MemoryKind.FACT
+_RESERVED_SCOPES = frozenset({"meta:authors"})
+_RESERVED_PREDICATES = frozenset({"author_trust", "fails", "design_rule", "schema"})
 
 
 def _write_payload(key_id: str, subject: str, predicate: str, scope: str, text: str) -> str:
@@ -121,13 +126,16 @@ def authenticated_remember(into: MemoryView, *, subject: str, predicate: str, sc
     if len(text) > _MAX_TEXT or len(subject) > _MAX_FIELD or len(predicate) > _MAX_FIELD \
             or len(scope) > _MAX_FIELD:
         return AuthnWrite(True, False, key_id, False, False, "field too long")
-    # Compare on the NORMALIZED scope: make_key() lowercases/strips, so a case/whitespace variant
-    # (" Meta:Authors ") would otherwise dodge an exact-match guard yet still collide with the
-    # ledger's subj_pred_key. Normalize identically before refusing.
-    if scope.strip().lower() == _RESERVED_SCOPE:
-        # server-managed reputation ledger — a client write here would clobber an author's standing.
+    # A client may only author plain FACTs — control-bearing kinds are earned/induced, not authored.
+    if kind != _CLIENT_KIND:
         return AuthnWrite(True, False, key_id, False, False,
-                          "reserved scope — reputation is server-managed, not client-writable")
+                          f"signed writes may only author facts, not {kind.value} (server-managed)")
+    # Refuse keys that collide with server-managed control state (reputation ledger, failure ledger,
+    # induced rules/schemas). Normalize predicate/scope exactly as make_key does so a case/whitespace
+    # variant can't dodge the guard while still colliding with the target's subj_pred_key.
+    if scope.strip().lower() in _RESERVED_SCOPES or predicate.strip().lower() in _RESERVED_PREDICATES:
+        return AuthnWrite(True, False, key_id, False, False,
+                          "reserved key — that predicate/scope is server-managed, not client-writable")
     author = key_id
     rid = make_id(make_key(subject, predicate, scope))
     existing = into.get(rid)
