@@ -274,7 +274,7 @@ def test_signed_write_cannot_tamper_reputation_ledger():
         r = authenticated_remember(mem, subject=victim, predicate="author_trust", scope=sc,
                                    text="poison", signature=sig, key_id=alice.key_id,
                                    trusted=trusted, author_trust=at)
-        assert r.authenticated and r.written is False and "reserved scope" in r.reason, sc
+        assert r.authenticated and r.written is False and "reserved" in r.reason, sc
         assert at.standing(victim) == (5, 5), sc  # standing untouched
 
     # a normal write to a non-reserved scope still goes through.
@@ -282,6 +282,62 @@ def test_signed_write_cannot_tamper_reputation_ledger():
     ok = authenticated_remember(mem, subject="s", predicate="p", scope="repo:default", text="hi",
                                 signature=sig2, key_id=alice.key_id, trusted=trusted)
     assert ok.authenticated and ok.written
+
+
+def test_signed_writes_cannot_forge_control_records():
+    """Red-team round 4: a signed write may only author a plain FACT with a non-reserved predicate/
+    scope. Control-bearing kinds (FAILURE/DESIGN_RULE/SCHEMA/SKILL) and server-managed predicates
+    ('fails', 'author_trust', 'design_rule', 'schema') are refused — else a principal could clobber
+    the failure-regression ledger or inject forged rules into the consolidation→promotion pipeline."""
+    alice = Principal.generate()
+    trusted = dict([alice.enroll()])
+    mem = _mem()
+
+    def signed(subject, predicate, scope, text, kind):
+        sig = alice.sign_write(subject=subject, predicate=predicate, scope=scope, text=text)
+        return authenticated_remember(mem, subject=subject, predicate=predicate, scope=scope,
+                                      text=text, signature=sig, key_id=alice.key_id, trusted=trusted,
+                                      kind=kind)
+
+    # control-bearing KINDS refused
+    for k in (MemoryKind.FAILURE, MemoryKind.DESIGN_RULE, MemoryKind.SCHEMA, MemoryKind.SKILL):
+        r = signed("s", "p", "repo:x", "x", k)
+        assert r.authenticated and r.written is False and "facts" in r.reason, k
+    # reserved PREDICATES refused (even as a FACT, even in a normal scope, even case/space variants)
+    for pred in ("fails", "author_trust", "design_rule", "schema", " FAILS ", "Author_Trust"):
+        r = signed("fp", pred, "repo:x", "override", MemoryKind.FACT)
+        assert r.written is False and "reserved" in r.reason, pred
+    # a normal FACT still authors fine
+    assert signed("deploy", "how", "team", "page oncall", MemoryKind.FACT).written is True
+
+
+def test_verify_write_fails_closed_without_pynacl(monkeypatch):
+    """Coverage pin: with PyNaCl absent, verify_write must return False (never accept)."""
+    from verel.verdict import keys
+    alice = Principal.generate()
+    trusted = dict([alice.enroll()])
+    sig = alice.sign_write(subject="a", predicate="b", scope="team", text="x")
+    assert verify_write(key_id=alice.key_id, subject="a", predicate="b", scope="team", text="x",
+                        signature=sig, trusted=trusted) is True
+    monkeypatch.setattr(keys, "_NACL", False)
+    assert verify_write(key_id=alice.key_id, subject="a", predicate="b", scope="team", text="x",
+                        signature=sig, trusted=trusted) is False
+
+
+def test_cross_protocol_signature_rejected():
+    """Coverage pin: a receipt signature (domain 'runreceipt'/'gatereceipt') must NOT verify as a
+    memwrite — the domain tag separates the protocols (no cross-protocol replay)."""
+    from verel.verdict import RunReceipt, attest_self
+    from verel.verdict.keys import own_public_key_b64, self_runner_identity
+    # the runner's own ed25519 key, enrolled as a principal, signing a RECEIPT (different domain)
+    kid = self_runner_identity().split(":", 1)[1]
+    trusted = {kid: own_public_key_b64()}
+    rr = RunReceipt(suite_sha="a", inputs_digest="b", coverage_assertion="team",
+                    runner_identity="", result_digest="x", signature="")
+    attest_self(rr)   # an ed25519 receipt signature by the runner's key
+    # present that receipt signature as a memwrite signature for the matching fields → must reject
+    assert verify_write(key_id=kid, subject="a", predicate="b", scope="team", text="x",
+                        signature=rr.signature, trusted=trusted) is False
 
 
 def test_explicit_opt_out_keeps_raw_write_open(tmp_path):
