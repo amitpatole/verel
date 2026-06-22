@@ -29,16 +29,18 @@ _MAX_FIELD = 512
 
 # A client signed-write may only AUTHOR a plain belief. Server-side pipelines key CONTROL-BEARING
 # state on specific (predicate, scope) conventions in the SAME store: the AuthorTrust reputation
-# ledger (author_trust / meta:authors), the failure-regression ledger (predicate "fails"), and the
-# induced design-rules/schemas (design_rule / schema). A client write that collides with one of those
-# keys would clobber or forge that state via the interference rule (make_id ignores `kind`, so the
-# collision is purely on the normalized subject|predicate|scope). And FAILURE/DESIGN_RULE/SCHEMA/SKILL
-# are EARNED or INDUCED, never directly authored. So a signed write is constrained to kind=FACT with a
-# non-reserved predicate/scope; everything else is server-managed and refused. (Compare on the same
-# strip().lower() normalization `make_key` applies, so a case/whitespace variant can't dodge it.)
+# ledger (author_trust / meta:authors), the failure-regression ledger (predicate "fails"), the
+# induced design-rules/schemas (design_rule / schema), and the toolsmith's procedural SKILL registry
+# (predicate "tool" — the executable tool body lives in detail['tool']). A client write that collides
+# with one of those keys would clobber or forge that state via the interference rule (make_id ignores
+# `kind`, so the collision is purely on the normalized subject|predicate|scope — a FACT and a SKILL
+# with the same subj_pred_key share an id). And FAILURE/DESIGN_RULE/SCHEMA/SKILL are EARNED or INDUCED,
+# never directly authored. So a signed write is constrained to kind=FACT with a non-reserved
+# predicate/scope; everything else is server-managed and refused. (Compare on the same strip().lower()
+# normalization `make_key` applies, so a case/whitespace variant can't dodge it.)
 _CLIENT_KIND = MemoryKind.FACT
 _RESERVED_SCOPES = frozenset({"meta:authors"})
-_RESERVED_PREDICATES = frozenset({"author_trust", "fails", "design_rule", "schema"})
+_RESERVED_PREDICATES = frozenset({"author_trust", "fails", "design_rule", "schema", "tool"})
 
 
 def _write_payload(key_id: str, subject: str, predicate: str, scope: str, text: str) -> str:
@@ -139,6 +141,15 @@ def authenticated_remember(into: MemoryView, *, subject: str, predicate: str, sc
     author = key_id
     rid = make_id(make_key(subject, predicate, scope))
     existing = into.get(rid)
+    # STRUCTURAL backstop (root cause, predicate-independent): make_id ignores `kind`, so a client FACT
+    # shares an id with a server-managed record at the same subject|predicate|scope. A client must never
+    # supersede a NON-FACT record (the failure ledger, a SKILL, an induced rule/schema) — this catches
+    # ANY such record regardless of its predicate, so a future server-managed kind can't reopen the
+    # collision class the reserved-predicate denylist chases one entry at a time. (FACT-kind control
+    # state — only the AuthorTrust ledger — is covered by the reserved predicate/scope check above.)
+    if existing is not None and existing.kind != MemoryKind.FACT:
+        return AuthnWrite(True, False, author, False, True,
+                          f"collides with a server-managed {existing.kind.value} record — refused")
     # A principal may neither overwrite NOR corroborate-and-reattribute ANOTHER principal's VERIFIED
     # belief — the author check fires regardless of text equivalence (a case/whitespace variant would
     # otherwise hit the corroboration merge and silently rewrite the stored `author`). Cross-principal

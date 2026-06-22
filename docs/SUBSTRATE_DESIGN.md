@@ -497,3 +497,25 @@ overwrite another principal's verified belief; `AuthorTrust` keys on the verifie
 `candidate`) is earned by a fact-bound attestation; transport confidentiality (TLS) for a routable
 bind; and wiring the MCP `remember` verb to a configured remote principal (today MCP remember is the
 local brain). Key distribution/enrollment is operator-driven (publish pubkeys), same as receipt keys.
+
+### 15.3 Security cadence — the controls the red-team rounds added
+Six adversarial rounds hardened this surface; each found a real issue, fixed between rounds:
+- **AUTHZ (signed-writes mode).** Enrolling principals turns on signed-writes mode (secure-by-default,
+  read live so a later `enroll()` flips it on). A bearer token then means "can connect", not "can
+  author/mutate": the allow-list is `{/write_signed, /recall, /all}`; the raw `/write` and all ten
+  trust/confidence mutators (`/promote`, `/corroborate`, `/contradict`, `/demote`, `/pin`, `/unpin`,
+  `/annotate`, `/set_flags`, `/decay`) return 403. Bearer is checked first (401 before anything).
+- **Replication = cluster channel.** `/apply` and `/replicate` are verbatim upserts (trust + author
+  as-is), so they require a **separate cluster credential** (`X-Cluster-Token`, constant-time),
+  distinct from the client bearer; without it a signed-mode server refuses them. (`MemoryServer(
+  cluster_token=…)`, threaded by `RemoteMemory`/`ReplicaClient`.)
+- **No control-record forgery (root-cause fix).** A signed client write may only AUTHOR a plain
+  `FACT`; `make_id` ignores `kind`, so a client FACT shares an id with any server-managed record at
+  the same `subject|predicate|scope`. Two layers: (a) a **structural backstop** — a client FACT may
+  never supersede an existing **non-FACT** record (failure ledger, SKILL, induced rule/schema),
+  predicate-independent, so a future server-managed kind can't reopen the class; (b) a **reserved
+  predicate/scope denylist** (`author_trust`, `fails`, `design_rule`, `schema`, `tool` / `meta:authors`)
+  for the one FACT-kind control record (the AuthorTrust ledger), normalized exactly as `make_key`.
+- **Verified-belief integrity.** A principal can't overwrite **or** corroborate-and-reattribute
+  another principal's verified belief (the author check fires regardless of text equivalence); signed
+  fields are length-bounded; cross-protocol signature reuse is blocked by the `memwrite` domain tag.
