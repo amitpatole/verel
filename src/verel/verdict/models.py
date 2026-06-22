@@ -62,6 +62,23 @@ class IssueKind(str, Enum):
     BLANK = "blank"
     ERROR_TEXT = "error_text"
     TYPO = "typo"
+    # Audio kinds — mirror audel.models.IssueKind so the hearing adapter is a pure mapping.
+    # Time-grounded (the locator carries a span) rather than pixel-grounded. CLIPPING ("clipping",
+    # audio overload) is deliberately distinct from the vision CLIPPED ("clipped", off-canvas).
+    SILENCE = "silence"
+    CLIPPING = "clipping"
+    LOUDNESS = "loudness"
+    TRUNCATION = "truncation"
+    DROPOUT = "dropout"
+    DECODE_ERROR = "decode_error"
+    MISSING_AUDIO = "missing_audio"
+    DESYNC = "desync"
+    TRANSCRIPT_MISMATCH = "transcript_mismatch"
+    WRONG_LANGUAGE = "wrong_language"
+    NOISE = "noise"
+    CHANNEL_ISSUE = "channel_issue"
+    DURATION = "duration"
+    # Shared cross-domain kinds.
     INTENT_MISMATCH = "intent_mismatch"
     OTHER = "other"
 
@@ -72,6 +89,12 @@ class GraderKind(str, Enum):
     DOM = "dom"
     OCR = "ocr"
     CV = "cv"
+    # Hearing sources (mirror audel.models.IssueSource). DSP/ASR are deterministic grounding
+    # (precise); ACOUSTIC (CLAP) and AUDIO_LLM (transcript/audio-native critique) are advisory.
+    DSP = "dsp"
+    ASR = "asr"
+    ACOUSTIC = "acoustic"
+    AUDIO_LLM = "audio_llm"
     # Functional / semantic graders.
     TEST = "test"
     TYPECHECK = "typecheck"
