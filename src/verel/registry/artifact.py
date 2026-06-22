@@ -16,6 +16,7 @@ import hmac
 from pydantic import BaseModel, Field
 
 from .._secrets import load_secret
+from .._sign import canonical_payload
 
 # Registry artifact signing key — its own trust domain. No public default; see _secrets.load_secret.
 _SECRET = load_secret("VEREL_REGISTRY_SECRET", "registry_secret")
@@ -38,8 +39,9 @@ class SkillArtifact(BaseModel):
 
     def _payload(self) -> str:
         # side_effect is security-relevant (destructive vs read_only gates human review) — bind it
-        # into the signature so it can't be silently flipped on a re-published artifact.
-        return f"{self.content_hash}|{self.name}|{self.origin}|{self.side_effect}"
+        # into the signature so it can't be silently flipped on a re-published artifact. Injective
+        # (length-prefixed) encoding so a "|" in name/origin can't shift a field boundary. See _sign.
+        return canonical_payload(self.content_hash, self.name, self.origin, self.side_effect)
 
     def finalize(self) -> SkillArtifact:
         self.content_hash = content_hash(self.code)

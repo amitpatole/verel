@@ -22,6 +22,7 @@ from enum import Enum
 from pydantic import BaseModel, Field
 
 from .._secrets import load_secret
+from .._sign import canonical_payload
 from ..memory.view import MemoryKind, MemoryRecord, MemoryView, Trust, make_key
 
 # Tool-code signing key — a SEPARATE trust domain from the gate's runner secret (a leak of one must
@@ -56,7 +57,10 @@ class ToolRecord(BaseModel):
     signature: str = ""
 
     def signing_payload(self) -> str:
-        return f"{self.name}|{self.version}|{self.code}"
+        # Injective (length-prefixed) — a bare "|".join let a "|" in the untrusted `code` or the `name`
+        # reuse-key shift the partition, so one signature validated a DIFFERENT (name, code) pair
+        # (e.g. name="a",code="b|2|c" collided with name="a|1|b",code="c"). See verel._sign.
+        return canonical_payload(self.name, str(self.version), self.code)
 
     def sign(self) -> ToolRecord:
         self.signature = hmac.new(_SECRET, self.signing_payload().encode(), hashlib.sha256).hexdigest()

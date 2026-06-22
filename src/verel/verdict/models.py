@@ -15,6 +15,8 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
+from .._sign import canonical_payload
+
 
 class Verdict(str, Enum):
     PASS = "pass"
@@ -91,15 +93,10 @@ class RunReceipt(BaseModel):
     def signing_payload(self) -> str:
         # `alg` is bound FIRST so a signature minted under one scheme can never be replayed as another
         # (algorithm-confusion / downgrade): the bytes a verifier checks differ the moment `alg` differs.
-        #
-        # LENGTH-PREFIXED (netstring `len:data,`) — NOT a bare "|".join. The join was non-injective: a
-        # "|" inside any field (e.g. free-form coverage_assertion) shifted the partition so one signature
-        # was valid for multiple distinct (suite, inputs, coverage, ...) tuples, defeating the binding's
-        # uniqueness. Prefixing each field with its length makes the encoding an injective function of
-        # the field tuple — no field's content can forge a boundary. (Red-team round 2.)
-        fields = [self.alg, self.suite_sha, self.inputs_digest, self.coverage_assertion,
-                  self.runner_identity, self.result_digest]
-        return "".join(f"{len(f)}:{f}," for f in fields)
+        # Canonical (injective, length-prefixed) encoding — a bare "|".join was non-injective and let a
+        # delimiter inside a field shift the binding's partition (red-team round 2). See verel._sign.
+        return canonical_payload(self.alg, self.suite_sha, self.inputs_digest,
+                                 self.coverage_assertion, self.runner_identity, self.result_digest)
 
 
 class Issue(BaseModel):

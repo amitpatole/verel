@@ -329,3 +329,23 @@ the full attack table above is regression-pinned in `tests/`, an exploit script 
 fixed code and shown blocked, **≥3 adversarial red-team rounds come back clean**, and lint + types +
 the full suite are green. Residual design risk named honestly (key distribution/registry deferred;
 rotation lifecycle; dependency/kernel trust).
+
+### 11.6 Red-team log (what the adversarial rounds actually found)
+- **Round 1 (manual):** `_b64d` claimed strict validation but used lax base64 (silent char-discard) →
+  switched to `validate=True`. Robustness, not a forge vector.
+- **Round 2 (independent crypto + impl agents):** **non-injective signing payload** — a bare `"|".join`
+  let a `"|"` inside any field shift the binding partition, so one signature covered multiple distinct
+  field tuples (proven on both tiers). Fixed with a length-prefixed (netstring) canonical encoding.
+  Also tightened the `key_id` charset to strict ASCII (was Unicode-aware `isalnum()`).
+- **Round 3 (independent encoding-attack + holistic agents):** the new encoding proven injective
+  (300k random adversarial tuples, zero collisions). Surfaced the **same `|`-injection class on the
+  adjacent HMAC signers** (`toolsmith.ToolRecord`, `registry.SkillArtifact`) — the ToolRecord one was
+  empirically exploitable (a signature over `(name="a", code="b|2|c")` validated `(name="a|1|b",
+  code="c")`). Fixed by routing all three signers through the shared `verel._sign.canonical_payload`.
+- **Round 4:** target — a clean round (no new findings) before declaring done.
+
+**Named residual (deferred defense-in-depth):** the per-run replay `inputs_digests` binding is wired
+only at the CI pipeline site; `memory.promotion` and `toolsmith.smith` gate a self-minted receipt in
+the same call (so there is no external receipt to replay), and cross-rule/cross-tool replay is already
+blocked by the coverage-assertion check. Wiring an *independently computed* expected input digest at
+those two sites is deferred — passing the receipt's own digest there would be a no-op (self-comparison).
