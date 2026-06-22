@@ -66,7 +66,7 @@ class TransferReport:
 
 def measure_transfer(skills: list[SkillArtifact],
                      targets: dict[str, dict[str, list[ToolCase]]],
-                     *, sandbox: bool = True,
+                     *, isolation: str = "container", sandbox: bool | None = None,
                      log=lambda m: None) -> TransferReport:
     """skills: verified artifacts from source tenant(s).
     targets: {tenant_name: {capability_or_name: [target held-out cases]}}.
@@ -82,7 +82,7 @@ def measure_transfer(skills: list[SkillArtifact],
                 log(f"  skip: {tenant} has no held-out cases for {skill.name!r} (not counted)")
                 continue
             reg = ToolRegistry(LocalMemory(), scope=f"tenant:{tenant}")
-            res = import_skill(skill, reg, target_cases=cases, sandbox=sandbox)
+            res = import_skill(skill, reg, target_cases=cases, isolation=isolation, sandbox=sandbox)
             report.outcomes.append(TransferOutcome(skill.name, tenant, res.reverified, res.score))
             log(f"  {skill.name} -> {tenant}: {'TRANSFER' if res.reverified else 'no'} ({res.score:.0%})")
     return report
