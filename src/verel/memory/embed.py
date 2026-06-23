@@ -83,9 +83,12 @@ class OpenAIEmbedder:
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         payload = json.dumps({"model": self.model, "input": texts}).encode()
+        if not str(self.base_url).lower().startswith(("http://", "https://")):
+            # never ship the bearer key to a file:/ or custom-scheme target via a misconfigured base_url
+            raise RuntimeError(f"embeddings base_url must be http(s), got {self.base_url!r}")
         req = urllib.request.Request(f"{self.base_url}/embeddings", data=payload,
                                      headers={"Authorization": f"Bearer {self._key()}",
                                               "Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=60) as r:
+        with urllib.request.urlopen(req, timeout=60) as r:  # nosec B310 — scheme guarded http(s) above
             data = json.load(r)
         return [e["embedding"] for e in data["data"]]

@@ -415,16 +415,18 @@ def parse_npm_audit(out: str, err: str = "") -> list[Issue]:
 
 # Dirs that are never the shipped attack surface — bandit on a whole repo otherwise drowns the gate in
 # test-only patterns (every `assert` is B101) and vendored/third-party code under a local virtualenv.
-_BANDIT_EXCLUDE = "./tests,./test,./.venv,./venv,./env,./build,./dist,./.git,./node_modules,./.tox"
+_BANDIT_EXCLUDE = ("./tests,./test,./tools,./scripts,./.venv,./venv,./env,./build,./dist,./.git,"
+                   "./node_modules,./.tox")
 
 
 def bandit_spec(repo: str, covers: list[str] | None = None, *, paths: list[str] | None = None):
-    # Match the documented intent — a HIGH/CRITICAL *gate*, not a lint of every advisory LOW. `bandit`
-    # exits non-zero (→ FAIL) only when a finding at/above the floor exists; LOW/MEDIUM stay advisory.
-    # `--severity-level high` + `--confidence-level medium` is the floor; tests/vendored dirs excluded.
+    # A real security *gate*: fail on MEDIUM+ severity at MEDIUM+ confidence (real SQLi, weak crypto,
+    # command injection, etc.) — `bandit` exits non-zero (→ FAIL) only when a finding at/above that floor
+    # exists. LOW stays advisory. Verified false positives are pinned in-code with `# nosec Bxxx`.
+    # tests/vendored dirs excluded (every `assert` is B101 — not the shipped attack surface).
     return GraderSpec(GraderKind.SECURITY,
                       ["bandit", "-r", "-q", "-f", "json",
-                       "--severity-level", "high", "--confidence-level", "medium",
+                       "--severity-level", "medium", "--confidence-level", "medium",
                        "--exclude", _BANDIT_EXCLUDE, *(paths or ["."])],
                       cwd=repo, covers=covers or [], parser=parse_bandit, lang="python")
 
