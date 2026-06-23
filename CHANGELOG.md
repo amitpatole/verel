@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.37.0 — mTLS, certificate pinning, per-IP fairness (closes the §15.4 transport residuals)
+
+Closes the three code-closeable residuals named in v0.36.0 (§15.4), uniformly across the brain, lease
+authority, and registry via `verel.transport`:
+
+- **mTLS** — servers take `client_ca=` (require a client certificate signed by it, `CERT_REQUIRED`):
+  transport-layer client authentication beneath the bearer/signature layers, so a stolen bearer token
+  alone no longer connects. Clients present `client_cert=`/`client_key=`. `client_ca` without a server
+  cert fails closed.
+- **Certificate pinning** — clients take `pin_sha256=` (`transport.cert_sha256()` computes it): reject
+  any server leaf cert outside the pinned set even if a trusted CA signed it (defeats a mis-issued or
+  compromised-but-trusted CA). Additive to CA + hostname verification; pins are validated as 64-hex at
+  build time (a malformed pin fails loud, never a silent never-match).
+- **Per-source-IP fairness** — servers take `max_per_ip=` bounding how many of the global
+  `max_connections` slots one source IP may hold (off by default; for routable/exposed binds).
+- **MCP wiring** — `VEREL_BRAIN_CLIENT_CERT` / `VEREL_BRAIN_CLIENT_KEY` / `VEREL_BRAIN_PIN` (operator
+  env only), via a shared `_remote_tls_kwargs()`.
+
+**Honest residuals that stay operational/inherent** (§15.5): endpoint trust (closed at the application
+layer by `verel_verify` on the ed25519 receipt — a malicious *configured* server's `trust`/`author`
+claims), certificate issuance/rotation (operator-run; Verel is not a CA), per-IP is a concurrency
+bound not a rate limiter, and the stdlib/OS/kernel/unknown-unknowns no audit removes.
+
+Hardened through a **3-round adversarial red-team** (one LOW pin-validation footgun fixed; the last
+round came back empty). 35 tests in `tests/test_brain_tls.py`. See `docs/SUBSTRATE_DESIGN.md` §15.5.
+
 ## 0.36.0 — TLS for routable brain/lease/registry binds
 
 Roadmap item 3: transport confidentiality on any non-loopback bind, fail closed, with loopback staying
