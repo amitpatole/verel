@@ -45,6 +45,13 @@ def _doctor() -> int:
     except ImportError:
         m = False
     print(f"  {ok(m)}mem0 (rented memory backend) — `pip install verel[mem0]`")
+
+    import os as _os
+
+    from .memory.registry import known_backends
+    backend = _os.environ.get("VEREL_MEMORY_BACKEND") or (
+        "remote" if _os.environ.get("VEREL_BRAIN_URL") else "local")
+    print(f"  -> memory backend: {backend}  (available: {', '.join(known_backends())})")
     return 0
 
 

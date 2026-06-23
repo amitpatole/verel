@@ -14,7 +14,7 @@ from .consolidate import (
     induce_hierarchy,
     induce_schemas,
 )
-from .embed import Embedder, HashEmbedder, OpenAIEmbedder, cosine
+from .embed import Embedder, HashEmbedder, OpenAIEmbedder, cosine, embedder_from_env
 from .failure_ledger import FailureLedger, regression_report
 from .hosted import MemoryServer, RemoteMemory, ReplicaClient
 from .lattice import ScopeLattice, graduate, lattice_recall
@@ -35,6 +35,7 @@ from .promotion import (
     PromotionResult,
     evaluate_rule,
 )
+from .registry import known_backends, load_backend
 from .replicated import (
     AntiEntropy,
     NotLeaderError,
@@ -96,10 +97,13 @@ __all__ = [
     "FailureLedger",
     "regression_report",
     "LocalMemory",
+    "load_backend",
+    "known_backends",
     "Embedder",
     "HashEmbedder",
     "OpenAIEmbedder",
     "cosine",
+    "embedder_from_env",
     "Mem0Memory",
     "make_ollama_mem0",
     "EvalCase",

@@ -10,6 +10,28 @@ Verel is configured by a few environment variables — there is no config file.
 | `VEREL_REGISTRY_SECRET` | *dev value* | Signing secret for the skill registry — **set a real one in production**. |
 | `VEREL_RUNNER_SECRET` | *dev value* | Grader-runner signing identity — **set a real one in production**. |
 
+## Memory backend
+
+The shared **brain** (verified memory) is pluggable. Pick a backend by name; each reads its own
+connection env. Built-in names are `local` (default) and `remote`; external-DB backends ship behind
+extras in later releases (`pip install verel[<db>]`) and register under the same selector.
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `VEREL_MEMORY_BACKEND` | `local` | Backend to use — `local`, `remote`, or any registered name. If unset but `VEREL_BRAIN_URL` is set, defaults to `remote` (back-compat). |
+| `VEREL_MEMORY_STORE` | `~/.config/verel/brain.db` | SQLite path for the `local` backend (`:memory:` for ephemeral). |
+| `VEREL_EMBEDDER` | `lexical` | Recall relevance signal — `none`/`lexical` (token overlap, zero-config), `hash` (offline vectors), or `openai` (semantic; needs an OpenAI key). |
+| `VEREL_BRAIN_URL` | — | `remote` backend: URL of a `MemoryServer` to share one brain across machines. |
+| `VEREL_BRAIN_TOKEN` | — | Bearer token for the remote brain. |
+| `VEREL_CLUSTER_TOKEN` | — | Replication-channel credential for the remote brain. |
+| `VEREL_BRAIN_CACERT` | — | CA bundle that signed the remote brain's TLS cert. |
+| `VEREL_BRAIN_CLIENT_CERT` / `VEREL_BRAIN_CLIENT_KEY` | — | Client cert/key for mTLS to the remote brain. |
+| `VEREL_BRAIN_PIN` | — | Pin the remote brain's cert SHA-256 (comma-separated for a set). |
+| `VEREL_BRAIN_INSECURE` | `0` | Explicit opt-out letting a token ride a cleartext hop (only behind a TLS-terminating proxy). |
+| `VEREL_PRINCIPAL_SEED` | — | 64 hex chars: the identity that authors *signed* beliefs on a remote brain. |
+
+`verel doctor` prints the selected backend and the available ones.
+
 ## LLM keys
 
 - **Ollama Cloud** (default): key at `~/.config/ollama/key`, model `qwen3-coder:480b`.

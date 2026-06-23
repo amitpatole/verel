@@ -34,12 +34,6 @@ def _err(msg: str) -> dict:
     return {"error": msg}
 
 
-def _env_truthy(name: str) -> bool:
-    """An env flag is ON only for an explicit truthy token — so a stray empty/`0`/`false` value can't
-    silently flip a security default (e.g. VEREL_BRAIN_INSECURE) open."""
-    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
-
-
 def _resolve_attest(choice: str) -> tuple[str, str | None]:
     """Map the requested attest mode to a concrete scheme. 'auto' → ed25519 when verel[attest] is
     installed, else hmac. Explicit 'ed25519' FAILS CLOSED (returns an error) when unavailable rather
@@ -287,33 +281,25 @@ def _tool_ci_check(args: dict) -> dict:
     }
 
 
-def _config_dir() -> str:
-    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
-    return os.path.join(base, "verel")
-
-
 def _brain():
-    """The shared verified brain — local by default, REMOTE when configured. All read paths (recall)
-    use this. Config is operator env, NOT agent-controllable (a tool arg can't repoint it):
-      - VEREL_BRAIN_URL set → a hosted MemoryServer over HTTP(S) (RemoteMemory), with VEREL_BRAIN_TOKEN
-        (bearer) and VEREL_CLUSTER_TOKEN (replication) if set. For TLS: VEREL_BRAIN_CACERT points at the
-        CA bundle that signed the brain's cert; VEREL_BRAIN_CLIENT_CERT/VEREL_BRAIN_CLIENT_KEY present a
-        client cert for mTLS; VEREL_BRAIN_PIN pins the server cert sha256 (comma-separated for a set);
-        VEREL_BRAIN_INSECURE=1 is the explicit opt-out that lets a token ride a cleartext hop (only when
-        a TLS-terminating proxy already encrypts it). This is what lets a fleet on different machines
-        draw from ONE authenticated brain.
-      - else → a per-install persistent LocalMemory (VEREL_MEMORY_STORE or ~/.config/verel/brain.db)."""
-    url = os.environ.get("VEREL_BRAIN_URL")
-    if url:
-        from .memory import RemoteMemory
+    """The shared verified brain — selected by operator env, NOT agent-controllable (a tool arg can't
+    repoint it). Selection (`src/verel/memory/registry.py`):
+      - VEREL_MEMORY_BACKEND chooses the backend: local (default) | remote | postgres | lancedb | redis
+        (plus any third-party plugin registered under the `verel.memory_backends` entry-point group).
+        Each backend's `from_env()` reads its own connection env and lazy-imports its extra.
+      - Back-compat: if VEREL_MEMORY_BACKEND is unset but VEREL_BRAIN_URL is set, the brain is `remote`.
+    Remote-brain env: VEREL_BRAIN_URL (a MemoryServer over HTTP(S)); VEREL_BRAIN_TOKEN (bearer) and
+    VEREL_CLUSTER_TOKEN (replication); for TLS — VEREL_BRAIN_CACERT (CA bundle), VEREL_BRAIN_CLIENT_CERT/
+    VEREL_BRAIN_CLIENT_KEY (mTLS), VEREL_BRAIN_PIN (server cert sha256 pin, comma-separated for a set),
+    VEREL_BRAIN_INSECURE=1 (explicit opt-out letting a token ride a cleartext hop behind a TLS proxy).
+    Local-brain env: VEREL_MEMORY_STORE (else ~/.config/verel/brain.db). This is what lets a fleet on
+    different machines draw from ONE shared store."""
+    from .memory.registry import load_backend
 
-        return RemoteMemory(url, **_remote_tls_kwargs())
-    from .memory import LocalMemory
-
-    path = os.environ.get("VEREL_MEMORY_STORE") or os.path.join(_config_dir(), "brain.db")
-    if path != ":memory:":
-        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    return LocalMemory(path)
+    name = os.environ.get("VEREL_MEMORY_BACKEND")
+    if not name:
+        name = "remote" if os.environ.get("VEREL_BRAIN_URL") else "local"
+    return load_backend(name)
 
 
 def _remote_principal():
@@ -332,24 +318,8 @@ def _remote_principal():
         raise ValueError(f"VEREL_PRINCIPAL_SEED must be 64 hex chars: {e}") from e
     if len(seed) != 32:
         raise ValueError("VEREL_PRINCIPAL_SEED must decode to exactly 32 bytes")
-    rmem = RemoteMemory(url, **_remote_tls_kwargs())
+    rmem = RemoteMemory(url, **RemoteMemory.env_kwargs())
     return rmem, Principal(seed)
-
-
-def _remote_tls_kwargs() -> dict:
-    """The RemoteMemory connection kwargs from operator env (one source of truth for both the read brain
-    and the authoring principal): bearer/cluster tokens, TLS server CA, mTLS client cert/key, cert pin,
-    and the cleartext opt-out. A comma-separated VEREL_BRAIN_PIN becomes a set of allowed fingerprints."""
-    pin = os.environ.get("VEREL_BRAIN_PIN")
-    return {
-        "auth_token": os.environ.get("VEREL_BRAIN_TOKEN"),
-        "cluster_token": os.environ.get("VEREL_CLUSTER_TOKEN"),
-        "cafile": os.environ.get("VEREL_BRAIN_CACERT"),
-        "client_cert": os.environ.get("VEREL_BRAIN_CLIENT_CERT"),
-        "client_key": os.environ.get("VEREL_BRAIN_CLIENT_KEY"),
-        "pin_sha256": [p for p in pin.split(",") if p.strip()] if pin else None,
-        "insecure": _env_truthy("VEREL_BRAIN_INSECURE"),
-    }
 
 
 def _evidence_verifies(evidence) -> tuple[bool, str]:
@@ -396,8 +366,8 @@ def _tool_recall(args: dict) -> dict:
             return _err(f"unknown kind {kraw!r}")
 
     try:
-        mem = _brain()   # may fail closed: e.g. a token configured for a cleartext routable URL
-    except ValueError as e:
+        mem = _brain()   # may fail closed: cleartext-routable token (ValueError) or misconfigured
+    except (ValueError, RuntimeError) as e:   # backend (RuntimeError, e.g. remote with no URL)
         return _err(str(e))
     import urllib.error
     try:
@@ -493,7 +463,10 @@ def _tool_remember(args: dict) -> dict:
     if is_reserved_key(predicate, scope):
         return _err("reserved key — that predicate/scope is server-managed, not client-writable")
 
-    mem = _brain()
+    try:
+        mem = _brain()   # fail closed on a cleartext-routable token (ValueError) or misconfigured
+    except (ValueError, RuntimeError) as e:   # backend (RuntimeError, e.g. remote with no URL)
+        return _err(str(e))
     rid = make_id(make_key(subject, predicate, scope))
     existing = mem.get(rid)
     # STRUCTURAL backstop (mirror authenticated_remember): make_id ignores `kind`, so a remember FACT
