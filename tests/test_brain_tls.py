@@ -278,6 +278,53 @@ def test_connection_slot_released_after_request(tmp_path):
         srv.stop()
 
 
+def test_max_connections_must_be_positive(tmp_path):
+    """A non-positive cap would silently drop every connection (a hang) — reject it with a clear error."""
+    with pytest.raises(ValueError, match="max_connections"):
+        MemoryServer(db_path=str(tmp_path / "b.db"), max_connections=0)
+
+
+def test_verify_request_false_does_not_over_release_slots():
+    """Slot release is paired in the worker thread, not shutdown_request — so the verify_request()==False
+    path (shutdown_request without a prior acquire) can't over-release the BoundedSemaphore (red-team R4a,
+    latent). Pins the accounting against a future verify_request override."""
+    import socket
+    import threading
+    import time
+    from http.server import BaseHTTPRequestHandler
+
+    from verel.transport import TLSThreadingHTTPServer
+
+    class RejectAll(TLSThreadingHTTPServer):
+        def verify_request(self, request, client_address):
+            return False   # socketserver calls shutdown_request WITHOUT process_request
+
+    class H(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+
+    srv = RejectAll(("127.0.0.1", 0), H, max_connections=4)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        host, port = srv.server_address[:2]
+        for _ in range(6):
+            try:
+                s = socket.create_connection((host, port))
+                s.sendall(b"GET / HTTP/1.0\r\n\r\n")
+                s.recv(16)
+                s.close()
+            except OSError:
+                pass
+        time.sleep(0.3)
+        assert srv._slots._value == 4   # balanced — no over-release despite rejected requests
+    finally:
+        srv.shutdown()
+
+
 def test_client_opener_ignores_ambient_proxy(tmp_path, monkeypatch):
     """The client must NOT honor HTTP_PROXY/ALL_PROXY — doing so would ship Authorization to the proxy
     in cleartext even for a loopback http target (red-team R2a, MEDIUM). A dead proxy in env must not
