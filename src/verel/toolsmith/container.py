@@ -43,7 +43,7 @@ def _bwrap_cmd() -> list[str]:
     for p in ("/lib64", "/etc"):
         if os.path.exists(p):
             cmd += ["--ro-bind", p, p]
-    cmd += ["--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--setenv", "PATH", "/usr/bin"]
+    cmd += ["--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--setenv", "PATH", "/usr/bin"]  # nosec B108 — bwrap arg mounting a fresh tmpfs INSIDE the sandbox, not a host temp file
     return cmd
 
 
