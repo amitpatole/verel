@@ -28,6 +28,19 @@ def cert(tmp_path_factory):
     return str(crt), str(key)
 
 
+@pytest.fixture(scope="module")
+def client_id(tmp_path_factory):
+    """A client cert+key for mTLS — self-signed, used as both the presented client cert and (as its own
+    CA) the server's `client_ca` trust anchor."""
+    d = tmp_path_factory.mktemp("mtls")
+    crt, key = d / "client.pem", d / "client.key"
+    subprocess.run(
+        ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+         "-keyout", str(key), "-out", str(crt), "-subj", "/CN=verel-client"],
+        check=True, capture_output=True)
+    return str(crt), str(key)
+
+
 # ---- server bind policy (fail closed on a routable host) ----
 
 def test_routable_bind_without_auth_token_refuses(tmp_path):
@@ -339,3 +352,139 @@ def test_client_opener_ignores_ambient_proxy(tmp_path, monkeypatch):
         assert [h.text for h in client.recall("direct", scope="team")] == ["direct"]
     finally:
         srv.stop()
+
+
+# ---- mTLS: the server authenticates the client at the transport layer (item 3 residual) ----
+
+def test_mtls_requires_a_client_cert(cert, client_id, tmp_path):
+    """With client_ca set, a client must present a cert signed by it — a client without one is rejected
+    (under TLS 1.3 the server enforces this just after the handshake, surfacing as an SSL error); the
+    enrolled client gets through."""
+    import ssl
+    import urllib.error
+
+    server_crt, server_key = cert
+    client_crt, client_key = client_id
+    srv = MemoryServer(db_path=str(tmp_path / "b.db"), host="127.0.0.1",
+                       certfile=server_crt, keyfile=server_key, client_ca=client_crt).start()
+    try:
+        nocert = RemoteMemory(srv.url, cafile=server_crt)        # no client cert presented
+        with pytest.raises((urllib.error.URLError, ssl.SSLError)):
+            nocert.recall("x", scope="team")
+        ok = RemoteMemory(srv.url, cafile=server_crt, client_cert=client_crt, client_key=client_key)
+        ok.write(MemoryRecord(kind=MemoryKind.FACT, subject="s", predicate="p", text="mtls",
+                              scope="team"))
+        assert [h.text for h in ok.recall("mtls", scope="team")] == ["mtls"]
+    finally:
+        srv.stop()
+
+
+def test_mtls_client_ca_without_server_cert_refused(tmp_path, client_id):
+    """mTLS is meaningless without the server also presenting a cert — fail closed at construction."""
+    with pytest.raises(ValueError, match="mTLS"):
+        MemoryServer(db_path=str(tmp_path / "b.db"), client_ca=client_id[0])
+
+
+# ---- certificate pinning (item 3 residual: pinning now first-class) ----
+
+def test_pinning_accepts_the_pinned_cert(cert, tmp_path):
+    from verel.transport import cert_sha256
+
+    server_crt, server_key = cert
+    srv = MemoryServer(db_path=str(tmp_path / "b.db"), host="127.0.0.1",
+                       certfile=server_crt, keyfile=server_key).start()
+    try:
+        c = RemoteMemory(srv.url, cafile=server_crt, pin_sha256=cert_sha256(server_crt))
+        c.write(MemoryRecord(kind=MemoryKind.FACT, subject="s", predicate="p", text="pinned",
+                             scope="team"))
+        assert [h.text for h in c.recall("pinned", scope="team")] == ["pinned"]
+    finally:
+        srv.stop()
+
+
+def test_pinning_rejects_an_unpinned_cert(cert, tmp_path):
+    """A cert outside the pinned set is rejected even though the CA (cafile) trusts it."""
+    import urllib.error
+
+    server_crt, server_key = cert
+    srv = MemoryServer(db_path=str(tmp_path / "b.db"), host="127.0.0.1",
+                       certfile=server_crt, keyfile=server_key).start()
+    try:
+        c = RemoteMemory(srv.url, cafile=server_crt, pin_sha256="00" * 32)   # bogus pin
+        with pytest.raises(urllib.error.URLError):
+            c.recall("x", scope="team")
+    finally:
+        srv.stop()
+
+
+def test_cert_sha256_matches_openssl(cert):
+    import subprocess
+
+    from verel.transport import cert_sha256
+
+    crt, _ = cert
+    out = subprocess.run(["openssl", "x509", "-in", crt, "-noout", "-fingerprint", "-sha256"],
+                         capture_output=True, text=True, check=True).stdout
+    expected = out.split("=", 1)[1].strip().replace(":", "").lower()
+    assert cert_sha256(crt) == expected
+
+
+# ---- per-source-IP fairness (item 3 residual: one source can't monopolize the global cap) ----
+
+def test_per_ip_cap_drops_over_one_sources_share(tmp_path):
+    import socket
+    import time
+
+    srv = MemoryServer(db_path=str(tmp_path / "b.db"), host="127.0.0.1",
+                       max_connections=10, max_per_ip=2).start()
+    try:
+        host, port = srv._httpd.server_address[:2]
+        held = [socket.create_connection((host, port)) for _ in range(2)]   # fill 127.0.0.1's share
+        try:
+            time.sleep(0.3)
+            over = socket.create_connection((host, port))   # same IP, over its per-IP share
+            over.settimeout(3)
+            try:
+                assert over.recv(16) == b""        # dropped though the global cap (10) isn't full
+            finally:
+                over.close()
+        finally:
+            for s in held:
+                s.close()
+    finally:
+        srv.stop()
+
+
+def test_max_per_ip_must_be_positive(tmp_path):
+    with pytest.raises(ValueError, match="max_per_ip"):
+        MemoryServer(db_path=str(tmp_path / "b.db"), max_per_ip=0)
+
+
+# ---- red-team round-2 hardening: malformed pins must fail LOUD, not become a silent never-match ----
+
+def test_malformed_pin_rejected_at_build_time():
+    """An empty/typo'd pin must raise at construction — never silently never-match (a typo) or seed a
+    fail-open empty-string primitive (red-team R2b, LOW)."""
+    from verel.transport import build_opener
+
+    for bad in ["", " ", ":::", "00" * 31, "zz" * 32, []]:
+        with pytest.raises(ValueError):
+            build_opener(None, pin_sha256=bad)
+
+
+def test_valid_pin_accepts_openssl_and_plain_forms():
+    """A real 64-hex sha256, with or without colons / mixed case, is accepted and normalized."""
+    from verel.transport import build_opener
+
+    build_opener(None, pin_sha256="Aa" * 32)            # mixed case, no colons
+    build_opener(None, pin_sha256=":".join(["ab"] * 32))  # openssl colon form
+
+
+def test_cert_sha256_on_non_pem_is_a_clean_error(tmp_path):
+    """A DER/binary file passed to cert_sha256 raises a clear ValueError, not a raw UnicodeDecodeError."""
+    from verel.transport import cert_sha256
+
+    der = tmp_path / "cert.der"
+    der.write_bytes(b"\x30\x82\x01\x00binary-not-pem")
+    with pytest.raises(ValueError):
+        cert_sha256(str(der))

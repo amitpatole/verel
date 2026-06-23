@@ -596,3 +596,40 @@ protects the hop, not the endpoints — a malicious *configured* server still re
 endpoint-independent integrity). Certificate *issuance/rotation* is operator-driven (same posture as
 key distribution). Client cert *pinning* beyond CA verification is available via a custom `ssl_context`
 but not a first-class field yet.
+
+### 15.5 Closing the §15.4 transport residuals — mTLS, cert pinning, per-IP fairness
+
+§15.4 named three residuals on the routable-bind surface; this closes the code-closeable ones and is
+honest about what stays operational. All three apply uniformly to the brain, lease authority, and
+registry via the shared `verel.transport`.
+
+- **mTLS (mutual TLS) — closes "the server doesn't cryptographically authenticate the client".** A
+  server given `client_ca=` sets `CERT_REQUIRED` and verifies that every client presents a certificate
+  signed by that CA — transport-layer client authentication beneath the bearer/signature layers (a
+  stolen bearer token alone no longer connects). Clients present `client_cert=`/`client_key=`. mTLS
+  requires the server to also present its own cert (else construction fails closed). Under TLS 1.3 the
+  server enforces the client cert just after the handshake, so a certless client is rejected on first
+  exchange.
+- **Certificate pinning — closes "pinning is not first-class".** Clients take `pin_sha256=` (one digest
+  or a set; `transport.cert_sha256(certfile)` computes it). The client rejects any server leaf cert
+  whose sha256 is not pinned, *even if a trusted CA signed it* — defeating a mis-issued or
+  compromised-but-trusted CA. Additive to normal CA + hostname verification.
+- **Per-source-IP fairness — closes "no per-IP rate-limiting beyond the connection cap".** A server
+  given `max_per_ip=` bounds how many of the global `max_connections` slots one source IP may hold, so
+  a single routable peer can't monopolize the server. Off by default (all loopback traffic shares
+  `127.0.0.1`, so a per-IP cap there would throttle legit local concurrency) — it is meant for
+  routable/exposed binds. The MCP layer threads `VEREL_BRAIN_CLIENT_CERT`/`VEREL_BRAIN_CLIENT_KEY`/
+  `VEREL_BRAIN_PIN` (operator env only).
+
+**Still operational / inherent (cannot be "closed" in code — stated honestly):**
+- **Endpoint trust.** mTLS + pinning close the *transport* identity of both ends, but a fully malicious
+  *configured* server can still return arbitrary `trust`/`author` JSON — that is an application-layer
+  trust property, closed where it matters by `verel_verify` on the ed25519 receipt (no producer trust).
+- **Certificate issuance & rotation** remain an operator responsibility, as for every TLS service
+  (mint with `openssl req -x509 -newkey rsa:2048 -nodes -keyout k.pem -out c.pem -addext
+  subjectAltName=...`; rotate by replacing cert/key and restarting; pin the new leaf). Verel does not
+  run a CA.
+- **Per-IP fairness is a concurrency bound, not a rate limiter**, and an attacker controlling many
+  source IPs is unaffected — as with any per-IP control.
+- The standing unknowns no audit removes: the `ssl`/`urllib` stdlib, the OS cert store, the kernel, and
+  unknown unknowns.

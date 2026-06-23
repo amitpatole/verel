@@ -297,18 +297,17 @@ def _brain():
     use this. Config is operator env, NOT agent-controllable (a tool arg can't repoint it):
       - VEREL_BRAIN_URL set → a hosted MemoryServer over HTTP(S) (RemoteMemory), with VEREL_BRAIN_TOKEN
         (bearer) and VEREL_CLUSTER_TOKEN (replication) if set. For TLS: VEREL_BRAIN_CACERT points at the
-        CA bundle that signed the brain's cert; VEREL_BRAIN_INSECURE=1 is the explicit opt-out that lets
-        a token ride a cleartext hop (only when a TLS-terminating proxy already encrypts it). This is
-        what lets a fleet on different machines draw from ONE authenticated brain.
+        CA bundle that signed the brain's cert; VEREL_BRAIN_CLIENT_CERT/VEREL_BRAIN_CLIENT_KEY present a
+        client cert for mTLS; VEREL_BRAIN_PIN pins the server cert sha256 (comma-separated for a set);
+        VEREL_BRAIN_INSECURE=1 is the explicit opt-out that lets a token ride a cleartext hop (only when
+        a TLS-terminating proxy already encrypts it). This is what lets a fleet on different machines
+        draw from ONE authenticated brain.
       - else → a per-install persistent LocalMemory (VEREL_MEMORY_STORE or ~/.config/verel/brain.db)."""
     url = os.environ.get("VEREL_BRAIN_URL")
     if url:
         from .memory import RemoteMemory
 
-        return RemoteMemory(url, auth_token=os.environ.get("VEREL_BRAIN_TOKEN"),
-                            cluster_token=os.environ.get("VEREL_CLUSTER_TOKEN"),
-                            cafile=os.environ.get("VEREL_BRAIN_CACERT"),
-                            insecure=_env_truthy("VEREL_BRAIN_INSECURE"))
+        return RemoteMemory(url, **_remote_tls_kwargs())
     from .memory import LocalMemory
 
     path = os.environ.get("VEREL_MEMORY_STORE") or os.path.join(_config_dir(), "brain.db")
@@ -333,11 +332,24 @@ def _remote_principal():
         raise ValueError(f"VEREL_PRINCIPAL_SEED must be 64 hex chars: {e}") from e
     if len(seed) != 32:
         raise ValueError("VEREL_PRINCIPAL_SEED must decode to exactly 32 bytes")
-    rmem = RemoteMemory(url, auth_token=os.environ.get("VEREL_BRAIN_TOKEN"),
-                        cluster_token=os.environ.get("VEREL_CLUSTER_TOKEN"),
-                        cafile=os.environ.get("VEREL_BRAIN_CACERT"),
-                        insecure=_env_truthy("VEREL_BRAIN_INSECURE"))
+    rmem = RemoteMemory(url, **_remote_tls_kwargs())
     return rmem, Principal(seed)
+
+
+def _remote_tls_kwargs() -> dict:
+    """The RemoteMemory connection kwargs from operator env (one source of truth for both the read brain
+    and the authoring principal): bearer/cluster tokens, TLS server CA, mTLS client cert/key, cert pin,
+    and the cleartext opt-out. A comma-separated VEREL_BRAIN_PIN becomes a set of allowed fingerprints."""
+    pin = os.environ.get("VEREL_BRAIN_PIN")
+    return {
+        "auth_token": os.environ.get("VEREL_BRAIN_TOKEN"),
+        "cluster_token": os.environ.get("VEREL_CLUSTER_TOKEN"),
+        "cafile": os.environ.get("VEREL_BRAIN_CACERT"),
+        "client_cert": os.environ.get("VEREL_BRAIN_CLIENT_CERT"),
+        "client_key": os.environ.get("VEREL_BRAIN_CLIENT_KEY"),
+        "pin_sha256": [p for p in pin.split(",") if p.strip()] if pin else None,
+        "insecure": _env_truthy("VEREL_BRAIN_INSECURE"),
+    }
 
 
 def _evidence_verifies(evidence) -> tuple[bool, str]:
