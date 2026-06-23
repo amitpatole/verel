@@ -27,6 +27,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from ..transport import (
+    _DEFAULT_MAX_CONNECTIONS,
     TLSThreadingHTTPServer,
     build_opener,
     build_server_context,
@@ -122,13 +123,14 @@ class ControlPlaneServer:
 
     def __init__(self, db_path: str | Path, *, host: str = "127.0.0.1", port: int = 0,
                  auth_token: str | None = None, certfile: str | Path | None = None,
-                 keyfile: str | Path | None = None, ssl_context: ssl.SSLContext | None = None):
+                 keyfile: str | Path | None = None, ssl_context: ssl.SSLContext | None = None,
+                 max_connections: int = _DEFAULT_MAX_CONNECTIONS):
         ssl_context = build_server_context(certfile, keyfile, ssl_context)
         self._tls = ssl_context is not None
         enforce_bind_policy(host, auth_token=auth_token, tls=self._tls, service="lease authority")
         self.store = SqliteLeaseStore(db_path)
         self._httpd = TLSThreadingHTTPServer((host, port), _make_handler(self.store, auth_token),
-                                             ssl_context=ssl_context)
+                                             ssl_context=ssl_context, max_connections=max_connections)
         self._thread: threading.Thread | None = None
 
     @property
