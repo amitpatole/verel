@@ -290,6 +290,38 @@ class RemoteMemory:
         guard_cleartext_secret(self.base, has_secret=bool(auth_token or cluster_token),
                                insecure=insecure)
 
+    @staticmethod
+    def env_kwargs() -> dict:
+        """The connection kwargs from operator env — ONE source of truth for both the read brain and
+        the authoring principal: bearer/cluster tokens, TLS server CA, mTLS client cert/key, cert pin
+        (comma-separated → a set of allowed fingerprints), and the cleartext opt-out."""
+        import os
+
+        pin = os.environ.get("VEREL_BRAIN_PIN")
+        insecure = os.environ.get("VEREL_BRAIN_INSECURE", "").strip().lower() in (
+            "1", "true", "yes", "on")
+        return {
+            "auth_token": os.environ.get("VEREL_BRAIN_TOKEN"),
+            "cluster_token": os.environ.get("VEREL_CLUSTER_TOKEN"),
+            "cafile": os.environ.get("VEREL_BRAIN_CACERT"),
+            "client_cert": os.environ.get("VEREL_BRAIN_CLIENT_CERT"),
+            "client_key": os.environ.get("VEREL_BRAIN_CLIENT_KEY"),
+            "pin_sha256": [p for p in pin.split(",") if p.strip()] if pin else None,
+            "insecure": insecure,
+        }
+
+    @classmethod
+    def from_env(cls) -> RemoteMemory:
+        """Construct from operator env (registry entry point for `VEREL_MEMORY_BACKEND=remote`, and
+        the back-compat path when `VEREL_BRAIN_URL` is set). Fails closed without a brain URL."""
+        import os
+
+        url = os.environ.get("VEREL_BRAIN_URL")
+        if not url:
+            raise RuntimeError(
+                "remote brain backend requires VEREL_BRAIN_URL (point it at a MemoryServer)")
+        return cls(url, **cls.env_kwargs())
+
     def _req(self, method: str, path: str, body: dict | None = None) -> dict:
         headers = {"Content-Type": "application/json"}
         if self.token:

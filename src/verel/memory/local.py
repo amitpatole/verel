@@ -67,6 +67,23 @@ class LocalMemory(MemoryView):
             self._db.execute("ALTER TABLE memory ADD COLUMN vector TEXT DEFAULT ''")
         self._db.commit()
 
+    @classmethod
+    def from_env(cls) -> LocalMemory:
+        """Construct from operator env (the registry entry point for `VEREL_MEMORY_BACKEND=local`).
+
+        Path: `VEREL_MEMORY_STORE` else `$XDG_CONFIG_HOME/verel/brain.db` (default `~/.config`).
+        Embedder: the shared `embedder_from_env()` (None by default → lexical recall, unchanged).
+        """
+        import os
+
+        from .embed import embedder_from_env
+
+        base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+        path = os.environ.get("VEREL_MEMORY_STORE") or os.path.join(base, "verel", "brain.db")
+        if path != ":memory:":
+            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        return cls(path, embedder=embedder_from_env())
+
     # ---- embeddings ----
     def _embed_text(self, r: MemoryRecord) -> str:
         return f"{r.subject} {r.predicate} {r.text}".strip()

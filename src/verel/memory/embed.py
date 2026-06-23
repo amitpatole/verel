@@ -92,3 +92,26 @@ class OpenAIEmbedder:
         with urllib.request.urlopen(req, timeout=60) as r:  # nosec B310 — scheme guarded http(s) above
             data = json.load(r)
         return [e["embedding"] for e in data["data"]]
+
+
+def embedder_from_env() -> Embedder | None:
+    """The one shared, env-driven embedder factory every backend uses (decision #4), so the
+    ANN-vs-lexical choice is configured ONE way, not five.
+
+    `VEREL_EMBEDDER` selects:
+      - unset / "none" / "lexical" → None  → lexical token-overlap recall (the zero-config default,
+        and the only option that works with Ollama, which serves no embeddings endpoint).
+      - "hash"   → `HashEmbedder()` — offline, dependency-free vectors (surface overlap, not meaning);
+        exercises the ANN path with no external API.
+      - "openai" → `OpenAIEmbedder()` — real semantic vectors (needs an OpenAI key).
+    Unknown values fail closed with a clear error rather than silently degrading to lexical.
+    """
+    name = (os.environ.get("VEREL_EMBEDDER") or "none").strip().lower()
+    if name in ("", "none", "lexical"):
+        return None
+    if name == "hash":
+        return HashEmbedder()
+    if name == "openai":
+        model = os.environ.get("VEREL_EMBED_MODEL", "text-embedding-3-small")
+        return OpenAIEmbedder(model=model)
+    raise ValueError(f"unknown VEREL_EMBEDDER={name!r}; expected none|lexical|hash|openai")

@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.41.0 — pluggable memory-backend registry (foundation for external DB stores)
+
+Formalizes how Verel's shared brain selects its storage, so external databases can become
+out-of-the-box options (`pip install verel[<db>]` + env vars, no code). This release is the
+**foundation** — a registry + a portable contract — with **zero behavior change**; the Postgres,
+LanceDB, and Redis backends land in the releases that follow.
+
+- **Backend registry** (`verel.memory.registry`): `load_backend(name)` resolves a `MemoryView` by
+  name, **built-ins first** (a static map — fast, deterministic, and a third-party package cannot
+  hijack a built-in name), then the `verel.memory_backends` entry-point group so external packages
+  can register their own backend. Listing names never imports a plugin.
+- **`VEREL_MEMORY_BACKEND`** selects the backend (`local` default | `remote` | future external DBs).
+  Back-compat is exact: unset behaves as before — `local`, or `remote` when `VEREL_BRAIN_URL` is set.
+- **`from_env()`** factories on `LocalMemory` and `RemoteMemory` read operator env only and
+  fail closed (a `remote` brain with no `VEREL_BRAIN_URL` raises rather than silently degrading).
+- **Shared embedder factory** (`embedder_from_env`, via `VEREL_EMBEDDER=none|lexical|hash|openai`):
+  one place configures the ANN-vs-lexical recall choice. Default is lexical (works with Ollama,
+  which serves no embeddings endpoint).
+- **Reusable contract harness** (`tests/memory_contract.py`): the trust-layer invariants (orthogonal
+  confidence/strength, the interference rule, the exact prune conjunction, `apply_replica`
+  idempotency, decay-never-moves-confidence) as backend-agnostic checks — every backend is proven by
+  reusing it instead of copy-pasting assertions. Run over LocalMemory and the mem0 adapter here.
+- `verel doctor` now reports the selected memory backend and the available ones. **521 tests.**
+
 ## 0.40.0 — remove the metrics dashboard from the package (not a Verel feature)
 
 Reverts the v0.39.0 decision to ship the metrics dashboard inside `verel`. The dashboard is a
