@@ -375,6 +375,12 @@ def _tool_remember(args: dict) -> dict:
     predicate = str(fact.get("predicate", ""))[:_MAX_FIELD]
     evidence = args.get("evidence")
     ev_ok, ev_ref = _evidence_verifies(evidence)
+    # A FACT-BOUND attestation (a verifying GateReceipt with verdict=PASS over THIS exact claim) earns
+    # the verified tier; a receipt that merely verifies but isn't bound to this fact is grounding only
+    # (no trust laundering). Local brain is single-principal, so hmac evidence is accepted too.
+    from .verdict import verify_fact_attestation
+    fact_attested = isinstance(evidence, dict) and verify_fact_attestation(
+        evidence, subject, predicate, fact["text"])
 
     provenance: list[str] = []
     if ev_ok:
@@ -399,14 +405,17 @@ def _tool_remember(args: dict) -> dict:
     if author:
         rec.with_detail(author=author)
     written = mem.write(rec)
-    if written.trust == Trust.VERIFIED:
+    if fact_attested:
+        written = mem.promote(written.id) or written   # fact-bound attestation → verified
+        reason = "verified by a fact-bound attestation"
+    elif written.trust == Trust.VERIFIED:
         reason = "corroborated an existing verified belief"   # same-text re-assertion of a verified fact
     elif ev_ok:
         reason = "attested grounding recorded — stays candidate (trust does not travel)"
     else:
         reason = "recorded as candidate"
     return {"id": written.id, "trust": written.trust.value, "scope": scope,
-            "evidence_verified": ev_ok, "reason": reason}
+            "evidence_verified": ev_ok, "fact_attested": fact_attested, "reason": reason}
 
 
 def _tool_build_tool(args: dict) -> dict:

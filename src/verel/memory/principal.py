@@ -115,12 +115,17 @@ class AuthnWrite:
 
 def authenticated_remember(into: MemoryView, *, subject: str, predicate: str, scope: str, text: str,
                            signature: str, key_id: str, trusted: dict[str, str],
-                           kind: MemoryKind = MemoryKind.FACT,
+                           kind: MemoryKind = MemoryKind.FACT, evidence: dict | None = None,
                            author_trust: AuthorTrust | None = None, ts: float = 0.0) -> AuthnWrite:
     """Write a belief on behalf of an AUTHENTICATED principal. The signature must verify against an
     enrolled key (else rejected); `author` is the verified key_id (forge-proof); AuthorTrust keys on
     it. A principal may NOT silently supersede another principal's VERIFIED belief (cross-principal
-    protection) — that needs a revision/contradiction flow, not a bare write."""
+    protection) — that needs a revision/contradiction flow, not a bare write.
+
+    Trust does not travel by say-so — a write enters as a CANDIDATE. It earns the cross-principal
+    `verified` tier ONLY when `evidence` is a **fact-bound attestation**: a publicly-verifiable
+    (ed25519) GateReceipt that attests a PASS verdict AND whose signed subject commits to THIS exact
+    claim. A trusted grader signed over this specific fact — so it's verified, not laundered."""
     if not verify_write(key_id=key_id, subject=subject, predicate=predicate, scope=scope, text=text,
                         signature=signature, trusted=trusted):
         return AuthnWrite(False, False, "", False, False, "unauthenticated — signature invalid or "
@@ -161,8 +166,14 @@ def authenticated_remember(into: MemoryView, *, subject: str, predicate: str, sc
 
     claim = MemoryRecord(kind=kind, subject=subject, predicate=predicate, text=text, scope=scope,
                          subj_pred_key=make_key(subject, predicate, scope))
-    # trust does not travel: the candidate re-verifies only via the importer's own check (none here →
-    # stays candidate). author is the authenticated principal; AuthorTrust can no longer be forged.
-    res = import_belief(into, claim, verify=lambda _r: False, author=author,
+    # The importer's own check: trust does not travel by say-so. It re-verifies (→ verified) ONLY when
+    # `evidence` is a publicly-verifiable, fact-BOUND attestation of a PASS over THIS exact claim;
+    # otherwise the write stays a CANDIDATE. author is the authenticated principal (AuthorTrust safe).
+    from ..verdict import verify_fact_attestation
+    attested = evidence is not None and verify_fact_attestation(
+        evidence, subject, predicate, text, allowed_algs={"ed25519"})
+    res = import_belief(into, claim, verify=lambda _r: attested, author=author,
                         author_trust=author_trust, ts=ts)
-    return AuthnWrite(True, True, author, res.reverified, False, "written as candidate (authenticated)")
+    reason = ("verified by a fact-bound attestation" if res.reverified
+              else "written as candidate (authenticated)")
+    return AuthnWrite(True, True, author, res.reverified, False, reason)

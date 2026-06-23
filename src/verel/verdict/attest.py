@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 
+from .._sign import canonical_payload
 from . import keys
 from .constants import ADVISORY_GRADERS, GATING_SEVERITY, PRECISE_GRADERS, SEV_ORDER
 from .gate import sign_receipt, verify_receipt
@@ -92,6 +93,40 @@ def build_gate_receipt(verdict: Verdict, reports: list[Report], *, issued_by: st
         gr.runner_identity = "ci-runner"
         gr.signature = sign_receipt(gr)
     return gr
+
+
+def fact_commitment(subject: str, predicate: str, text: str) -> str:
+    """A deterministic commitment to a claim's CONTENT (subject|predicate|text — not its scope, which
+    is only where it's filed). This is what a fact attestation binds into its signed `subject`, so a
+    receipt proves it attests THIS exact claim — closing the trust-laundering gap (an unrelated valid
+    receipt can't promote a different fact). Producer and importer compute it identically."""
+    return "fact:" + hashlib.blake2s(
+        canonical_payload("factclaim", subject, predicate, text).encode()).hexdigest()[:16]
+
+
+def attest_fact(verdict: Verdict, reports: list[Report], *, subject: str, predicate: str, text: str,
+                attest: str = "ed25519", issued_by: str | None = None) -> GateReceipt:
+    """Mint a PORTABLE fact attestation — a signed GateReceipt whose `subject` commits to the claim, so
+    a DIFFERENT principal can accept it as proof this fact passed a trusted grader. `reports` are the
+    eval/grader reports the verdict rests on (each carrying its signed RunReceipt)."""
+    return build_gate_receipt(verdict, reports, attest=attest, issued_by=issued_by,
+                              subject=fact_commitment(subject, predicate, text))
+
+
+def verify_fact_attestation(receipt: GateReceipt | dict, subject: str, predicate: str, text: str, *,
+                            allowed_algs: set[str] | None = None) -> bool:
+    """True iff `receipt` is a GateReceipt that VERIFIES, attests a PASS verdict, and is bound to THIS
+    exact fact (its signed `subject` == the fact commitment). The basis for a cross-principal `verified`
+    tier: trust travels only via a trusted grader's signature over this specific claim — never the
+    caller's say-so, and never an unrelated receipt. Pass allowed_algs={"ed25519"} to require public
+    verifiability (no shared secret), as a cross-principal importer must."""
+    try:
+        gr = receipt if isinstance(receipt, GateReceipt) else GateReceipt.model_validate(receipt)
+    except (ValueError, TypeError):
+        return False
+    res = verify_gate_receipt(gr, allowed_algs=allowed_algs)
+    return (res.valid and gr.verdict == Verdict.PASS
+            and gr.subject == fact_commitment(subject, predicate, text))
 
 
 def verify_gate_receipt(receipt: GateReceipt, *,

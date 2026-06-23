@@ -42,6 +42,23 @@ def test_remember_attested_evidence_is_grounded_not_verified():
         or out["evidence_verified"]   # provenance carries the attested ref
 
 
+def test_remember_earns_verified_with_a_fact_bound_attestation():
+    """A fact-bound attestation (a verifying GateReceipt with PASS over THIS exact claim) promotes the
+    belief to verified; an unrelated receipt stays grounding-only (candidate)."""
+    from verel.verdict import Verdict, attest_fact
+    fact = {"subject": "ci", "predicate": "status", "text": "suite green"}
+    att = attest_fact(Verdict.PASS, [], subject="ci", predicate="status", text="suite green",
+                      attest="ed25519").model_dump()
+    out = dispatch("verel_remember", {"fact": fact, "evidence": att})
+    assert out["fact_attested"] is True and out["trust"] == "verified"
+    # an attestation for a DIFFERENT fact does not promote
+    wrong = attest_fact(Verdict.PASS, [], subject="other", predicate="x", text="z",
+                        attest="ed25519").model_dump()
+    out2 = dispatch("verel_remember", {"fact": {"subject": "db", "predicate": "p", "text": "y"},
+                                       "evidence": wrong})
+    assert out2["fact_attested"] is False and out2["trust"] == "candidate"
+
+
 def test_remember_cannot_supersede_a_verified_belief():
     """Red-team round 2 finding 2: an ordinary remember must not silently overwrite a VERIFIED fact."""
     import os as _os
