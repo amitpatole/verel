@@ -28,11 +28,13 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from ..transport import (
+    build_opener,
     build_server_context,
     enforce_bind_policy,
     guard_cleartext_secret,
     make_client_context,
     scheme,
+    send,
 )
 from .artifact import SkillArtifact
 from .store import PublicRegistry
@@ -144,7 +146,8 @@ class RemoteRegistry:
         self.base = base_url.rstrip("/")
         self.token = auth_token
         self.timeout = timeout
-        self._ctx = make_client_context(cafile, ssl_context)
+        self._insecure = insecure
+        self._opener = build_opener(make_client_context(cafile, ssl_context))
         guard_cleartext_secret(self.base, has_secret=bool(auth_token), insecure=insecure)
 
     def _req(self, method: str, path: str, body: dict | None = None) -> dict:
@@ -154,7 +157,8 @@ class RemoteRegistry:
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(self.base + path, data=data, headers=headers, method=method)
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout, context=self._ctx) as r:
+            with send(self._opener, req, base_url=self.base, has_secret=bool(self.token),
+                      insecure=self._insecure, timeout=self.timeout) as r:
                 return json.loads(r.read())
         except urllib.error.HTTPError as e:
             if e.code == 404:

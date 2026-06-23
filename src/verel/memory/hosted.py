@@ -27,11 +27,13 @@ from urllib.parse import parse_qs, urlparse
 
 from ..fleet.lease import FencingError
 from ..transport import (
+    build_opener,
     build_server_context,
     enforce_bind_policy,
     guard_cleartext_secret,
     make_client_context,
     scheme,
+    send,
 )
 from .local import LocalMemory
 from .replicated import NotLeaderError
@@ -277,10 +279,11 @@ class RemoteMemory:
         self.token = auth_token
         self.cluster_token = cluster_token   # needed only for the replication channel (/apply)
         self.timeout = timeout
-        self._ctx = make_client_context(cafile, ssl_context)
-        # Fail closed at construction: never put a token on a cleartext hop to a routable host.
+        self._insecure = insecure
+        self._opener = build_opener(make_client_context(cafile, ssl_context))
+        # Fail closed at construction for fast feedback; `send()` re-checks per request on the live token.
         guard_cleartext_secret(self.base, has_secret=bool(auth_token or cluster_token),
-                                insecure=insecure)
+                               insecure=insecure)
 
     def _req(self, method: str, path: str, body: dict | None = None) -> dict:
         headers = {"Content-Type": "application/json"}
@@ -290,7 +293,9 @@ class RemoteMemory:
             headers["X-Cluster-Token"] = self.cluster_token
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(self.base + path, data=data, headers=headers, method=method)
-        with urllib.request.urlopen(req, timeout=self.timeout, context=self._ctx) as r:
+        with send(self._opener, req, base_url=self.base,
+                  has_secret=bool(self.token or self.cluster_token), insecure=self._insecure,
+                  timeout=self.timeout) as r:
             return json.loads(r.read())
 
     @staticmethod
@@ -380,9 +385,10 @@ class ReplicaClient:
         self.token = auth_token
         self.cluster_token = cluster_token   # the cluster credential the follower requires for /replicate
         self.timeout = timeout
-        self._ctx = make_client_context(cafile, ssl_context)
+        self._insecure = insecure
+        self._opener = build_opener(make_client_context(cafile, ssl_context))
         guard_cleartext_secret(self.base, has_secret=bool(auth_token or cluster_token),
-                                insecure=insecure)
+                               insecure=insecure)
 
     def apply_replica_fenced(self, record: dict, token: int) -> None:
         headers = {"Content-Type": "application/json"}
@@ -393,7 +399,9 @@ class ReplicaClient:
         data = json.dumps({"record": record, "token": token}).encode()
         req = urllib.request.Request(self.base + "/replicate", data=data, headers=headers, method="POST")
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout, context=self._ctx) as r:
+            with send(self._opener, req, base_url=self.base,
+                      has_secret=bool(self.token or self.cluster_token), insecure=self._insecure,
+                      timeout=self.timeout) as r:
                 r.read()
         except urllib.error.HTTPError as e:
             if e.code == 409:

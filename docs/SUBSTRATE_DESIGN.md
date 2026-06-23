@@ -562,12 +562,21 @@ closed, with loopback staying zero-config.
 - **Bind policy, tightened (fail closed).** A **non-loopback bind now requires BOTH an `auth_token`
   AND TLS.** Without a cert the server *refuses to start* on a routable host — it will not silently
   serve a bearer-authenticated brain in cleartext. Loopback (`127.0.0.1`, `::1`, `localhost`) is
-  unchanged: plain HTTP, no token, zero-config for the local-dev roundtrip.
+  unchanged: plain HTTP, no token, zero-config for the local-dev roundtrip. `host=""` is treated as
+  **routable**, not loopback — an empty host is the wildcard `0.0.0.0` bind (all interfaces), the most
+  exposed bind there is.
 - **Client TLS + cleartext-secret guard.** `RemoteMemory`/`ReplicaClient` take `cafile=`/`ssl_context=`
-  so an internal CA or a pinned cert verifies (not only system roots), threaded into `urlopen`. And
-  the client **refuses to attach a bearer or cluster token to a non-loopback `http://` URL** — a
-  secret must never leave the process toward a routable host in cleartext. An explicit `insecure=True`
-  (client) opts out for a TLS-terminating proxy / service mesh that already encrypts the hop.
+  so an internal CA or a pinned cert verifies (not only system roots), threaded into a per-client
+  opener. And the client **refuses to attach a bearer or cluster token to a non-loopback `http://`
+  URL** — a secret must never leave the process toward a routable host in cleartext. The guard runs
+  **per request on the live token** (not only at construction), so a token set after the fact can't
+  slip past. An explicit `insecure=True` opts out for a TLS-terminating proxy / mesh that encrypts.
+- **Redirect defense.** `urllib` re-sends request headers (incl. `Authorization`) across a 3xx by
+  default — so an `https://` (even cert-pinned) base URL `302`'d to routable `http://` would otherwise
+  leak the token past the construction-time guard. A `_SecureRedirectHandler` closes this: on any
+  redirect it refuses a cleartext-routable target while a secret is attached, and strips the sensitive
+  headers whenever the origin (scheme, host, port) changes — the token never crosses to a server other
+  than the one it was minted for.
 - **MCP wiring.** `_brain()`/`_remote_principal()` read `VEREL_BRAIN_CACERT` (CA bundle for the brain's
   cert) and `VEREL_BRAIN_INSECURE` (the same explicit cleartext opt-out), operator env only.
 
