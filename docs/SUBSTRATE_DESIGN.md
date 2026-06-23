@@ -493,7 +493,7 @@ unenrolled principal is rejected; a signature is bound to its claim (can't be li
 overwrite another principal's verified belief; `AuthorTrust` keys on the verified id. 23 tests in
 `tests/test_principal_brain.py`. Security cadence applied next.
 
-**Cross-principal `verified` tier — DONE (§15.4).** A peer's belief now earns `verified` (not just
+**Cross-principal `verified` tier — DONE.** A peer's belief now earns `verified` (not just
 `candidate`) via a **fact-bound attestation**: `verdict.fact_commitment(subject,predicate,text)` is a
 256-bit commitment to the claim content; `attest_fact()` mints a portable signed `GateReceipt` whose
 `subject` IS that commitment; `verify_fact_attestation()` accepts it iff it verifies, attests
