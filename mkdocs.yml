@@ -60,6 +60,7 @@ plugins:
 nav:
   - Home: index.md
   - Get started: getting-started.md
+  - Try it yourself: try-it.md
   - 5-minute tutorial: tutorial.md
   - Use cases: use-cases.md
   - Real-world scenarios: examples.md
