@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.34.0 — cross-principal `verified` tier (fact-bound attestation)
+
+Closes the last brain trust residual: a peer's belief can now earn the **`verified`** tier (not just
+`candidate`) — but only via a **fact-bound attestation**, so trust still never travels by say-so.
+
+- `verdict.fact_commitment(subject, predicate, text)` is a 256-bit commitment to a claim's content;
+  `attest_fact()` mints a portable signed **GateReceipt** whose signed `subject` IS that commitment;
+  `verify_fact_attestation()` accepts it iff it verifies, attests `verdict=PASS`, AND is bound to THIS
+  exact claim — so an unrelated valid receipt can't launder a different fact.
+- `memory.authenticated_remember(evidence=…)` earns the cross-principal `verified` tier only with a
+  publicly-verifiable **ed25519** attestation (a peer verifies without the producer's secret);
+  `RemoteMemory.remember_signed(evidence=…)` + `/write_signed` thread it (the response now returns
+  `reverified`). The MCP `verel_remember` also promotes on a fact-bound attestation (local brain is
+  single-principal, so hmac is accepted) and returns `fact_attested`.
+- The reserved-key + non-FACT guards run BEFORE promotion, and the local and remote write paths now
+  share one `memory.is_reserved_key` source of truth (so neither can touch the AuthorTrust ledger).
+
+Shipped through a 4-round adversarial red-team (256-bit commitment; local non-FACT backstop; local
+reserved-key guard; guard parity proven). 446-test suite; ruff + mypy clean.
+
+## 0.33.0 — the hearing sense
+
+An **Audel** hearing adapter (`senses/audio.py`) feeding the verdict bus as another grounded sense,
+with cross-modal verdicts (Phase 5).
+
 ## 0.32.0 — the authenticated multi-principal brain
 
 Turns the deferred multi-principal items from the 0.31.0 brain audit into real controls, so a **shared
