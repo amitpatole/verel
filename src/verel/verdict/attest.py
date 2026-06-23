@@ -99,9 +99,14 @@ def fact_commitment(subject: str, predicate: str, text: str) -> str:
     """A deterministic commitment to a claim's CONTENT (subject|predicate|text — not its scope, which
     is only where it's filed). This is what a fact attestation binds into its signed `subject`, so a
     receipt proves it attests THIS exact claim — closing the trust-laundering gap (an unrelated valid
-    receipt can't promote a different fact). Producer and importer compute it identically."""
+    receipt can't promote a different fact). Producer and importer compute it identically.
+
+    Uses the FULL 256-bit blake2s digest (not the [:16] dedup truncation): this is a security binding
+    where an attacker would benefit from a second-preimage, so the collision margin must be infeasible
+    (2^128), not the ~2^64 a 64-bit truncation would allow. `factclaim` domain-tagged + length-prefixed
+    (injective), so no field-boundary collision between subject/predicate/text."""
     return "fact:" + hashlib.blake2s(
-        canonical_payload("factclaim", subject, predicate, text).encode()).hexdigest()[:16]
+        canonical_payload("factclaim", subject, predicate, text).encode()).hexdigest()
 
 
 def attest_fact(verdict: Verdict, reports: list[Report], *, subject: str, predicate: str, text: str,
