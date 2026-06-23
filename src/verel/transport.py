@@ -13,11 +13,17 @@ The rule, fail-closed:
 from __future__ import annotations
 
 import ssl
+import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
 
 # Hosts that never leave the machine — plain HTTP and no token are fine (the zero-config dev roundtrip).
-_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost", ""})
+# NB: "" is deliberately NOT here — an empty host is the WILDCARD bind (ThreadingHTTPServer(("", p))
+# listens on 0.0.0.0, all interfaces), the most exposed bind there is, not loopback. The servers default
+# host="127.0.0.1", so "" only ever arrives as an explicit all-interfaces choice → treat it as routable.
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+# Request headers that carry a secret — never let a redirect ferry these onto a cleartext/cross-origin hop.
+_SENSITIVE_HEADERS = frozenset({"authorization", "x-cluster-token"})
 
 
 def is_loopback(host: str) -> bool:
@@ -80,3 +86,41 @@ def guard_cleartext_secret(base_url: str, *, has_secret: bool, insecure: bool) -
             f"refusing to send a token to {base_url!r} over cleartext http — it would be sniffable on "
             "the wire; use an https:// URL (pass cafile= for an internal CA), or set insecure=True "
             "only if a TLS-terminating proxy already encrypts the hop")
+
+
+class _SecureRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Don't let a 3xx redirect ferry a bearer/cluster secret onto a cleartext or cross-origin hop.
+    urllib re-sends request headers (including `Authorization`) to a redirect target by default — even
+    on an https→http downgrade — which would defeat the construction-time cleartext guard. So on every
+    redirect: if a secret is attached, refuse a cleartext-routable target outright; and strip the
+    sensitive headers whenever the origin (scheme, host, port) changes, so the secret never crosses to a
+    different server than the one it was minted for."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        new = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new is None:
+            return None
+        carried = {k for k in req.headers if k.lower() in _SENSITIVE_HEADERS}
+        if carried:
+            guard_cleartext_secret(newurl, has_secret=True, insecure=False)  # raises on http-routable
+        old, dst = urlparse(req.full_url), urlparse(newurl)
+        if (old.scheme, old.hostname, old.port) != (dst.scheme, dst.hostname, dst.port):
+            for k in carried:                       # cross-origin → never forward the secret
+                new.headers.pop(k, None)
+        return new
+
+
+def build_opener(ssl_context: ssl.SSLContext | None) -> urllib.request.OpenerDirector:
+    """A urllib opener that verifies TLS with `ssl_context` (None → system roots, verification ON) and
+    applies the secure-redirect policy above. Use this instead of the module-level `urlopen` so the
+    redirect path can't leak a token."""
+    return urllib.request.build_opener(_SecureRedirectHandler,
+                                       urllib.request.HTTPSHandler(context=ssl_context))
+
+
+def send(opener: urllib.request.OpenerDirector, req: urllib.request.Request, *, base_url: str,
+         has_secret: bool, insecure: bool, timeout: float):
+    """Guard then open: re-checks the cleartext-secret policy on the LIVE token at request time (so a
+    token set after construction can't skip it), then sends via the secure-redirect opener."""
+    guard_cleartext_secret(base_url, has_secret=has_secret, insecure=insecure)
+    return opener.open(req, timeout=timeout)

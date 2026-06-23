@@ -124,3 +124,70 @@ def test_client_no_token_on_cleartext_routable_is_fine():
     """No secret to leak → a plain http routable URL is allowed (reads aren't confidential)."""
     rm = RemoteMemory("http://10.0.0.5:8000")
     assert rm.token is None
+
+
+# ---- red-team round-1 regression: empty host is the WILDCARD bind, not loopback ----
+
+def test_empty_host_is_not_loopback():
+    """host='' binds 0.0.0.0 (all interfaces) — it must be treated as routable, not loopback, or an
+    `MemoryServer(host='')` would be an anonymous cleartext service on every interface (red-team R1)."""
+    from verel.transport import enforce_bind_policy, is_loopback
+
+    assert is_loopback("") is False
+    with pytest.raises(ValueError, match="auth_token"):
+        enforce_bind_policy("", auth_token=None, tls=False, service="x")
+
+
+def test_empty_host_server_refuses_anonymous_bind(tmp_path):
+    with pytest.raises(ValueError, match="auth_token"):
+        MemoryServer(db_path=str(tmp_path / "b.db"), host="")
+
+
+# ---- red-team round-2 regression: a 3xx redirect must not ferry the token onto a cleartext/cross hop ----
+
+def test_redirect_refuses_downgrade_to_cleartext_routable():
+    """urllib re-sends Authorization across a 3xx by default — an https→http(routable) downgrade would
+    leak the token past the init guard. The secure redirect handler must refuse it."""
+    import urllib.request
+
+    from verel.transport import _SecureRedirectHandler
+
+    h = _SecureRedirectHandler()
+    req = urllib.request.Request("https://brain.internal/x", headers={"Authorization": "Bearer s3cr3t"})
+    with pytest.raises(ValueError, match="cleartext"):
+        h.redirect_request(req, None, 302, "Found", {}, "http://10.0.0.5/sink")
+
+
+def test_redirect_strips_secret_cross_origin():
+    """Even an https→https redirect to a DIFFERENT origin must not carry the secret (it was minted for
+    the original server only)."""
+    import urllib.request
+
+    from verel.transport import _SecureRedirectHandler
+
+    h = _SecureRedirectHandler()
+    req = urllib.request.Request("https://a.internal/x",
+                                 headers={"Authorization": "Bearer s", "X-Cluster-Token": "c"})
+    new = h.redirect_request(req, None, 302, "Found", {}, "https://b.internal/y")
+    assert "Authorization" not in new.headers and "X-cluster-token" not in new.headers
+
+
+def test_redirect_keeps_secret_same_origin():
+    """A same-origin redirect (e.g. a path change) legitimately keeps the token."""
+    import urllib.request
+
+    from verel.transport import _SecureRedirectHandler
+
+    h = _SecureRedirectHandler()
+    req = urllib.request.Request("https://a.internal/x", headers={"Authorization": "Bearer s"})
+    new = h.redirect_request(req, None, 302, "Found", {}, "https://a.internal/y")
+    assert new.headers.get("Authorization") == "Bearer s"
+
+
+def test_token_set_after_init_is_still_guarded_per_request():
+    """The init-time guard can't see a token set later — `send()` must re-check on the live token so a
+    post-construction `client.token = ...` can't ride a cleartext routable hop (red-team R2, finding 2)."""
+    rm = RemoteMemory("http://10.0.0.5:8000")   # no token at construction → allowed
+    rm.token = "sneaky"
+    with pytest.raises(ValueError, match="cleartext"):
+        rm.recall("x", scope="team")
