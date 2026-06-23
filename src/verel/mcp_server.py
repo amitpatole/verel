@@ -392,6 +392,16 @@ def _tool_remember(args: dict) -> dict:
     mem = _brain()
     rid = make_id(make_key(subject, predicate, scope))
     existing = mem.get(rid)
+    # STRUCTURAL backstop (mirror authenticated_remember): make_id ignores `kind`, so a remember FACT
+    # shares an id with a server-managed NON-FACT record at the same subject|predicate|scope — the
+    # toolsmith SKILL registry, the failure-regression ledger, an induced design_rule/schema. The
+    # interference rule would otherwise let a bare remember silently OVERWRITE that control state
+    # (e.g. clobber a skill's executable detail['tool'] body) regardless of its trust tier. A client
+    # remember may only ever author a FACT; it must never supersede a non-FACT record. Refuse.
+    if existing is not None and existing.kind != MemoryKind.FACT:
+        return {"id": existing.id, "trust": existing.trust.value, "scope": scope,
+                "evidence_verified": ev_ok, "fact_attested": False, "conflict": True,
+                "reason": f"collides with a server-managed {existing.kind.value} record — not overwritten"}
     if (existing is not None and existing.trust == Trust.VERIFIED
             and existing.text.strip().lower() != fact["text"].strip().lower()):
         # PROTECT a verified belief: an ordinary remember must not silently supersede it (a real
