@@ -11,11 +11,10 @@ docs_dir: docs
 theme:
   name: material
   palette:
-    - scheme: slate
-      primary: deep purple
-      accent: deep purple
+    scheme: default          # Warm Paper — light, editorial
   font:
     text: Inter
+    code: JetBrains Mono
   icon:
     repo: fontawesome/brands/github
   features:
@@ -27,6 +26,9 @@ theme:
     - toc.follow
     - search.suggest
     - search.highlight
+
+extra_css:
+  - stylesheets/extra.css
 
 markdown_extensions:
   - admonition
