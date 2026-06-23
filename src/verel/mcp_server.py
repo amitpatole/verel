@@ -372,8 +372,14 @@ def _tool_recall(args: dict) -> dict:
             return _err(f"unknown kind {kraw!r}")
 
     mem = _brain()
-    hits = (lattice_recall(mem, query, scope=scope, kind=kind, k=k) if scope
-            else mem.recall(query, kind=kind, k=k))
+    import urllib.error
+    try:
+        hits = (lattice_recall(mem, query, scope=scope, kind=kind, k=k) if scope
+                else mem.recall(query, kind=kind, k=k))
+    except urllib.error.HTTPError as e:   # remote brain: bad bearer (401) etc. — subclass of URLError
+        return _err(f"remote brain rejected the request: HTTP {e.code}")
+    except urllib.error.URLError as e:
+        return _err(f"remote brain unreachable: {e.reason}")
     return {"records": [
         {"text": h.text, "subject": h.subject, "predicate": h.predicate, "scope": h.scope,
          "trust": h.trust.value, "confidence": round(h.epistemic_confidence, 3),
@@ -411,10 +417,15 @@ def _tool_remember(args: dict) -> dict:
 
     # REMOTE brain: author as an AUTHENTICATED principal — sign the claim and let the server enforce
     # every guard (reserved-key, non-FACT backstop, cross-principal protection) + the verified tier.
+    from .verdict.keys import MissingAttestationDep
     try:
         remote = _remote_principal()
     except ValueError as e:
         return _err(str(e))   # remote configured but the principal seed is missing/invalid → fail closed
+    except MissingAttestationDep:
+        # signing a remote write needs ed25519 — without PyNaCl there is no principal identity to author
+        # as, so fail closed with the install hint rather than a bare exception-type name.
+        return _err("remote authoring needs ed25519 — install it with `pip install verel[attest]`")
     if remote is not None:
         import urllib.error
         rmem, principal = remote

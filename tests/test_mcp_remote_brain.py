@@ -98,6 +98,25 @@ def test_remote_wrong_bearer_token_surfaces_http_status(tmp_path, monkeypatch):
         srv.stop()
 
 
+def test_remote_recall_wrong_bearer_surfaces_http_status(tmp_path, monkeypatch):
+    """A bad bearer on RECALL (read path) gets the same friendly HTTP-status wording as remember —
+    not the generic dispatch backstop ('verel_recall failed: HTTPError') — and never leaks the token."""
+    srv = MemoryServer(db_path=str(tmp_path / "b.db"), auth_token="right-token").start()
+    try:
+        monkeypatch.setenv("VEREL_BRAIN_URL", srv.url)
+        monkeypatch.setenv("VEREL_BRAIN_TOKEN", "WRONG-token")
+        out = dispatch("verel_recall", {"query": "anything", "scope": "team"})
+        assert "error" in out and "HTTP 401" in out["error"] and "WRONG-token" not in str(out)
+    finally:
+        srv.stop()
+
+
+def test_remote_recall_unreachable_is_a_clean_error(monkeypatch):
+    monkeypatch.setenv("VEREL_BRAIN_URL", "http://127.0.0.1:9")   # nothing listening
+    out = dispatch("verel_recall", {"query": "anything", "scope": "team"})
+    assert "error" in out and "unreachable" in out["error"]
+
+
 def test_remote_unreachable_is_a_clean_error(monkeypatch):
     monkeypatch.setenv("VEREL_BRAIN_URL", "http://127.0.0.1:9")   # nothing listening
     monkeypatch.setenv("VEREL_PRINCIPAL_SEED", _SEED)
