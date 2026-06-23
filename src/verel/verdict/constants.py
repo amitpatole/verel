@@ -19,8 +19,14 @@ PRECISE_GRADERS = {
     GraderKind.OCR,
     GraderKind.CV,
     GraderKind.SECURITY,
+    # Hearing: DSP signal analysis and ASR transcription are deterministic grounding.
+    GraderKind.DSP,
+    GraderKind.ASR,
 }
-ADVISORY_GRADERS = {GraderKind.VISION, GraderKind.LLM_JUDGE}
+# Advisory graders are clamped to ADVISORY_CEIL: open-ended model judgement (VISION/LLM_JUDGE) and
+# the hearing analogues — zero-shot acoustic (CLAP) and transcript/audio-native LLM critique.
+ADVISORY_GRADERS = {GraderKind.VISION, GraderKind.LLM_JUDGE,
+                    GraderKind.ACOUSTIC, GraderKind.AUDIO_LLM}
 
 # Progress is required non-increasing across a window of this length (§7.2).
 W = 4
