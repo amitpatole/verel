@@ -29,11 +29,10 @@ from ..fleet.lease import FencingError
 from ..transport import (
     _DEFAULT_MAX_CONNECTIONS,
     TLSThreadingHTTPServer,
-    build_opener,
     build_server_context,
+    client_opener,
     enforce_bind_policy,
     guard_cleartext_secret,
-    make_client_context,
     scheme,
     send,
 )
@@ -219,11 +218,12 @@ class MemoryServer:
                  durable: bool = True, trusted_principals: dict[str, str] | None = None,
                  require_signed_writes: bool | None = None, cluster_token: str | None = None,
                  certfile: str | Path | None = None, keyfile: str | Path | None = None,
-                 ssl_context: ssl.SSLContext | None = None,
-                 max_connections: int = _DEFAULT_MAX_CONNECTIONS):
+                 ssl_context: ssl.SSLContext | None = None, client_ca: str | Path | None = None,
+                 max_connections: int = _DEFAULT_MAX_CONNECTIONS, max_per_ip: int | None = None):
         # Build the server-side TLS context (if any) BEFORE the bind-policy check, so a routable bind
         # can prove it has transport confidentiality, then fail closed if it's authenticated-but-cleartext.
-        ssl_context = build_server_context(certfile, keyfile, ssl_context)
+        # client_ca turns on mTLS (require a client cert signed by it).
+        ssl_context = build_server_context(certfile, keyfile, ssl_context, client_ca=client_ca)
         self._tls = ssl_context is not None
         enforce_bind_policy(host, auth_token=auth_token, tls=self._tls, service="memory service")
         if store is None:
@@ -243,7 +243,7 @@ class MemoryServer:
         self._httpd = TLSThreadingHTTPServer(
             (host, port), _make_handler(self.store, self._lock, auth_token, self.trusted_principals,
                                         self._require_override, cluster_token), ssl_context=ssl_context,
-            max_connections=max_connections)
+            max_connections=max_connections, max_per_ip=max_per_ip)
         self._thread: threading.Thread | None = None
 
     def enroll(self, key_id: str, public_key_b64: str) -> None:
@@ -276,13 +276,16 @@ class RemoteMemory:
 
     def __init__(self, base_url: str, *, auth_token: str | None = None, timeout: float = 15.0,
                  cluster_token: str | None = None, cafile: str | Path | None = None,
-                 ssl_context: ssl.SSLContext | None = None, insecure: bool = False):
+                 ssl_context: ssl.SSLContext | None = None, insecure: bool = False,
+                 client_cert: str | Path | None = None, client_key: str | Path | None = None,
+                 pin_sha256: str | list | set | None = None):
         self.base = base_url.rstrip("/")
         self.token = auth_token
         self.cluster_token = cluster_token   # needed only for the replication channel (/apply)
         self.timeout = timeout
         self._insecure = insecure
-        self._opener = build_opener(make_client_context(cafile, ssl_context))
+        self._opener = client_opener(cafile, ssl_context, client_cert=client_cert,
+                                     client_key=client_key, pin_sha256=pin_sha256)
         # Fail closed at construction for fast feedback; `send()` re-checks per request on the live token.
         guard_cleartext_secret(self.base, has_secret=bool(auth_token or cluster_token),
                                insecure=insecure)
@@ -382,13 +385,16 @@ class ReplicaClient:
 
     def __init__(self, base_url: str, *, auth_token: str | None = None, timeout: float = 10.0,
                  cluster_token: str | None = None, cafile: str | Path | None = None,
-                 ssl_context: ssl.SSLContext | None = None, insecure: bool = False):
+                 ssl_context: ssl.SSLContext | None = None, insecure: bool = False,
+                 client_cert: str | Path | None = None, client_key: str | Path | None = None,
+                 pin_sha256: str | list | set | None = None):
         self.base = base_url.rstrip("/")
         self.token = auth_token
         self.cluster_token = cluster_token   # the cluster credential the follower requires for /replicate
         self.timeout = timeout
         self._insecure = insecure
-        self._opener = build_opener(make_client_context(cafile, ssl_context))
+        self._opener = client_opener(cafile, ssl_context, client_cert=client_cert,
+                                     client_key=client_key, pin_sha256=pin_sha256)
         guard_cleartext_secret(self.base, has_secret=bool(auth_token or cluster_token),
                                insecure=insecure)
 
