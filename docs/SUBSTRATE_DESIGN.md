@@ -493,10 +493,21 @@ unenrolled principal is rejected; a signature is bound to its claim (can't be li
 overwrite another principal's verified belief; `AuthorTrust` keys on the verified id. 23 tests in
 `tests/test_principal_brain.py`. Security cadence applied next.
 
-**Still deferred (honest):** a receipt↔fact binding so a cross-principal `verified` tier (not just
-`candidate`) is earned by a fact-bound attestation; transport confidentiality (TLS) for a routable
-bind; and wiring the MCP `remember` verb to a configured remote principal (today MCP remember is the
-local brain). Key distribution/enrollment is operator-driven (publish pubkeys), same as receipt keys.
+**Cross-principal `verified` tier — DONE (§15.4).** A peer's belief now earns `verified` (not just
+`candidate`) via a **fact-bound attestation**: `verdict.fact_commitment(subject,predicate,text)` is a
+256-bit commitment to the claim content; `attest_fact()` mints a portable signed `GateReceipt` whose
+`subject` IS that commitment; `verify_fact_attestation()` accepts it iff it verifies, attests
+`verdict=PASS`, and is bound to THIS exact claim. `authenticated_remember(evidence=…)` requires
+**ed25519** (a peer verifies without the producer's secret); the local MCP `verel_remember` accepts
+hmac too (single-principal). Trust still never travels by say-so — only a trusted grader's signature
+over the specific fact. The reserved-key + non-FACT guards run BEFORE promotion, and the local tool
+now shares the same `is_reserved_key` guard as the remote path (so neither can touch the AuthorTrust
+ledger). Hardened through a 3-round red-team (256-bit commitment; local non-FACT backstop; local
+reserved-key guard).
+
+**Still deferred (honest):** transport confidentiality (TLS) for a routable bind; and wiring the MCP
+`remember` verb to a configured remote principal (today MCP remember is the local brain). Key
+distribution/enrollment is operator-driven (publish pubkeys), same as receipt keys.
 
 ### 15.3 Security cadence — the controls the red-team rounds added
 Seven adversarial rounds hardened this surface; each of the first six found a real issue (fixed

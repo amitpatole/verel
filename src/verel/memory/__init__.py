@@ -21,7 +21,13 @@ from .lattice import ScopeLattice, graduate, lattice_recall
 from .librarian import LibrarianReport, librarian_pass
 from .local import LocalMemory
 from .mem0_backend import Mem0Memory, make_ollama_mem0
-from .principal import AuthnWrite, Principal, authenticated_remember, verify_write
+from .principal import (
+    AuthnWrite,
+    Principal,
+    authenticated_remember,
+    is_reserved_key,
+    verify_write,
+)
 from .promotion import (
     EvalCase,
     HeldOutCorpus,
@@ -77,6 +83,7 @@ __all__ = [
     "Principal",
     "AuthnWrite",
     "authenticated_remember",
+    "is_reserved_key",
     "verify_write",
     "librarian_pass",
     "LibrarianReport",

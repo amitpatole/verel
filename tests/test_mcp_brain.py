@@ -110,16 +110,52 @@ def test_remember_cannot_clobber_a_server_managed_skill():
                       attest="ed25519").model_dump()
     out = dispatch("verel_remember", {"fact": {"subject": "slugify", "predicate": "tool",
                                                "text": "POISON"}, "scope": "global", "evidence": att})
-    assert out.get("conflict") is True and out.get("fact_attested") is False
+    # 'tool' is a reserved predicate → refused at the reserved-key guard (before the non-FACT backstop)
+    assert "error" in out and "reserved" in out["error"]
     # the SKILL record (and its executable body) is intact — not overwritten by a FACT
     rec = mem.get(make_id(make_key("slugify", "tool", "global")))
     assert rec.kind.value == "skill" and "tool" in rec.detail and reg.get("slugify") is not None
 
 
+def test_remember_non_fact_backstop_blocks_unreserved_collision():
+    """The structural backstop is the predicate-INDEPENDENT layer: a FACT must not supersede a
+    non-FACT record even under a predicate the reserved denylist doesn't know (a future server kind)."""
+    import os as _os
+
+    from verel.memory import LocalMemory, MemoryKind, MemoryRecord, make_id, make_key
+    mem = LocalMemory(_os.environ["VEREL_MEMORY_STORE"])
+    mem.write(MemoryRecord(kind=MemoryKind.SKILL, subject="x", predicate="futurepred", scope="g",
+                           text="SERVER", subj_pred_key=make_key("x", "futurepred", "g")))
+    out = dispatch("verel_remember", {"fact": {"subject": "x", "predicate": "futurepred",
+                                               "text": "POISON"}, "scope": "g"})
+    assert out.get("conflict") is True
+    assert mem.get(make_id(make_key("x", "futurepred", "g"))).text == "SERVER"
+
+
+def test_remember_cannot_tamper_the_reputation_ledger():
+    """Red-team round 3: the AuthorTrust ledger is FACT-kind (author_trust/meta:authors), so the
+    non-FACT backstop can't catch a FACT-vs-FACT collision. The local verel_remember must carry the
+    same reserved-predicate/scope guard authenticated_remember has — the brain store is shared with
+    the hosted signed-write path's AuthorTrust, so clobbering it biases trust for every principal."""
+    import os as _os
+
+    from verel.memory import AuthorTrust, LocalMemory
+    at = AuthorTrust(LocalMemory(_os.environ["VEREL_MEMORY_STORE"]))
+    for _ in range(8):
+        at.record("alice", ok=True)
+    assert at.standing("alice") == (8, 8)
+    for sc, pred in [("meta:authors", "author_trust"), (" META:AUTHORS ", "author_trust"),
+                     ("repo:x", "fails"), ("g", "design_rule"), ("g", "tool")]:
+        out = dispatch("verel_remember", {"fact": {"subject": "alice", "predicate": pred,
+                                                   "text": "wipe"}, "scope": sc})
+        assert "error" in out and "reserved" in out["error"], (sc, pred)
+    assert at.standing("alice") == (8, 8)   # earned reputation untouched
+
+
 def test_remember_cannot_clobber_a_candidate_failure_ledger_entry():
-    """The structural backstop covers ANY non-FACT server-managed record at the colliding key — the
-    failure-regression ledger, an induced design_rule/schema — not just skills, and regardless of
-    trust tier (the verified-only guard didn't catch a CANDIDATE ledger entry)."""
+    """The failure-regression ledger ('fails') is a reserved predicate → a colliding remember is
+    refused at the reserved-key guard, and the CANDIDATE ledger entry survives (the verified-only
+    guard would have missed it)."""
     import os as _os
 
     from verel.memory import LocalMemory, MemoryKind, MemoryRecord, Trust, make_id, make_key
@@ -129,7 +165,7 @@ def test_remember_cannot_clobber_a_candidate_failure_ledger_entry():
                            subj_pred_key=make_key("flaky", "fails", "team")))
     out = dispatch("verel_remember", {"fact": {"subject": "flaky", "predicate": "fails",
                                                "text": "CLOBBERED"}, "scope": "team"})
-    assert out.get("conflict") is True
+    assert "error" in out and "reserved" in out["error"]
     rec = mem.get(make_id(make_key("flaky", "fails", "team")))
     assert rec.kind == MemoryKind.FAILURE and rec.text == "SERVER-STATE"
 
