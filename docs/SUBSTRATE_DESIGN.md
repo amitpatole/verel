@@ -548,3 +548,32 @@ but the FACT-kind reserved-predicate list (`author_trust`, `fails`, `design_rule
 per-name. Any **future** server pipeline that writes a FACT-kind control record on a client-reachable
 key MUST either add its predicate to that denylist or, like `graduate()`, stamp its control fields
 (notably `author`) explicitly. This is a design-discipline obligation, not a current exploitable gap.
+
+### 15.4 Transport confidentiality (TLS) — roadmap item 3
+
+The bind policy (§15.2) refuses an *anonymous* routable bind, but a token-gated one still crossed the
+wire in **cleartext** — the bearer token, the cluster credential, and every signed-write payload were
+sniffable on a routable network. Item 3 closes that: confidentiality on any non-loopback path, fail
+closed, with loopback staying zero-config.
+
+- **Server TLS.** `MemoryServer(certfile=, keyfile=, ssl_context=)` wraps the listening socket with an
+  `ssl.SSLContext` (`server_side=True`); `url` then reports `https://`. Pass a cert/key pair or a
+  fully-built context (e.g. with mTLS / a custom cipher policy).
+- **Bind policy, tightened (fail closed).** A **non-loopback bind now requires BOTH an `auth_token`
+  AND TLS.** Without a cert the server *refuses to start* on a routable host — it will not silently
+  serve a bearer-authenticated brain in cleartext. Loopback (`127.0.0.1`, `::1`, `localhost`) is
+  unchanged: plain HTTP, no token, zero-config for the local-dev roundtrip.
+- **Client TLS + cleartext-secret guard.** `RemoteMemory`/`ReplicaClient` take `cafile=`/`ssl_context=`
+  so an internal CA or a pinned cert verifies (not only system roots), threaded into `urlopen`. And
+  the client **refuses to attach a bearer or cluster token to a non-loopback `http://` URL** — a
+  secret must never leave the process toward a routable host in cleartext. An explicit `insecure=True`
+  (client) opts out for a TLS-terminating proxy / service mesh that already encrypts the hop.
+- **MCP wiring.** `_brain()`/`_remote_principal()` read `VEREL_BRAIN_CACERT` (CA bundle for the brain's
+  cert) and `VEREL_BRAIN_INSECURE` (the same explicit cleartext opt-out), operator env only.
+
+**Threat addressed:** a passive on-path attacker on the brain's network. **Residual (named):** TLS
+protects the hop, not the endpoints — a malicious *configured* server still returns whatever
+`trust`/`author` it likes (the §15.2 operator-trust caveat; `verel_verify` the ed25519 receipt for
+endpoint-independent integrity). Certificate *issuance/rotation* is operator-driven (same posture as
+key distribution). Client cert *pinning* beyond CA verification is available via a custom `ssl_context`
+but not a first-class field yet.

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hmac
 import json
+import ssl
 import threading
 import urllib.error
 import urllib.request
@@ -25,6 +26,13 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from ..fleet.lease import FencingError
+from ..transport import (
+    build_server_context,
+    enforce_bind_policy,
+    guard_cleartext_secret,
+    make_client_context,
+    scheme,
+)
 from .local import LocalMemory
 from .replicated import NotLeaderError
 from .view import MemoryKind, MemoryRecord, MemoryView, make_id, make_key
@@ -205,10 +213,14 @@ class MemoryServer:
     def __init__(self, db_path: str | Path | None = None, *, store: MemoryView | None = None,
                  host: str = "127.0.0.1", port: int = 0, auth_token: str | None = None,
                  durable: bool = True, trusted_principals: dict[str, str] | None = None,
-                 require_signed_writes: bool | None = None, cluster_token: str | None = None):
-        if auth_token is None and host not in ("127.0.0.1", "::1", "localhost"):
-            raise ValueError(f"refusing to bind {host!r} without auth_token — that exposes an "
-                             "unauthenticated memory service; pass auth_token=... or bind 127.0.0.1")
+                 require_signed_writes: bool | None = None, cluster_token: str | None = None,
+                 certfile: str | Path | None = None, keyfile: str | Path | None = None,
+                 ssl_context: ssl.SSLContext | None = None):
+        # Build the server-side TLS context (if any) BEFORE the bind-policy check, so a routable bind
+        # can prove it has transport confidentiality, then fail closed if it's authenticated-but-cleartext.
+        ssl_context = build_server_context(certfile, keyfile, ssl_context)
+        self._tls = ssl_context is not None
+        enforce_bind_policy(host, auth_token=auth_token, tls=self._tls, service="memory service")
         if store is None:
             if db_path is None:
                 raise ValueError("MemoryServer needs a db_path or a store")
@@ -226,6 +238,8 @@ class MemoryServer:
         self._httpd = ThreadingHTTPServer(
             (host, port), _make_handler(self.store, self._lock, auth_token, self.trusted_principals,
                                         self._require_override, cluster_token))
+        if ssl_context is not None:   # encrypt the listening socket (TLS terminates here)
+            self._httpd.socket = ssl_context.wrap_socket(self._httpd.socket, server_side=True)
         self._thread: threading.Thread | None = None
 
     def enroll(self, key_id: str, public_key_b64: str) -> None:
@@ -237,7 +251,7 @@ class MemoryServer:
         host, port = self._httpd.server_address[:2]
         if isinstance(host, (bytes, bytearray)):
             host = host.decode()
-        return f"http://{host}:{port}"
+        return f"{scheme(self._tls)}://{host}:{port}"
 
     def start(self) -> MemoryServer:
         self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
@@ -257,11 +271,16 @@ class RemoteMemory:
     promotion gate all work against the shared store unchanged."""
 
     def __init__(self, base_url: str, *, auth_token: str | None = None, timeout: float = 15.0,
-                 cluster_token: str | None = None):
+                 cluster_token: str | None = None, cafile: str | Path | None = None,
+                 ssl_context: ssl.SSLContext | None = None, insecure: bool = False):
         self.base = base_url.rstrip("/")
         self.token = auth_token
         self.cluster_token = cluster_token   # needed only for the replication channel (/apply)
         self.timeout = timeout
+        self._ctx = make_client_context(cafile, ssl_context)
+        # Fail closed at construction: never put a token on a cleartext hop to a routable host.
+        guard_cleartext_secret(self.base, has_secret=bool(auth_token or cluster_token),
+                                insecure=insecure)
 
     def _req(self, method: str, path: str, body: dict | None = None) -> dict:
         headers = {"Content-Type": "application/json"}
@@ -271,7 +290,7 @@ class RemoteMemory:
             headers["X-Cluster-Token"] = self.cluster_token
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(self.base + path, data=data, headers=headers, method=method)
-        with urllib.request.urlopen(req, timeout=self.timeout) as r:
+        with urllib.request.urlopen(req, timeout=self.timeout, context=self._ctx) as r:
             return json.loads(r.read())
 
     @staticmethod
@@ -355,11 +374,15 @@ class ReplicaClient:
     deposed leader's in-flight write is rejected at the follower, exactly as in-process."""
 
     def __init__(self, base_url: str, *, auth_token: str | None = None, timeout: float = 10.0,
-                 cluster_token: str | None = None):
+                 cluster_token: str | None = None, cafile: str | Path | None = None,
+                 ssl_context: ssl.SSLContext | None = None, insecure: bool = False):
         self.base = base_url.rstrip("/")
         self.token = auth_token
         self.cluster_token = cluster_token   # the cluster credential the follower requires for /replicate
         self.timeout = timeout
+        self._ctx = make_client_context(cafile, ssl_context)
+        guard_cleartext_secret(self.base, has_secret=bool(auth_token or cluster_token),
+                                insecure=insecure)
 
     def apply_replica_fenced(self, record: dict, token: int) -> None:
         headers = {"Content-Type": "application/json"}
@@ -370,7 +393,7 @@ class ReplicaClient:
         data = json.dumps({"record": record, "token": token}).encode()
         req = urllib.request.Request(self.base + "/replicate", data=data, headers=headers, method="POST")
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as r:
+            with urllib.request.urlopen(req, timeout=self.timeout, context=self._ctx) as r:
                 r.read()
         except urllib.error.HTTPError as e:
             if e.code == 409:

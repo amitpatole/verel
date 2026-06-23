@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hmac
 import json
+import ssl
 import threading
 import time
 import urllib.error
@@ -25,6 +26,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from ..transport import (
+    build_server_context,
+    enforce_bind_policy,
+    guard_cleartext_secret,
+    make_client_context,
+    scheme,
+)
 from .lease import FencingError, Lease, SqliteLeaseStore
 
 _MAX_BODY = 1 * 1024 * 1024  # 1 MiB — lease payloads are tiny; reject oversized bodies (DoS guard)
@@ -110,12 +118,15 @@ class ControlPlaneServer:
     background thread; `url` is the base address; `stop()` shuts it down."""
 
     def __init__(self, db_path: str | Path, *, host: str = "127.0.0.1", port: int = 0,
-                 auth_token: str | None = None):
-        if auth_token is None and host not in ("127.0.0.1", "::1", "localhost"):
-            raise ValueError(f"refusing to bind {host!r} without auth_token — that exposes an "
-                             "unauthenticated lease authority; pass auth_token=... or bind 127.0.0.1")
+                 auth_token: str | None = None, certfile: str | Path | None = None,
+                 keyfile: str | Path | None = None, ssl_context: ssl.SSLContext | None = None):
+        ssl_context = build_server_context(certfile, keyfile, ssl_context)
+        self._tls = ssl_context is not None
+        enforce_bind_policy(host, auth_token=auth_token, tls=self._tls, service="lease authority")
         self.store = SqliteLeaseStore(db_path)
         self._httpd = ThreadingHTTPServer((host, port), _make_handler(self.store, auth_token))
+        if ssl_context is not None:
+            self._httpd.socket = ssl_context.wrap_socket(self._httpd.socket, server_side=True)
         self._thread: threading.Thread | None = None
 
     @property
@@ -123,7 +134,7 @@ class ControlPlaneServer:
         host, port = self._httpd.server_address[:2]
         if isinstance(host, (bytes, bytearray)):
             host = host.decode()
-        return f"http://{host}:{port}"
+        return f"{scheme(self._tls)}://{host}:{port}"
 
     def start(self) -> ControlPlaneServer:
         self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
@@ -141,10 +152,14 @@ class RemoteLeaseStore:
     """A `LeaseStore` over HTTP — points the scheduler at a `ControlPlaneServer`. The `now` args in
     the Protocol are accepted but ignored: the server is the clock authority."""
 
-    def __init__(self, base_url: str, *, auth_token: str | None = None, timeout: float = 10.0):
+    def __init__(self, base_url: str, *, auth_token: str | None = None, timeout: float = 10.0,
+                 cafile: str | Path | None = None, ssl_context: ssl.SSLContext | None = None,
+                 insecure: bool = False):
         self.base = base_url.rstrip("/")
         self.token = auth_token
         self.timeout = timeout
+        self._ctx = make_client_context(cafile, ssl_context)
+        guard_cleartext_secret(self.base, has_secret=bool(auth_token), insecure=insecure)
 
     def _req(self, method: str, path: str, body: dict | None = None) -> dict:
         headers = {"Content-Type": "application/json"}
@@ -153,7 +168,7 @@ class RemoteLeaseStore:
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(self.base + path, data=data, headers=headers, method=method)
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as r:
+            with urllib.request.urlopen(req, timeout=self.timeout, context=self._ctx) as r:
                 return json.loads(r.read())
         except urllib.error.HTTPError as e:
             if e.code == 409:

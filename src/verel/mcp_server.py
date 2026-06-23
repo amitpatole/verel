@@ -34,6 +34,12 @@ def _err(msg: str) -> dict:
     return {"error": msg}
 
 
+def _env_truthy(name: str) -> bool:
+    """An env flag is ON only for an explicit truthy token — so a stray empty/`0`/`false` value can't
+    silently flip a security default (e.g. VEREL_BRAIN_INSECURE) open."""
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def _resolve_attest(choice: str) -> tuple[str, str | None]:
     """Map the requested attest mode to a concrete scheme. 'auto' → ed25519 when verel[attest] is
     installed, else hmac. Explicit 'ed25519' FAILS CLOSED (returns an error) when unavailable rather
@@ -289,16 +295,20 @@ def _config_dir() -> str:
 def _brain():
     """The shared verified brain — local by default, REMOTE when configured. All read paths (recall)
     use this. Config is operator env, NOT agent-controllable (a tool arg can't repoint it):
-      - VEREL_BRAIN_URL set → a hosted MemoryServer over HTTP (RemoteMemory), with VEREL_BRAIN_TOKEN
-        (bearer) and VEREL_CLUSTER_TOKEN (replication) if set. This is what lets a fleet on different
-        machines draw from ONE authenticated brain.
+      - VEREL_BRAIN_URL set → a hosted MemoryServer over HTTP(S) (RemoteMemory), with VEREL_BRAIN_TOKEN
+        (bearer) and VEREL_CLUSTER_TOKEN (replication) if set. For TLS: VEREL_BRAIN_CACERT points at the
+        CA bundle that signed the brain's cert; VEREL_BRAIN_INSECURE=1 is the explicit opt-out that lets
+        a token ride a cleartext hop (only when a TLS-terminating proxy already encrypts it). This is
+        what lets a fleet on different machines draw from ONE authenticated brain.
       - else → a per-install persistent LocalMemory (VEREL_MEMORY_STORE or ~/.config/verel/brain.db)."""
     url = os.environ.get("VEREL_BRAIN_URL")
     if url:
         from .memory import RemoteMemory
 
         return RemoteMemory(url, auth_token=os.environ.get("VEREL_BRAIN_TOKEN"),
-                            cluster_token=os.environ.get("VEREL_CLUSTER_TOKEN"))
+                            cluster_token=os.environ.get("VEREL_CLUSTER_TOKEN"),
+                            cafile=os.environ.get("VEREL_BRAIN_CACERT"),
+                            insecure=_env_truthy("VEREL_BRAIN_INSECURE"))
     from .memory import LocalMemory
 
     path = os.environ.get("VEREL_MEMORY_STORE") or os.path.join(_config_dir(), "brain.db")
@@ -324,7 +334,9 @@ def _remote_principal():
     if len(seed) != 32:
         raise ValueError("VEREL_PRINCIPAL_SEED must decode to exactly 32 bytes")
     rmem = RemoteMemory(url, auth_token=os.environ.get("VEREL_BRAIN_TOKEN"),
-                        cluster_token=os.environ.get("VEREL_CLUSTER_TOKEN"))
+                        cluster_token=os.environ.get("VEREL_CLUSTER_TOKEN"),
+                        cafile=os.environ.get("VEREL_BRAIN_CACERT"),
+                        insecure=_env_truthy("VEREL_BRAIN_INSECURE"))
     return rmem, Principal(seed)
 
 
@@ -371,7 +383,10 @@ def _tool_recall(args: dict) -> dict:
         except ValueError:
             return _err(f"unknown kind {kraw!r}")
 
-    mem = _brain()
+    try:
+        mem = _brain()   # may fail closed: e.g. a token configured for a cleartext routable URL
+    except ValueError as e:
+        return _err(str(e))
     import urllib.error
     try:
         hits = (lattice_recall(mem, query, scope=scope, kind=kind, k=k) if scope
