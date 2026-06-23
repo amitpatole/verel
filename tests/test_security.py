@@ -49,7 +49,8 @@ def test_no_public_default_signing_secret(monkeypatch, tmp_path):
 
 def test_servers_refuse_unauthenticated_non_loopback_bind(tmp_path):
     """A server must not bind a routable interface without an auth token — that would expose an
-    unauthenticated service to the network (audit N3). Loopback stays zero-config."""
+    unauthenticated service to the network (audit N3). Loopback stays zero-config. A routable bind ALSO
+    requires TLS (item 3, §15.4) — a token alone would cross the wire in cleartext."""
     import pytest
 
     from verel.fleet.control_plane import ControlPlaneServer
@@ -62,13 +63,17 @@ def test_servers_refuse_unauthenticated_non_loopback_bind(tmp_path):
         ControlPlaneServer(str(tmp_path / "cp.db"), host="0.0.0.0")
     with pytest.raises(ValueError, match="auth_token"):
         RegistryServer(tmp_path / "reg", host="0.0.0.0")
+    # a routable bind with a token but NO TLS is now also refused (cleartext token on the wire).
+    with pytest.raises(ValueError, match="TLS"):
+        MemoryServer(":memory:", host="0.0.0.0", auth_token="t")
+    with pytest.raises(ValueError, match="TLS"):
+        ControlPlaneServer(str(tmp_path / "cp.db"), host="0.0.0.0", auth_token="t")
+    with pytest.raises(ValueError, match="TLS"):
+        RegistryServer(tmp_path / "reg", host="0.0.0.0", auth_token="t")
     # loopback with no token is fine (the common local case); release the socket without the
     # serve_forever/shutdown dance (the server was never started).
     srv = MemoryServer(":memory:", host="127.0.0.1")
     srv._httpd.server_close()
-    # a non-loopback bind WITH a token is allowed
-    srv2 = MemoryServer(":memory:", host="0.0.0.0", auth_token="t")
-    srv2._httpd.server_close()
 
 
 def test_lease_terminal_write_is_owner_bound():
