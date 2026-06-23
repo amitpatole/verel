@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.35.0 — MCP `recall`/`remember` over a remote authenticated brain
+
+Roadmap item 2: the MCP tools can now read from and write to a **hosted, multi-principal brain**, so a
+fleet on different machines draws from ONE authenticated memory instead of per-install local stores.
+
+- With `VEREL_BRAIN_URL` set, `verel_recall` reads the remote `MemoryServer` and `verel_remember`
+  authors a **signed write as an authenticated principal** (`VEREL_PRINCIPAL_SEED`, a 32-byte ed25519
+  seed) — the server enforces every guard (reserved-key, non-FACT backstop, cross-principal
+  protection) and the cross-principal `verified` tier (fact-bound `evidence`). Optional
+  `VEREL_BRAIN_TOKEN` (bearer) and `VEREL_CLUSTER_TOKEN` (replication) are threaded through.
+- The local per-install brain stays the **zero-config default** — no behaviour change without the env.
+- **Trust model (honest):** the remote `trust`/`author`/`reverified` reflect the *configured server's*
+  claim (operator-trusted, same tier as a DB URL). An agent wanting integrity independent of the
+  server calls `verel_verify` on the underlying ed25519 receipt — that survives a malicious peer.
+- **Fails closed, never leaks:** missing/invalid seed → can read, can't author; an unenrolled
+  principal is rejected (nothing written); a bad bearer surfaces as `HTTP 401`; an unreachable brain
+  as a clean error — neither echoes the token or seed. Config is operator-env only (no agent tool arg
+  can repoint the brain or forge a principal).
+
+Shipped through a 3-round adversarial red-team (every round clean — only error-wording polish);
+10 tests in `tests/test_mcp_remote_brain.py`. See `docs/SUBSTRATE_DESIGN.md` §15.2.
+
 ## 0.34.0 — cross-principal `verified` tier (fact-bound attestation)
 
 Closes the last brain trust residual: a peer's belief can now earn the **`verified`** tier (not just

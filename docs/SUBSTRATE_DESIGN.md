@@ -505,8 +505,17 @@ now shares the same `is_reserved_key` guard as the remote path (so neither can t
 ledger). Hardened through a 3-round red-team (256-bit commitment; local non-FACT backstop; local
 reserved-key guard).
 
-**Still deferred (honest):** transport confidentiality (TLS) for a routable bind; and wiring the MCP
-`remember` verb to a configured remote principal (today MCP remember is the local brain). Key
+**MCP `remember`/`recall` → remote principal — DONE.** With `VEREL_BRAIN_URL` set, `verel_recall`
+reads the hosted brain and `verel_remember` authors a **signed write as an authenticated principal**
+(`VEREL_PRINCIPAL_SEED`, 32-byte ed25519 seed) — the server enforces every guard above and the
+verified tier; the local brain stays the zero-config default. Config is operator env, never an agent
+tool arg (an agent can't repoint the brain). The returned `trust`/`author`/`reverified` reflect the
+*configured server's* claim (operator-trusted, same tier as a DB URL); an agent wanting integrity
+independent of the server `verel_verify`s the underlying receipt (ed25519, no producer trust). Missing
+seed → fail closed (can read, can't author); bad bearer surfaces as `HTTP 401`, unreachable as a clean
+error — neither leaks the token. 8 tests in `tests/test_mcp_remote_brain.py`; 3-round red-team (clean).
+
+**Still deferred (honest):** transport confidentiality (TLS) for a routable bind. Key
 distribution/enrollment is operator-driven (publish pubkeys), same as receipt keys.
 
 ### 15.3 Security cadence — the controls the red-team rounds added
