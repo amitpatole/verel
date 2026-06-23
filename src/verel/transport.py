@@ -12,6 +12,7 @@ The rule, fail-closed:
 
 from __future__ import annotations
 
+import re
 import ssl
 import threading
 import urllib.request
@@ -201,12 +202,31 @@ def cert_sha256(certfile: str | Path) -> str:
     (Reads the leaf cert from a PEM file.)"""
     import hashlib
 
-    der = ssl.PEM_cert_to_DER_cert(Path(certfile).read_text())
+    try:
+        pem = Path(certfile).read_text()
+    except UnicodeDecodeError as e:
+        raise ValueError(f"{certfile} is not a PEM certificate (expected text, got binary) — "
+                         "pass a PEM file") from e
+    der = ssl.PEM_cert_to_DER_cert(pem)
     return hashlib.sha256(der).hexdigest()
 
 
+_HEX64 = re.compile(r"[0-9a-f]{64}")
+
+
 def _normalize_fp(fp: str) -> str:
-    return fp.replace(":", "").replace(" ", "").strip().lower()
+    # drop ALL whitespace (spaces, tabs, newlines) + colons, lowercase — tolerant of openssl's
+    # AA:BB:.. formatting and stray copy-paste whitespace.
+    return "".join(fp.split()).replace(":", "").lower()
+
+
+def _validated_fp(fp: str) -> str:
+    """Normalize and REQUIRE a full sha256 (64 hex chars). A malformed/empty pin must fail LOUD at
+    build time — never become a silent never-match (a typo'd pin) or an empty-string fail-open primitive."""
+    norm = _normalize_fp(fp)
+    if not _HEX64.fullmatch(norm):
+        raise ValueError(f"invalid sha256 pin {fp!r} — expected 64 hex chars (see transport.cert_sha256)")
+    return norm
 
 
 def guard_cleartext_secret(base_url: str, *, has_secret: bool, insecure: bool) -> None:
@@ -292,8 +312,10 @@ def build_opener(ssl_context: ssl.SSLContext | None,
     disables env proxies so the client connects directly to the URL it was given."""
     if pin_sha256 is not None:
         raw = [pin_sha256] if isinstance(pin_sha256, str) else list(pin_sha256)
-        https: urllib.request.HTTPSHandler = _pinning_https_handler(
-            ssl_context, frozenset(_normalize_fp(p) for p in raw))
+        pins = frozenset(_validated_fp(p) for p in raw)
+        if not pins:
+            raise ValueError("pin_sha256 is empty — pass at least one sha256 fingerprint, or None")
+        https: urllib.request.HTTPSHandler = _pinning_https_handler(ssl_context, pins)
     else:
         https = urllib.request.HTTPSHandler(context=ssl_context)
     return urllib.request.build_opener(urllib.request.ProxyHandler({}), _SecureRedirectHandler, https)

@@ -458,3 +458,33 @@ def test_per_ip_cap_drops_over_one_sources_share(tmp_path):
 def test_max_per_ip_must_be_positive(tmp_path):
     with pytest.raises(ValueError, match="max_per_ip"):
         MemoryServer(db_path=str(tmp_path / "b.db"), max_per_ip=0)
+
+
+# ---- red-team round-2 hardening: malformed pins must fail LOUD, not become a silent never-match ----
+
+def test_malformed_pin_rejected_at_build_time():
+    """An empty/typo'd pin must raise at construction — never silently never-match (a typo) or seed a
+    fail-open empty-string primitive (red-team R2b, LOW)."""
+    from verel.transport import build_opener
+
+    for bad in ["", " ", ":::", "00" * 31, "zz" * 32, []]:
+        with pytest.raises(ValueError):
+            build_opener(None, pin_sha256=bad)
+
+
+def test_valid_pin_accepts_openssl_and_plain_forms():
+    """A real 64-hex sha256, with or without colons / mixed case, is accepted and normalized."""
+    from verel.transport import build_opener
+
+    build_opener(None, pin_sha256="Aa" * 32)            # mixed case, no colons
+    build_opener(None, pin_sha256=":".join(["ab"] * 32))  # openssl colon form
+
+
+def test_cert_sha256_on_non_pem_is_a_clean_error(tmp_path):
+    """A DER/binary file passed to cert_sha256 raises a clear ValueError, not a raw UnicodeDecodeError."""
+    from verel.transport import cert_sha256
+
+    der = tmp_path / "cert.der"
+    der.write_bytes(b"\x30\x82\x01\x00binary-not-pem")
+    with pytest.raises(ValueError):
+        cert_sha256(str(der))
