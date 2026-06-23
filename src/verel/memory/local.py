@@ -163,11 +163,11 @@ class LocalMemory(MemoryView):
         return record
 
     def get(self, record_id: str) -> MemoryRecord | None:
-        row = self._db.execute(f"SELECT {_COLS} FROM memory WHERE id=?", (record_id,)).fetchone()
+        row = self._db.execute(f"SELECT {_COLS} FROM memory WHERE id=?", (record_id,)).fetchone()  # nosec B608 — _COLS is a constant column list; values bind as ?
         return self._row_to_record(row) if row else None
 
     def recall(self, query: str, *, scope=None, kind=None, k: int = 5, ts: float = 0.0):
-        rows = self._db.execute(f"SELECT {_COLS} FROM memory").fetchall()
+        rows = self._db.execute(f"SELECT {_COLS} FROM memory").fetchall()  # nosec B608 — _COLS is a constant column list (no user input in SQL)
         cands = [self._row_to_record(r) for r in rows]
         if scope is not None:
             cands = [c for c in cands if c.scope == scope or c.scope == "global"]
@@ -261,7 +261,7 @@ class LocalMemory(MemoryView):
               stale_after_s: float = STALE_AFTER_S, volatile_ttl_s: float = VOLATILE_TTL_S) -> int:
         """Decay retrieval_strength, expire TTL/volatile/stale records, then prune per §5.
         Pinned memories are exempt. Confidence is never touched. Returns #pruned."""
-        rows = self._db.execute(f"SELECT {_COLS} FROM memory").fetchall()
+        rows = self._db.execute(f"SELECT {_COLS} FROM memory").fetchall()  # nosec B608 — _COLS is a constant column list (no user input in SQL)
         pruned = 0
         for row in rows:
             r = self._row_to_record(row)
@@ -275,7 +275,7 @@ class LocalMemory(MemoryView):
         return pruned
 
     def all(self, *, scope=None, kind=None):
-        rows = self._db.execute(f"SELECT {_COLS} FROM memory").fetchall()
+        rows = self._db.execute(f"SELECT {_COLS} FROM memory").fetchall()  # nosec B608 — _COLS is a constant column list (no user input in SQL)
         recs = [self._row_to_record(r) for r in rows]
         if scope is not None:
             recs = [r for r in recs if r.scope == scope]

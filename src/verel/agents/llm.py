@@ -71,13 +71,16 @@ def chat(messages: list[dict], *, model: str | None = None, temperature: float =
     payload = json.dumps(
         {"model": model, "temperature": temperature, "messages": messages}
     ).encode()
+    if not str(base).lower().startswith(("http://", "https://")):
+        # never let a misconfigured base_url ship the bearer key to a file:/ or custom-scheme target
+        raise LLMError(f"{provider} base_url must be http(s), got {base!r}")
     req = urllib.request.Request(
         f"{base}/chat/completions",
         data=payload,
         headers={"Authorization": f"Bearer {_resolve_key(provider)}", "Content-Type": "application/json"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310 — scheme guarded http(s) above
             data = json.load(resp)
     except urllib.error.HTTPError as e:
         raise LLMError(f"{provider} HTTP {e.code}: {e.read().decode()[:300]}") from e
