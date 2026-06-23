@@ -410,6 +410,71 @@ def test_cross_protocol_signature_rejected():
                         signature=rr.signature, trusted=trusted) is False
 
 
+# --- cross-principal `verified` tier via a fact-bound attestation -----------
+def _attest(subject, predicate, text, verdict=None, attest="ed25519"):
+    from verel.verdict import Verdict, attest_fact
+    return attest_fact(verdict or Verdict.PASS, [], subject=subject, predicate=predicate, text=text,
+                       attest=attest).model_dump()
+
+
+def test_fact_attestation_roundtrip_and_binding():
+    from verel.verdict import Verdict, fact_commitment, verify_fact_attestation
+    att = _attest("retry", "rule", "retry 3x")
+    assert verify_fact_attestation(att, "retry", "rule", "retry 3x", allowed_algs={"ed25519"})
+    # bound to THIS exact claim — a different claim does not verify (no laundering)
+    assert not verify_fact_attestation(att, "retry", "rule", "DIFFERENT", allowed_algs={"ed25519"})
+    assert not verify_fact_attestation(att, "other", "rule", "retry 3x", allowed_algs={"ed25519"})
+    # FAIL verdict is not a verification; hmac is not publicly verifiable
+    assert not verify_fact_attestation(_attest("a", "b", "c", Verdict.FAIL), "a", "b", "c",
+                                       allowed_algs={"ed25519"})
+    assert not verify_fact_attestation(_attest("a", "b", "c", attest="hmac"), "a", "b", "c",
+                                       allowed_algs={"ed25519"})
+    # the commitment binds content, not scope
+    assert fact_commitment("a", "b", "c") == fact_commitment("a", "b", "c")
+
+
+def test_authenticated_remember_earns_verified_with_fact_attestation():
+    alice = Principal.generate()
+    trusted = dict([alice.enroll()])
+    mem = _mem()
+    S, P, X = "deploy", "how", "page oncall"
+    sig = alice.sign_write(subject=S, predicate=P, scope="team", text=X)
+    # no evidence → candidate
+    r0 = authenticated_remember(mem, subject=S, predicate=P, scope="team", text=X, signature=sig,
+                                key_id=alice.key_id, trusted=trusted)
+    assert r0.reverified is False
+    # a fact-bound attestation → verified (trust travels only via a trusted grader's signed PASS)
+    r1 = authenticated_remember(mem, subject=S, predicate=P, scope="team", text=X, signature=sig,
+                                key_id=alice.key_id, trusted=trusted, evidence=_attest(S, P, X))
+    assert r1.reverified is True
+    assert mem.get(make_id(make_key(S, P, "team"))).trust == Trust.VERIFIED
+
+
+def test_unrelated_attestation_does_not_launder_trust():
+    alice = Principal.generate()
+    trusted = dict([alice.enroll()])
+    sig = alice.sign_write(subject="x", predicate="y", scope="team", text="false claim")
+    r = authenticated_remember(_mem(), subject="x", predicate="y", scope="team", text="false claim",
+                               signature=sig, key_id=alice.key_id, trusted=trusted,
+                               evidence=_attest("unrelated", "z", "something else"))
+    assert r.reverified is False   # the receipt is valid but not bound to THIS claim → candidate
+
+
+def test_fact_attestation_over_http(tmp_path):
+    alice = Principal.generate()
+    srv = MemoryServer(db_path=str(tmp_path / "b.db"),
+                       trusted_principals=dict([alice.enroll()])).start()
+    try:
+        cli = RemoteMemory(srv.url)
+        S, P, X = "oncall", "rule", "use pagerduty"
+        r = cli.remember_signed(alice, subject=S, predicate=P, scope="team", text=X,
+                                evidence=_attest(S, P, X))
+        assert r["reverified"] is True
+        assert [x.trust.value for x in cli.recall(X, scope="team")] == ["verified"]
+    finally:
+        srv.stop()
+
+
 def test_explicit_opt_out_keeps_raw_write_open(tmp_path):
     """An operator can explicitly run single-principal-style even with principals enrolled."""
     alice = Principal.generate()

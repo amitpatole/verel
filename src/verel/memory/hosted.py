@@ -152,18 +152,21 @@ def _make_handler(store: MemoryView, lock: threading.Lock, token: str | None,
                 # an enrolled principal), never the caller's say-so. Trust does not travel.
                 from .principal import authenticated_remember
                 from .share import AuthorTrust
+                ev = b.get("evidence")
                 res = authenticated_remember(
                     store, subject=str(b.get("subject", "")), predicate=str(b.get("predicate", "")),
                     scope=str(b.get("scope", "repo:default")), text=str(b["text"]),
                     signature=str(b.get("signature", "")), key_id=str(b.get("key_id", "")),
                     trusted=trusted or {}, kind=_kind(b.get("kind")) or MemoryKind.FACT,
+                    evidence=ev if isinstance(ev, dict) else None,
                     author_trust=AuthorTrust(store), ts=b.get("ts", 0.0))
                 if not res.authenticated:
                     return self._send(403, {"error": res.reason})
                 rid = store.get(_make_id_for(b))
                 return self._send(200, {"authenticated": res.authenticated, "written": res.written,
-                                        "author": res.author, "conflict": res.conflict,
-                                        "reason": res.reason, "record": _rec_json(rid)})
+                                        "author": res.author, "reverified": res.reverified,
+                                        "conflict": res.conflict, "reason": res.reason,
+                                        "record": _rec_json(rid)})
             if self.path == "/recall":
                 hits = store.recall(b["query"], scope=b.get("scope"), kind=_kind(b.get("kind")),
                                     k=b.get("k", 5), ts=b.get("ts", 0.0))
@@ -281,15 +284,20 @@ class RemoteMemory:
         return self._rec(out["record"])  # type: ignore[return-value]
 
     def remember_signed(self, principal, *, subject: str, predicate: str, scope: str, text: str,
-                        kind: MemoryKind = MemoryKind.FACT, ts: float = 0.0) -> dict:
+                        kind: MemoryKind = MemoryKind.FACT, evidence: dict | None = None,
+                        ts: float = 0.0) -> dict:
         """Author a belief on the shared brain as an AUTHENTICATED principal: sign the claim with the
-        principal's key; the server derives `author` from the verified key (forge-proof). Returns the
-        server's authn result {authenticated, written, author, conflict, reason, record}."""
+        principal's key; the server derives `author` from the verified key (forge-proof). Pass a
+        fact-bound `evidence` attestation (a publicly-verifiable GateReceipt over this exact claim) to
+        earn the cross-principal `verified` tier; without it the belief stays a candidate. Returns the
+        server's authn result {authenticated, written, author, reverified, conflict, reason, record}."""
         sig = principal.sign_write(subject=subject, predicate=predicate, scope=scope, text=text)
+        body = {"subject": subject, "predicate": predicate, "scope": scope, "text": text,
+                "kind": kind.value, "signature": sig, "key_id": principal.key_id, "ts": ts}
+        if evidence is not None:
+            body["evidence"] = evidence
         try:
-            return self._req("POST", "/write_signed", {
-                "subject": subject, "predicate": predicate, "scope": scope, "text": text,
-                "kind": kind.value, "signature": sig, "key_id": principal.key_id, "ts": ts})
+            return self._req("POST", "/write_signed", body)
         except urllib.error.HTTPError as e:
             if e.code == 403:  # unauthenticated write rejected — surface it, don't raise
                 body = json.loads(e.read() or b"{}")
