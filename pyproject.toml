@@ -29,7 +29,7 @@ container = ["pyseccomp"]  # seccomp-bpf syscall filter for the §7.7 bwrap cont
 attest = ["pynacl>=1.5"]  # ed25519 publicly-verifiable receipts (substrate §11); HMAC works without it
 mem0 = ["mem0ai>=2.0", "chromadb>=0.5"]
 mcp = ["mcp>=1.0", "anyio>=4"]
-dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.6", "mypy>=1.10"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.6", "mypy>=1.10", "bandit>=1.7"]  # bandit = the pre-merge `security` grader; must be installed for that gate to run (else it fails closed)
 
 [project.scripts]
 verel = "verel.cli:main"
