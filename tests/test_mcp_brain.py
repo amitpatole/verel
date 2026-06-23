@@ -91,6 +91,49 @@ def test_remember_ignores_caller_asserted_trust():
     assert out["trust"] == "candidate"
 
 
+def test_remember_cannot_clobber_a_server_managed_skill():
+    """Red-team (integration): make_id ignores `kind`, so a remember FACT shares an id with a
+    toolsmith SKILL record at the same (subject, predicate, scope). A bare remember — even with a
+    fact-bound attestation — must NOT supersede the skill and destroy its executable detail['tool']
+    body. Mirrors authenticated_remember's structural backstop, which the local tool lacked."""
+    import os as _os
+
+    from verel.memory import LocalMemory, Trust, make_id, make_key
+    from verel.toolsmith.registry import ToolRecord, ToolRegistry
+    from verel.verdict import Verdict, attest_fact
+
+    mem = LocalMemory(_os.environ["VEREL_MEMORY_STORE"])
+    reg = ToolRegistry(mem, scope="global")
+    reg.register(ToolRecord(name="slugify", capability="slug", doc="d", code="def f(): pass",
+                            provenance=[]), trust=Trust.CANDIDATE)   # a freshly built tool is CANDIDATE
+    att = attest_fact(Verdict.PASS, [], subject="slugify", predicate="tool", text="POISON",
+                      attest="ed25519").model_dump()
+    out = dispatch("verel_remember", {"fact": {"subject": "slugify", "predicate": "tool",
+                                               "text": "POISON"}, "scope": "global", "evidence": att})
+    assert out.get("conflict") is True and out.get("fact_attested") is False
+    # the SKILL record (and its executable body) is intact — not overwritten by a FACT
+    rec = mem.get(make_id(make_key("slugify", "tool", "global")))
+    assert rec.kind.value == "skill" and "tool" in rec.detail and reg.get("slugify") is not None
+
+
+def test_remember_cannot_clobber_a_candidate_failure_ledger_entry():
+    """The structural backstop covers ANY non-FACT server-managed record at the colliding key — the
+    failure-regression ledger, an induced design_rule/schema — not just skills, and regardless of
+    trust tier (the verified-only guard didn't catch a CANDIDATE ledger entry)."""
+    import os as _os
+
+    from verel.memory import LocalMemory, MemoryKind, MemoryRecord, Trust, make_id, make_key
+    mem = LocalMemory(_os.environ["VEREL_MEMORY_STORE"])
+    mem.write(MemoryRecord(kind=MemoryKind.FAILURE, subject="flaky", predicate="fails",
+                           text="SERVER-STATE", scope="team", trust=Trust.CANDIDATE,
+                           subj_pred_key=make_key("flaky", "fails", "team")))
+    out = dispatch("verel_remember", {"fact": {"subject": "flaky", "predicate": "fails",
+                                               "text": "CLOBBERED"}, "scope": "team"})
+    assert out.get("conflict") is True
+    rec = mem.get(make_id(make_key("flaky", "fails", "team")))
+    assert rec.kind == MemoryKind.FAILURE and rec.text == "SERVER-STATE"
+
+
 # --- recall: lattice + surfaced trust ---------------------------------------
 def test_recall_surfaces_trust_and_provenance():
     dispatch("verel_remember", {"fact": {"subject": "deploy", "predicate": "how",
