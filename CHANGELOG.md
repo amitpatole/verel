@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.40.0 — remove the metrics dashboard from the package (not a Verel feature)
+
+Reverts the v0.39.0 decision to ship the metrics dashboard inside `verel`. The dashboard is a
+**maintainer tool** — it tracks the author's own projects' adoption and reads GitHub *traffic* data
+(which needs push access via local `gh` auth), so it has no use for anyone who installs Verel. It does
+not belong in the public package.
+
+- Removed `verel.dashboard` and the `verel-dashboard` console script from the package.
+- The dashboard lives under `tools/metrics_dashboard.py` again (not packaged); it keeps the
+  fail-closed auth+TLS hardening and may be extracted into its own project later.
+- No API a Verel user relied on is affected (the dashboard was only ever an extra command).
+
+> **v0.39.0 is yanked** on PyPI/TestPyPI — install `verel>=0.40.0`. (Package versions are immutable;
+> yank, not delete, is the correct supersede.)
+
 ## 0.39.0 — ship the metrics dashboard, hardened (auth + TLS)
 
 The live metrics dashboard graduates from a `tools/` script (which bound `0.0.0.0` **unauthenticated**)
