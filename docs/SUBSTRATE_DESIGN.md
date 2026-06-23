@@ -563,6 +563,10 @@ closed, with loopback staying zero-config.
   socket with `do_handshake_on_connect=False`), so a client that connects and never sends a ClientHello
   can't starve the single-threaded `accept()` — the existing handler timeout reaps it. (Wrapping the
   listener directly, the obvious approach, makes `accept()` handshake inline → a 1-packet unauthenticated DoS.)
+  Concurrency is also **bounded**: a `max_connections` semaphore (default 128) caps in-flight
+  connections — over the cap a connection is dropped rather than parking another worker thread, so a
+  pre-auth stalled-connection flood can't exhaust threads/FDs/memory. The cap self-heals as handlers
+  finish or time out; operators can raise it via `max_connections=`.
 - **Bind policy, tightened (fail closed).** A **non-loopback bind now requires BOTH an `auth_token`
   AND TLS.** Without a cert the server *refuses to start* on a routable host — it will not silently
   serve a bearer-authenticated brain in cleartext. Loopback (`127.0.0.1`, `::1`, `localhost`) is

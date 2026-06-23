@@ -234,6 +234,50 @@ def test_tls_handshake_does_not_starve_accept_loop(tmp_path, cert):
         srv.stop()
 
 
+def test_connection_cap_drops_over_cap_connections(tmp_path):
+    """A flood of stalled connections must not park unbounded worker threads — over `max_connections`
+    in-flight, the server drops (closes) the connection instead of spawning another thread (red-team
+    R3a, MEDIUM)."""
+    import socket
+    import time
+
+    srv = MemoryServer(db_path=str(tmp_path / "b.db"), host="127.0.0.1", max_connections=3).start()
+    try:
+        host, port = srv._httpd.server_address[:2]
+        stalled = [socket.create_connection((host, port)) for _ in range(3)]   # fill all slots
+        try:
+            time.sleep(0.3)
+            assert srv._httpd._slots._value == 0            # cap reached, not negative
+            over = socket.create_connection((host, port))   # over the cap → dropped
+            over.settimeout(3)
+            try:
+                t0 = time.time()
+                assert over.recv(16) == b""                 # server closed it
+                assert time.time() - t0 < 2                 # promptly, not parked
+            finally:
+                over.close()
+        finally:
+            for s in stalled:
+                s.close()
+    finally:
+        srv.stop()
+
+
+def test_connection_slot_released_after_request(tmp_path):
+    """Slots are released when a handler finishes, so a small cap doesn't permanently throttle — many
+    sequential requests succeed through a cap of 2."""
+    srv = MemoryServer(db_path=str(tmp_path / "b.db"), host="127.0.0.1", max_connections=2).start()
+    try:
+        client = RemoteMemory(srv.url)
+        # 6 sequential round-trips through a cap of 2 only complete if each handler RELEASES its slot;
+        # a leaked slot would exhaust the cap and hang by the 3rd request.
+        ids = [client.write(MemoryRecord(kind=MemoryKind.FACT, subject=f"s{i}", predicate="p",
+                                         text=f"rec{i}", scope="team")).id for i in range(6)]
+        assert len(ids) == 6 and all(ids)
+    finally:
+        srv.stop()
+
+
 def test_client_opener_ignores_ambient_proxy(tmp_path, monkeypatch):
     """The client must NOT honor HTTP_PROXY/ALL_PROXY — doing so would ship Authorization to the proxy
     in cleartext even for a loopback http target (red-team R2a, MEDIUM). A dead proxy in env must not

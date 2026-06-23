@@ -27,6 +27,7 @@ from urllib.parse import parse_qs, urlparse
 
 from ..fleet.lease import FencingError
 from ..transport import (
+    _DEFAULT_MAX_CONNECTIONS,
     TLSThreadingHTTPServer,
     build_opener,
     build_server_context,
@@ -218,7 +219,8 @@ class MemoryServer:
                  durable: bool = True, trusted_principals: dict[str, str] | None = None,
                  require_signed_writes: bool | None = None, cluster_token: str | None = None,
                  certfile: str | Path | None = None, keyfile: str | Path | None = None,
-                 ssl_context: ssl.SSLContext | None = None):
+                 ssl_context: ssl.SSLContext | None = None,
+                 max_connections: int = _DEFAULT_MAX_CONNECTIONS):
         # Build the server-side TLS context (if any) BEFORE the bind-policy check, so a routable bind
         # can prove it has transport confidentiality, then fail closed if it's authenticated-but-cleartext.
         ssl_context = build_server_context(certfile, keyfile, ssl_context)
@@ -240,7 +242,8 @@ class MemoryServer:
         self._lock = threading.Lock()
         self._httpd = TLSThreadingHTTPServer(
             (host, port), _make_handler(self.store, self._lock, auth_token, self.trusted_principals,
-                                        self._require_override, cluster_token), ssl_context=ssl_context)
+                                        self._require_override, cluster_token), ssl_context=ssl_context,
+            max_connections=max_connections)
         self._thread: threading.Thread | None = None
 
     def enroll(self, key_id: str, public_key_b64: str) -> None:

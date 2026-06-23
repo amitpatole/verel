@@ -13,12 +13,17 @@ The rule, fail-closed:
 from __future__ import annotations
 
 import ssl
+import threading
 import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
 _DEFAULT_PORTS = {"http": 80, "https": 443}
+# Cap concurrent connections so a flood of slow/stalled (pre-auth) connections can't park unbounded
+# worker threads — each parked thread costs an ~8 MiB stack + an FD until the handler timeout reaps it.
+# Generous for an internal cluster brain; operators can raise it via the server's max_connections=.
+_DEFAULT_MAX_CONNECTIONS = 128
 
 # Hosts that never leave the machine — plain HTTP and no token are fine (the zero-config dev roundtrip).
 # NB: "" is deliberately NOT here — an empty host is the WILDCARD bind (ThreadingHTTPServer(("", p))
@@ -66,16 +71,25 @@ def scheme(tls: bool) -> str:
 
 
 class TLSThreadingHTTPServer(ThreadingHTTPServer):
-    """A `ThreadingHTTPServer` that does the TLS handshake in the per-connection WORKER thread, not in
-    the single-threaded accept loop. Wrapping the *listener* with the default
-    `do_handshake_on_connect=True` makes `accept()` block on the handshake — one client that connects
-    and never sends a ClientHello starves the whole server (an unauthenticated, pre-auth DoS on exactly
-    the routable bind TLS exists for). Instead we wrap each accepted socket WITHOUT handshaking (fast,
-    no I/O) in `get_request`, so the accept loop stays free; the handshake then happens lazily on the
-    first read inside the worker thread, bounded by the handler's socket timeout (the slowloris guard)."""
+    """A `ThreadingHTTPServer` that (1) does the TLS handshake in the per-connection WORKER thread, not
+    in the single-threaded accept loop, and (2) caps concurrent connections.
 
-    def __init__(self, server_address, handler_class, *, ssl_context: ssl.SSLContext | None = None):
+    (1) Wrapping the *listener* with the default `do_handshake_on_connect=True` makes `accept()` block on
+    the handshake — one client that connects and never sends a ClientHello starves the whole server (an
+    unauthenticated, pre-auth DoS on exactly the routable bind TLS exists for). Instead we wrap each
+    accepted socket WITHOUT handshaking (fast, no I/O) in `get_request`, so the accept loop stays free;
+    the handshake then happens lazily on the first read inside the worker thread, bounded by the
+    handler's socket timeout (the slowloris guard).
+
+    (2) Deferring the handshake stops accept-loop starvation but not unbounded CONCURRENCY: a flood of
+    stalled connections would still park one worker thread each until the timeout. A bounded semaphore
+    caps in-flight connections — over the cap, the connection is dropped (closed) rather than parking
+    another thread. The cap self-heals as handlers finish or time out."""
+
+    def __init__(self, server_address, handler_class, *, ssl_context: ssl.SSLContext | None = None,
+                 max_connections: int = _DEFAULT_MAX_CONNECTIONS):
         self._ssl_context = ssl_context
+        self._slots = threading.BoundedSemaphore(max_connections)
         super().__init__(server_address, handler_class)
 
     def get_request(self):
@@ -84,6 +98,23 @@ class TLSThreadingHTTPServer(ThreadingHTTPServer):
             sock = self._ssl_context.wrap_socket(sock, server_side=True,
                                                   do_handshake_on_connect=False)
         return sock, addr
+
+    def process_request(self, request, client_address):
+        # Acquire a slot in the ACCEPT thread (before spawning a worker). Over the cap → drop now, so a
+        # flood can't park more than `max_connections` threads. close_request (not shutdown_request)
+        # avoids releasing a slot we never took (BoundedSemaphore would raise on over-release).
+        if not self._slots.acquire(blocking=False):
+            self.close_request(request)
+            return
+        super().process_request(request, client_address)   # spawns the worker thread
+
+    def shutdown_request(self, request):
+        # Runs once per processed connection (worker thread, in process_request_thread's finally) →
+        # release the slot exactly once, paired with the acquire above.
+        try:
+            super().shutdown_request(request)
+        finally:
+            self._slots.release()
 
 
 def make_client_context(cafile: str | Path | None,
