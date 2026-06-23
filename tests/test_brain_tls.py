@@ -191,3 +191,60 @@ def test_token_set_after_init_is_still_guarded_per_request():
     rm.token = "sneaky"
     with pytest.raises(ValueError, match="cleartext"):
         rm.recall("x", scope="team")
+
+
+def test_redirect_keeps_secret_across_default_port_normalization():
+    """https://h and https://h:443 are the SAME origin — a redirect that only adds/drops the default
+    port must NOT strip the token (round-2 over-strip nit)."""
+    import urllib.request
+
+    from verel.transport import _SecureRedirectHandler
+
+    h = _SecureRedirectHandler()
+    req = urllib.request.Request("https://a.internal/x", headers={"Authorization": "Bearer s"})
+    new = h.redirect_request(req, None, 302, "Found", {}, "https://a.internal:443/y")
+    assert new.headers.get("Authorization") == "Bearer s"
+
+
+# ---- red-team round-2 regression: TLS handshake must not starve the accept loop (unauth DoS) ----
+
+def test_tls_handshake_does_not_starve_accept_loop(tmp_path, cert):
+    """A raw TCP connection that never sends a ClientHello must not block the single-threaded accept
+    loop — the handshake happens in the worker thread, so a concurrent legit request still completes
+    (red-team R2b, HIGH). Pre-fix this hung until timeout."""
+    import socket
+    import time
+
+    crt, key = cert
+    srv = MemoryServer(db_path=str(tmp_path / "b.db"), host="127.0.0.1",
+                       certfile=crt, keyfile=key).start()
+    try:
+        host, port = srv._httpd.server_address[:2]
+        stalled = socket.create_connection((host, port))   # connects, sends nothing
+        try:
+            t0 = time.time()
+            client = RemoteMemory(srv.url, cafile=crt, timeout=8)
+            client.write(MemoryRecord(kind=MemoryKind.FACT, subject="s", predicate="p",
+                                      text="alive", scope="team"))
+            assert [h.text for h in client.recall("alive", scope="team")] == ["alive"]
+            assert time.time() - t0 < 5   # not starved by the stalled handshake
+        finally:
+            stalled.close()
+    finally:
+        srv.stop()
+
+
+def test_client_opener_ignores_ambient_proxy(tmp_path, monkeypatch):
+    """The client must NOT honor HTTP_PROXY/ALL_PROXY — doing so would ship Authorization to the proxy
+    in cleartext even for a loopback http target (red-team R2a, MEDIUM). A dead proxy in env must not
+    break a direct loopback request."""
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:1")
+    monkeypatch.setenv("ALL_PROXY", "http://127.0.0.1:1")
+    srv = MemoryServer(db_path=str(tmp_path / "b.db")).start()
+    try:
+        client = RemoteMemory(srv.url)   # loopback http, no token
+        client.write(MemoryRecord(kind=MemoryKind.FACT, subject="s", predicate="p",
+                                  text="direct", scope="team"))
+        assert [h.text for h in client.recall("direct", scope="team")] == ["direct"]
+    finally:
+        srv.stop()

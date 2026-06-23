@@ -21,12 +21,13 @@ import ssl
 import threading
 import urllib.error
 import urllib.request
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from ..fleet.lease import FencingError
 from ..transport import (
+    TLSThreadingHTTPServer,
     build_opener,
     build_server_context,
     enforce_bind_policy,
@@ -237,11 +238,9 @@ class MemoryServer:
         self._require_override = require_signed_writes
         self.cluster_token = cluster_token
         self._lock = threading.Lock()
-        self._httpd = ThreadingHTTPServer(
+        self._httpd = TLSThreadingHTTPServer(
             (host, port), _make_handler(self.store, self._lock, auth_token, self.trusted_principals,
-                                        self._require_override, cluster_token))
-        if ssl_context is not None:   # encrypt the listening socket (TLS terminates here)
-            self._httpd.socket = ssl_context.wrap_socket(self._httpd.socket, server_side=True)
+                                        self._require_override, cluster_token), ssl_context=ssl_context)
         self._thread: threading.Thread | None = None
 
     def enroll(self, key_id: str, public_key_b64: str) -> None:
