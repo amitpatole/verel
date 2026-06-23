@@ -88,6 +88,10 @@ class TLSThreadingHTTPServer(ThreadingHTTPServer):
 
     def __init__(self, server_address, handler_class, *, ssl_context: ssl.SSLContext | None = None,
                  max_connections: int = _DEFAULT_MAX_CONNECTIONS):
+        if max_connections < 1:
+            # a non-positive cap would silently drop EVERY connection (look like a total hang) — reject
+            # the misconfiguration with a clear error instead.
+            raise ValueError(f"max_connections must be >= 1, got {max_connections}")
         self._ssl_context = ssl_context
         self._slots = threading.BoundedSemaphore(max_connections)
         super().__init__(server_address, handler_class)
@@ -102,17 +106,23 @@ class TLSThreadingHTTPServer(ThreadingHTTPServer):
     def process_request(self, request, client_address):
         # Acquire a slot in the ACCEPT thread (before spawning a worker). Over the cap → drop now, so a
         # flood can't park more than `max_connections` threads. close_request (not shutdown_request)
-        # avoids releasing a slot we never took (BoundedSemaphore would raise on over-release).
+        # avoids releasing a slot we never took.
         if not self._slots.acquire(blocking=False):
             self.close_request(request)
             return
-        super().process_request(request, client_address)   # spawns the worker thread
-
-    def shutdown_request(self, request):
-        # Runs once per processed connection (worker thread, in process_request_thread's finally) →
-        # release the slot exactly once, paired with the acquire above.
         try:
-            super().shutdown_request(request)
+            super().process_request(request, client_address)   # spawns the worker thread
+        except BaseException:
+            self._slots.release()   # the worker never started → release the slot we just took
+            raise
+
+    def process_request_thread(self, request, client_address):
+        # Release is paired HERE (worker thread), not in shutdown_request: shutdown_request also runs on
+        # the verify_request()==False path where process_request never acquired, which would over-release
+        # the BoundedSemaphore. Pairing acquire(process_request)/release(here) is balanced on every path:
+        # accepted+spawned → released here; over-cap drop → never acquired; spawn failure → released above.
+        try:
+            super().process_request_thread(request, client_address)
         finally:
             self._slots.release()
 
