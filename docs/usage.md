@@ -64,7 +64,7 @@ offline examples in `examples/`) run with no key at all.
 | **CLI** | `verel …` | `doctor` · `loop` · `fleet` · `heal` · `ci` |
 | **CI CLI / git hook** | `verel-ci …` | a verdict-bus gate in CI or a pre-commit hook |
 | **MCP server** | `verel-mcp` | exposing gate / recall / build-tool / ci-check to an MCP host |
-| **GitHub Action** | `amitpatole/verel@v0.40.0` | failing a build on a FAIL verdict |
+| **GitHub Action** | `amitpatole/verel@v0.41.0` | failing a build on a FAIL verdict |
 | **pre-commit** | `.pre-commit-hooks.yaml` | gating commits |
 
 ### CLI reference
@@ -93,7 +93,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: amitpatole/verel@v0.40.0
+      - uses: amitpatole/verel@v0.41.0
         with:
           repo: .
           install: "-e .[dev]"      # your project deps so its tests import
@@ -102,7 +102,7 @@ jobs:
 ```yaml
 # .pre-commit-config.yaml
 - repo: https://github.com/amitpatole/verel
-  rev: v0.40.0
+  rev: v0.41.0
   hooks: [{ id: verel-precommit }]
 ```
 
@@ -198,9 +198,9 @@ outcome = RollbackExecutor().maybe_rollback(repo, proposal, reports)
 
 ## The brain — memory that compounds (`verel.memory`)
 
-A trust layer over a swappable backend (`LocalMemory`, zero-dep sqlite; or `mem0`). Each record
-carries **two orthogonal quantities** — `epistemic_confidence` (belief; moved only by
-corroborate/contradict) and `retrieval_strength` (reachability; decays, resets on recall).
+A trust layer over a **pluggable backend**. Each record carries **two orthogonal quantities** —
+`epistemic_confidence` (belief; moved only by corroborate/contradict) and `retrieval_strength`
+(reachability; decays, resets on recall).
 
 ```python
 from verel.memory import LocalMemory, MemoryRecord, MemoryKind
@@ -212,6 +212,26 @@ mem.write(MemoryRecord(kind=MemoryKind.FACT, subject="auth", predicate="uses",
                        subj_pred_key=make_key("auth", "uses", "repo:app")))
 hits = mem.recall("how does login work", scope="repo:app", k=3)
 ```
+
+### Pick a backend (no code change)
+
+Every backend implements one `MemoryView` contract, so the whole trust layer — consolidation, the
+promotion gate, the regression guard — works unchanged whichever you select. Choose one by name with
+`VEREL_MEMORY_BACKEND`; the registry resolves it (`verel doctor` prints the selection):
+
+```python
+from verel.memory import load_backend, known_backends
+print(known_backends())                # ['local', 'remote'] (+ any installed external-DB extra)
+brain = load_backend("local")          # 'local' (SQLite, default) | 'remote' (shared hosted brain)
+```
+
+- **`local`** — zero-dependency SQLite (`VEREL_MEMORY_STORE`, default `~/.config/verel/brain.db`).
+- **`remote`** — a whole fleet shares one authenticated brain over HTTP(S) (`VEREL_BRAIN_URL`).
+- **External DBs** (Postgres/pgvector, LanceDB, Redis) ship as `pip install verel[<db>]` extras that
+  register under the same selector — a third-party package can register its own backend too.
+
+See [`examples/demo_backend_registry.py`](https://github.com/amitpatole/verel/tree/main/examples/demo_backend_registry.py)
+and the [Configuration → Memory backend](configuration.md#memory-backend) table.
 
 Trust is **earned, never asserted** — a candidate reaches `verified` only by passing a held-out,
 agent-inaccessible eval (with a leakage canary):

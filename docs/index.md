@@ -20,11 +20,11 @@ One **verdict bus** unifies vision + tests + lint + types into a single `pass / 
 so *progress*, *"done"*, and *what compounds* are all decided in one place — with grader
 attestation so a hollow check can't mint green.
 
-## The five organs
+## The six organs
 
 | Organ | Module | What it does |
 |---|---|---|
-| 🧠 **Brain** | `verel.memory` | Memory that compounds — only verified facts/skills graduate (held-out, attested promotion gate); lifecycle controls keep it from becoming a junk drawer. |
+| 🧠 **Brain** | `verel.memory` | Memory that compounds — only verified facts/skills graduate (held-out, attested promotion gate); lifecycle controls keep it from becoming a junk drawer. **Pluggable backend** (`VEREL_MEMORY_BACKEND`): local SQLite, a shared hosted brain, or an external DB. |
 | 👁️ **Eyes** | `verel.senses` | **AgentVision** as a perception organ (DOM/contrast/OCR grounded, intent conformance, temporal `watch`) feeding the verdict bus and the brain. |
 | ⚖️ **Verdict bus** | `verel.verdict` | One schema for every sense — advisory ceiling clamp, grader attestation, strict-subset stuck/progress. |
 | 🚁 **Fleet** | `verel.fleet` | Agents managing agents — LLM manager fans out, workers in isolated git worktrees, each gated by the bus. |
@@ -44,9 +44,11 @@ into memory; then the eyes look again.
 
 ## Next
 
+- **[Try it yourself](try-it.md)** — a from-scratch, copy-paste walkthrough (no API key): catch a
+  real bug, fix it, watch Verel remember it so it can't come back.
 - **[Get started](getting-started.md)** — install, the gate, CI/agents adoption.
 - **[5-minute tutorial](tutorial.md)** — gate a repo, heal failing tests, watch a bug get remembered.
-- **[Architecture](ARCHITECTURE.md)** — the five organs and the eval-driven loop.
+- **[Architecture](ARCHITECTURE.md)** — the six organs and the eval-driven loop.
 
 Install: `pip install verel` · Source: [GitHub](https://github.com/amitpatole/verel) ·
 Package: [PyPI](https://pypi.org/project/verel/) · License: MIT.
