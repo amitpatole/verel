@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.38.0 — the security gate, fixed and stricter (dogfooding)
+
+Dogfooding Verel's own pre-merge gate on Verel found that the `security` grader was broken — it
+contradicted its own "HIGH/CRITICAL gate" docstring: it ran `bandit -r .` over the whole tree and
+failed on *any* finding, so it flagged every test `assert` (B101) and all of `.venv`, and could never
+pass on a normal project (and bandit wasn't even a declared dev dependency, so the gate failed closed
+as "security grader absent").
+
+- **bandit is now a `[dev]` dependency** — the pre-merge `security` grader is reproducible (an absent
+  required grader is a red gate, not a silent pass).
+- **The grader is fixed and made a real gate:** scans the shipped package (excludes `tests/`,
+  `tools/`, `scripts/`, `.venv`, build dirs) and **gates on MEDIUM+ severity at MEDIUM+ confidence**
+  (real SQL injection / weak crypto / command injection block a merge; LOW stays advisory).
+- **Verified false-positives resolved at the source** so the gate is green *and* meaningful: a real
+  scheme guard on the LLM/embedding clients (refuse to send the bearer key to a non-`http(s)`
+  `base_url`), and justified `# nosec` on the constant-column SQL, the in-sandbox `--tmpfs` mount, and
+  the restricted-`__builtins__` skill `exec`.
+- Verel's own pre-merge gate now passes at MEDIUM+ with a publicly-verifiable ed25519 receipt
+  (`graders_checked=4`) — the wedge, dogfooded end to end.
+
 ## 0.37.0 — mTLS, certificate pinning, per-IP fairness (closes the §15.4 transport residuals)
 
 Closes the three code-closeable residuals named in v0.36.0 (§15.4), uniformly across the brain, lease
