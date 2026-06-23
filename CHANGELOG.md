@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.36.0 — TLS for routable brain/lease/registry binds
+
+Roadmap item 3: transport confidentiality on any non-loopback bind, fail closed, with loopback staying
+zero-config. The bind policy (§15.2) already refused an *anonymous* routable bind; a token-gated one
+still crossed the wire in **cleartext** (bearer token, cluster credential, signed-write payloads all
+sniffable). This closes that across all three HTTP services — the brain, the lease authority, and the
+registry — via one shared `verel.transport` module.
+
+- **Server TLS.** `MemoryServer`/`ControlPlaneServer`/`RegistryServer` take `certfile=`/`keyfile=` (or a
+  built `ssl_context=`); `url` then reports `https://`. TLS 1.2+ floor.
+- **Bind policy, tightened (fail closed).** A non-loopback bind now requires **both** an `auth_token`
+  **and** TLS, else the server refuses to start. `host=""` is treated as routable (it's the `0.0.0.0`
+  wildcard). Loopback stays plain-HTTP, zero-config.
+- **Client TLS + cleartext-secret guard.** `RemoteMemory`/`ReplicaClient`/`RemoteLeaseStore`/
+  `RemoteRegistry` take `cafile=`/`ssl_context=` (verify internal/pinned CAs) and **refuse to attach a
+  bearer/cluster token to a non-loopback `http://` URL** (re-checked per request on the live token);
+  `insecure=True` opts out for a TLS-terminating proxy.
+- **DoS-resistant.** The TLS handshake runs in the per-connection worker thread (not the accept loop),
+  and a `max_connections` semaphore (default 128, tunable) bounds concurrency — a stalled-connection
+  flood can't starve `accept()` or exhaust threads. The client opener also ignores ambient
+  `HTTP_PROXY`/`ALL_PROXY` (which would ship a token to a proxy in cleartext) and blocks token leaks
+  across HTTP redirects.
+
+Hardened through a **5-round adversarial red-team** (closed a wildcard-host bind bypass, an
+HTTP-redirect token leak, a post-init guard bypass, a TLS-handshake accept-loop DoS, a proxy-env token
+leak, and an unbounded-connection DoS; the last two rounds came back empty). 25 tests in
+`tests/test_brain_tls.py`. See `docs/SUBSTRATE_DESIGN.md` §15.4.
+
 ## 0.35.0 — MCP `recall`/`remember` over a remote authenticated brain
 
 Roadmap item 2: the MCP tools can now read from and write to a **hosted, multi-principal brain**, so a

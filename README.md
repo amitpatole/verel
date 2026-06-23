@@ -8,7 +8,7 @@
   <a href="https://pypi.org/project/verel/"><img src="https://img.shields.io/pypi/v/verel?color=8b7cff&label=pip%20install%20verel" alt="PyPI"></a>
   <a href="https://pepy.tech/projects/verel"><img src="https://static.pepy.tech/personalized-badge/verel?period=total&units=international_system&left_color=black&right_color=green&left_text=downloads" alt="PyPI Downloads"></a>
   <a href="https://amitpatole.github.io/verel/"><img src="https://img.shields.io/badge/docs-amitpatole.github.io-5ad1e6" alt="Docs"></a>
-  <img src="https://img.shields.io/badge/tests-453%20passing-46d39a" alt="tests">
+  <img src="https://img.shields.io/badge/tests-478%20passing-46d39a" alt="tests">
   <img src="https://img.shields.io/badge/ruff%20%2B%20mypy-clean-5ad1e6" alt="lint">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT">
   <img src="https://img.shields.io/badge/LLM-Ollama%20Cloud%20%C2%B7%20OpenAI-8b7cff" alt="LLM">
@@ -132,7 +132,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: amitpatole/verel@v0.35.0
+      - uses: amitpatole/verel@v0.36.0
         with:
           repo: .
           install: "-e .[dev]"     # your project deps so its tests import
@@ -142,7 +142,7 @@ jobs:
 
 ```yaml
 - repo: https://github.com/amitpatole/verel
-  rev: v0.35.0
+  rev: v0.36.0
   hooks: [{ id: verel-precommit }]
 ```
 
