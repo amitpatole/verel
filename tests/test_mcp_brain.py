@@ -14,8 +14,10 @@ from verel.mcp_server import dispatch  # noqa: E402
 
 @pytest.fixture(autouse=True)
 def _brain(tmp_path, monkeypatch):
-    """Isolate the shared brain to a temp db per test (the real store is ~/.config/verel/brain.db)."""
+    """Isolate the shared brain to a temp db per test (the real store is ~/.config/verel/brain.db).
+    Also clear VEREL_BRAIN_URL so an ambient remote-brain env can't route these LOCAL-brain tests."""
     monkeypatch.setenv("VEREL_MEMORY_STORE", str(tmp_path / "brain.db"))
+    monkeypatch.delenv("VEREL_BRAIN_URL", raising=False)
 
 
 def _gate_receipt():
