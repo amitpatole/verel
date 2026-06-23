@@ -82,6 +82,22 @@ def test_remote_unenrolled_principal_is_not_authenticated(tmp_path, monkeypatch)
         srv.stop()
 
 
+def test_remote_wrong_bearer_token_surfaces_http_status(tmp_path, monkeypatch):
+    """A bad bearer token (401) is an HTTPError (⊂URLError) — surface it as an HTTP status, not as
+    'unreachable', and never leak the token."""
+    alice = Principal(bytes.fromhex(_SEED))
+    srv = MemoryServer(db_path=str(tmp_path / "b.db"), auth_token="right-token",
+                       trusted_principals=dict([alice.enroll()])).start()
+    try:
+        monkeypatch.setenv("VEREL_BRAIN_URL", srv.url)
+        monkeypatch.setenv("VEREL_PRINCIPAL_SEED", _SEED)
+        monkeypatch.setenv("VEREL_BRAIN_TOKEN", "WRONG-token")
+        out = dispatch("verel_remember", {"fact": {"subject": "a", "predicate": "b", "text": "x"}})
+        assert "error" in out and "HTTP 401" in out["error"] and "WRONG-token" not in str(out)
+    finally:
+        srv.stop()
+
+
 def test_remote_unreachable_is_a_clean_error(monkeypatch):
     monkeypatch.setenv("VEREL_BRAIN_URL", "http://127.0.0.1:9")   # nothing listening
     monkeypatch.setenv("VEREL_PRINCIPAL_SEED", _SEED)

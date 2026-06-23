@@ -387,7 +387,12 @@ def _tool_remember(args: dict) -> dict:
     GROUNDING (provenance + grounding tag) but does NOT promote to verified: the receipt attests a run,
     not this fact, so auto-promoting would trust the caller's unbound association (red-team round 2,
     finding 1). The `verified` tier is earned by a fact-bound attestation / held-out eval elsewhere.
-    A VERIFIED belief is protected from being silently overwritten here (finding 2)."""
+    A VERIFIED belief is protected from being silently overwritten here (finding 2).
+
+    REMOTE brain (VEREL_BRAIN_URL): authors via a signed principal write; the returned `trust`/`author`/
+    `reverified` reflect the CONFIGURED SERVER's claim (the operator trusts that server, same tier as a
+    DB URL). An agent wanting integrity independent of the server should `verel_verify` the underlying
+    receipt — that survives a malicious peer (ed25519, no producer trust)."""
     from .memory import MemoryKind, MemoryRecord, Trust, make_id, make_key
 
     fact = args.get("fact")
@@ -417,6 +422,8 @@ def _tool_remember(args: dict) -> dict:
             res = rmem.remember_signed(principal, subject=subject, predicate=predicate, scope=scope,
                                        text=fact["text"], kind=MemoryKind.FACT,
                                        evidence=evidence if isinstance(evidence, dict) else None)
+        except urllib.error.HTTPError as e:   # subclass of URLError → catch first (401 bearer, etc.)
+            return _err(f"remote brain rejected the request: HTTP {e.code}")
         except urllib.error.URLError as e:
             return _err(f"remote brain unreachable: {e.reason}")
         rec = res.get("record") or {}
