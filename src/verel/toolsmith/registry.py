@@ -104,7 +104,7 @@ def load_callable(tool: ToolRecord, *, timeout_s: int = 2):
 
     safe_builtins["__import__"] = _safe_import
     ns: dict = {"__builtins__": safe_builtins}
-    exec(compile(tool.code, f"<tool:{tool.name}>", "exec"), ns)  # noqa: S102 — guarded; see docstring
+    exec(compile(tool.code, f"<tool:{tool.name}>", "exec"), ns)  # noqa: S102  # nosec B102 — restricted-__builtins__ sandbox, import-allowlisted (see docstring); strong tier is bwrap+seccomp
     fn = ns.get(tool.name)
     if not callable(fn):
         raise ValueError(f"tool code does not define a callable named {tool.name!r}")
