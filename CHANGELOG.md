@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.39.0 — ship the metrics dashboard, hardened (auth + TLS)
+
+The live metrics dashboard graduates from a `tools/` script (which bound `0.0.0.0` **unauthenticated**)
+to a first-class shipped component, `verel.dashboard`, run via the **`verel-dashboard`** console script.
+It reuses the same fail-closed transport hardening as the brain/lease/registry:
+
+- **Loopback (`127.0.0.1`) default is zero-config** plain http, no token. A **routable bind** (anything
+  else, incl. `0.0.0.0`) **requires both an auth token AND TLS** or it refuses to start — the
+  GitHub-traffic data it shows is account-scoped, so it's never served to the open network
+  unauthenticated. (Verified to bind no socket on refusal.)
+- **Auth** is a constant-time bearer token (`Authorization: Bearer …`) or `?token=…` for a browser;
+  401 before any data is served. TLS handshake runs off the accept loop; global + per-IP connection
+  caps; slowloris timeout — all from the audited `verel.transport`.
+- Config is operator env only: `VEREL_DASHBOARD_HOST` / `VEREL_DASHBOARD_TOKEN` /
+  `VEREL_DASHBOARD_CERT` / `VEREL_DASHBOARD_KEY`. `tools/metrics_dashboard.py` stays as a thin
+  back-compat shim.
+
+A focused red-team (auth bypass / token leakage / SSRF / DoS / fail-closed) came back clean. The
+dashboard passes the MEDIUM+ security gate (a real http(s) scheme guard on its data-fetch path).
+
+> **Operational note:** a systemd unit running the dashboard now needs `VEREL_DASHBOARD_HOST` +
+> `VEREL_DASHBOARD_TOKEN` + `VEREL_DASHBOARD_CERT`/`KEY` to serve on the LAN; otherwise it binds
+> loopback only. (Will be refined further.)
+
 ## 0.38.0 — the security gate, fixed and stricter (dogfooding)
 
 Dogfooding Verel's own pre-merge gate on Verel found that the `security` grader was broken — it
