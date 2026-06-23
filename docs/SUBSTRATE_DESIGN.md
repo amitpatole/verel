@@ -548,3 +548,51 @@ but the FACT-kind reserved-predicate list (`author_trust`, `fails`, `design_rule
 per-name. Any **future** server pipeline that writes a FACT-kind control record on a client-reachable
 key MUST either add its predicate to that denylist or, like `graduate()`, stamp its control fields
 (notably `author`) explicitly. This is a design-discipline obligation, not a current exploitable gap.
+
+### 15.4 Transport confidentiality (TLS) — roadmap item 3
+
+The bind policy (§15.2) refuses an *anonymous* routable bind, but a token-gated one still crossed the
+wire in **cleartext** — the bearer token, the cluster credential, and every signed-write payload were
+sniffable on a routable network. Item 3 closes that: confidentiality on any non-loopback path, fail
+closed, with loopback staying zero-config.
+
+- **Server TLS.** `MemoryServer(certfile=, keyfile=, ssl_context=)` serves over an `ssl.SSLContext`
+  (TLS 1.2+ floor from `create_default_context`); `url` then reports `https://`. Pass a cert/key pair
+  or a fully-built context (e.g. with mTLS / a custom cipher policy). The handshake runs in the
+  per-connection **worker thread**, not the accept loop (`TLSThreadingHTTPServer` wraps each accepted
+  socket with `do_handshake_on_connect=False`), so a client that connects and never sends a ClientHello
+  can't starve the single-threaded `accept()` — the existing handler timeout reaps it. (Wrapping the
+  listener directly, the obvious approach, makes `accept()` handshake inline → a 1-packet unauthenticated DoS.)
+  Concurrency is also **bounded**: a `max_connections` semaphore (default 128) caps in-flight
+  connections — over the cap a connection is dropped rather than parking another worker thread, so a
+  pre-auth stalled-connection flood can't exhaust threads/FDs/memory. The cap self-heals as handlers
+  finish or time out; operators can raise it via `max_connections=`.
+- **Bind policy, tightened (fail closed).** A **non-loopback bind now requires BOTH an `auth_token`
+  AND TLS.** Without a cert the server *refuses to start* on a routable host — it will not silently
+  serve a bearer-authenticated brain in cleartext. Loopback (`127.0.0.1`, `::1`, `localhost`) is
+  unchanged: plain HTTP, no token, zero-config for the local-dev roundtrip. `host=""` is treated as
+  **routable**, not loopback — an empty host is the wildcard `0.0.0.0` bind (all interfaces), the most
+  exposed bind there is.
+- **Client TLS + cleartext-secret guard.** `RemoteMemory`/`ReplicaClient` take `cafile=`/`ssl_context=`
+  so an internal CA or a pinned cert verifies (not only system roots), threaded into a per-client
+  opener. And the client **refuses to attach a bearer or cluster token to a non-loopback `http://`
+  URL** — a secret must never leave the process toward a routable host in cleartext. The guard runs
+  **per request on the live token** (not only at construction), so a token set after the fact can't
+  slip past. An explicit `insecure=True` opts out for a TLS-terminating proxy / mesh that encrypts.
+- **Redirect defense.** `urllib` re-sends request headers (incl. `Authorization`) across a 3xx by
+  default — so an `https://` (even cert-pinned) base URL `302`'d to routable `http://` would otherwise
+  leak the token past the construction-time guard. A `_SecureRedirectHandler` closes this: on any
+  redirect it refuses a cleartext-routable target while a secret is attached, and strips the sensitive
+  headers whenever the origin (scheme, host, port, default-port-normalized) changes — the token never
+  crosses to a server other than the one it was minted for. The client opener also **ignores ambient
+  proxy env** (`HTTP_PROXY`/`ALL_PROXY`): honoring it would ship `Authorization` to the proxy in
+  cleartext even for a loopback http target — these are internal cluster hops, so they connect direct.
+- **MCP wiring.** `_brain()`/`_remote_principal()` read `VEREL_BRAIN_CACERT` (CA bundle for the brain's
+  cert) and `VEREL_BRAIN_INSECURE` (the same explicit cleartext opt-out), operator env only.
+
+**Threat addressed:** a passive on-path attacker on the brain's network. **Residual (named):** TLS
+protects the hop, not the endpoints — a malicious *configured* server still returns whatever
+`trust`/`author` it likes (the §15.2 operator-trust caveat; `verel_verify` the ed25519 receipt for
+endpoint-independent integrity). Certificate *issuance/rotation* is operator-driven (same posture as
+key distribution). Client cert *pinning* beyond CA verification is available via a custom `ssl_context`
+but not a first-class field yet.
