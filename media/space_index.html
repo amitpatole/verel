@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en"><head>
+<html lang="en"><head><script>window.huggingface={variables:{"SPACE_CREATOR_USER_ID":"69a8ab16d8a25438919538eb"}};</script>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>Verel — Verified Agents</title>
@@ -18,82 +18,86 @@
 <meta name="twitter:description" content="Nothing is &quot;done&quot; until a grader returns a verdict — eyes, verdict bus, compounding memory, a fleet, agent-built tooling, agent-run CI/CD."/>
 <meta name="twitter:image" content="https://raw.githubusercontent.com/amitpatole/verel/main/media/og-verel.png"/>
 <style>
-  :root{--bg:#0a0a11;--card:#14141f;--card2:#171724;--line:#262633;--fg:#eceaf7;
-        --mut:#a6a6c4;--acc:#8b7cff;--acc2:#5ad1e6;--good:#46d39a}
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600;8..60,700&family=JetBrains+Mono:wght@400;500&display=swap');
+  :root{--bg:#f7f5f1;--card:#fffdf9;--card2:#fdfbf7;--line:#e3ded4;--fg:#1b1a17;
+        --mut:#6b6862;--faint:#918d84;--acc:#7a72b5;--acc-ink:#564f8c;--good:#3f7d52;
+        --serif:"Source Serif 4",Georgia,serif;--mono:"JetBrains Mono",ui-monospace,Menlo,monospace}
   *{box-sizing:border-box;margin:0;padding:0}
   html{scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;line-height:1.55}
+  body{background:var(--bg);color:var(--fg);font-family:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.6;-webkit-font-smoothing:antialiased}
   a{color:inherit;text-decoration:none}
-  .wrap{max-width:1180px;margin:0 auto;padding:0 24px}
-  /* nav */
-  nav{position:sticky;top:0;z-index:20;backdrop-filter:blur(12px);background:rgba(10,10,17,.72);border-bottom:1px solid var(--line)}
-  nav .wrap{display:flex;align-items:center;justify-content:space-between;height:64px}
-  .brand{display:flex;align-items:center;gap:11px;font-weight:800;font-size:20px;letter-spacing:-.4px}
-  .brand img{width:34px;height:34px;border-radius:9px}
-  .nlinks{display:flex;gap:26px;font-size:15px;color:var(--mut)}
-  .nlinks a:hover{color:#fff}
-  .pill{background:linear-gradient(90deg,#7c6bff,#9a7cff);color:#0a0a11!important;padding:8px 16px;border-radius:10px;font-weight:700;font-size:14px}
-  /* hero */
-  .hero{position:relative;overflow:hidden;border-bottom:1px solid var(--line)}
-  .hero::before{content:"";position:absolute;inset:0;background:radial-gradient(900px 460px at 72% 30%,#241a52 0%,transparent 60%)}
-  .hero .wrap{position:relative;display:grid;grid-template-columns:1.05fr .95fr;gap:36px;align-items:center;padding:70px 24px 64px}
-  .eyebrow{letter-spacing:.3em;text-transform:uppercase;font-size:12.5px;color:var(--acc);font-weight:800}
-  h1{font-size:84px;line-height:.98;letter-spacing:-3px;margin:14px 0 8px;font-weight:850;
-     background:linear-gradient(92deg,#e2ddff,#8b7cff 55%,#5ad1e6);-webkit-background-clip:text;background-clip:text;color:transparent}
-  .lede{font-size:21px;color:#d3d2ea;max-width:560px}
-  .lede b{color:#fff}
-  .cmd{margin:26px 0 14px;display:inline-flex;align-items:center;gap:12px;background:#0e0e18;border:1px solid #2a2a3c;border-radius:12px;padding:13px 18px;font-family:ui-monospace,Menlo,monospace;font-size:17px}
-  .cmd .dollar{color:var(--acc)}
-  .btns{display:flex;gap:12px;flex-wrap:wrap;margin-top:8px}
-  .btn{padding:12px 20px;border-radius:11px;font-weight:700;font-size:15px;border:1px solid #2a2a3c;background:#15151f}
+  .wrap{max-width:1100px;margin:0 auto;padding:0 24px}
+  .ic{display:none}
+  nav{position:sticky;top:0;z-index:20;backdrop-filter:blur(8px);background:rgba(247,245,241,.86);border-bottom:1px solid var(--line)}
+  nav .wrap{display:flex;align-items:center;justify-content:space-between;height:62px}
+  .brand{display:flex;align-items:center;gap:11px;font-family:var(--serif);font-weight:600;font-size:21px;letter-spacing:-.01em;color:var(--fg)}
+  .brand img{width:30px;height:30px;border-radius:7px}
+  .nlinks{display:flex;gap:24px;font-size:15px;color:var(--mut)}
+  .nlinks a:hover{color:var(--fg)}
+  .pill{background:var(--acc-ink);color:var(--bg)!important;padding:8px 16px;border-radius:9px;font-weight:600;font-size:14px}
+  .pill:hover{background:var(--fg)}
+  .hero{position:relative;border-bottom:1px solid var(--line)}
+  .hero::before{content:none}
+  .hero .wrap{position:relative;display:grid;grid-template-columns:1.05fr .95fr;gap:40px;align-items:center;padding:74px 24px 66px}
+  .eyebrow{display:flex;align-items:center;gap:12px;letter-spacing:.2em;text-transform:uppercase;font-size:13px;color:var(--acc-ink);font-weight:600}
+  .eyebrow::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--acc)}
+  h1{font-family:var(--serif);font-size:80px;line-height:.98;letter-spacing:-.02em;margin:18px 0 14px;font-weight:600;color:var(--fg)}
+  .lede{font-family:var(--serif);font-size:23px;line-height:1.42;color:var(--mut);max-width:560px}
+  .lede b{color:var(--fg);font-weight:600}
+  .cmd{margin:28px 0 16px;display:inline-flex;align-items:center;gap:12px;background:#efece4;border:1px solid var(--line);border-radius:10px;padding:13px 18px;font-family:var(--mono);font-size:16px;color:var(--fg)}
+  .cmd .dollar{color:var(--acc-ink)}
+  .btns{display:flex;gap:12px;flex-wrap:wrap;margin-top:10px}
+  .btn{padding:11px 19px;border-radius:9px;font-weight:600;font-size:15px;border:1px solid var(--line);background:var(--card);color:var(--fg)}
   .btn:hover{border-color:var(--acc)}
-  .btn.primary{background:linear-gradient(90deg,#7c6bff,#9a7cff);color:#0a0a11;border:none}
-  .hero img.art{width:100%;border-radius:18px;border:1px solid #2a2540;box-shadow:0 30px 80px -30px #6f5cff66}
+  .btn.primary{background:var(--acc-ink);color:var(--bg);border-color:var(--acc-ink)}
+  .btn.primary:hover{background:var(--fg);border-color:var(--fg)}
+  .hero img.art{width:100%;border-radius:14px;border:1px solid var(--line);box-shadow:none}
   .badges{display:flex;gap:8px;flex-wrap:wrap;margin-top:22px}
-  .badge{font-size:12.5px;color:var(--mut);background:#13131d;border:1px solid var(--line);border-radius:999px;padding:5px 12px}
+  .badge{font-size:12.5px;color:var(--mut);background:var(--card);border:1px solid var(--line);border-radius:999px;padding:5px 12px}
   .badge b{color:var(--good)}
-  /* sections */
   section{padding:64px 0;border-bottom:1px solid var(--line)}
   .sech{text-align:center;margin-bottom:36px}
-  .sech .k{letter-spacing:.22em;text-transform:uppercase;font-size:12.5px;color:var(--acc);font-weight:800}
-  .sech h2{font-size:38px;letter-spacing:-1px;margin-top:8px}
-  .sech p{color:var(--mut);font-size:17px;max-width:680px;margin:10px auto 0}
-  /* loop */
-  .loopart{width:100%;border-radius:16px;border:1px solid #241f3a;margin-bottom:26px}
+  .sech .k{letter-spacing:.2em;text-transform:uppercase;font-size:13px;color:var(--acc-ink);font-weight:600}
+  .sech h2{font-family:var(--serif);font-size:37px;letter-spacing:-.01em;margin-top:8px;font-weight:600}
+  .sech p{color:var(--mut);font-size:17px;max-width:700px;margin:10px auto 0}
+  .loopart{width:100%;border-radius:14px;border:1px solid var(--line);margin-bottom:26px}
   .steps{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
-  .step{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 12px;text-align:center}
-  .step .ic{font-size:26px}.step .t{font-weight:700;margin-top:7px}.step .s{font-size:13px;color:var(--mut);margin-top:3px}
-  .step.win{background:linear-gradient(135deg,#16271f,#12211b);border-color:#2c5c46}.step.win .t{color:var(--good)}
-  /* organs */
+  .step{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px 12px;text-align:center}
+  .step .t{font-family:var(--serif);font-weight:600;margin-top:2px;font-size:18px}.step .s{font-size:13px;color:var(--mut);margin-top:4px}
+  .step.win{background:var(--card);border-color:var(--good);border-left:2px solid var(--good)}.step.win .t{color:var(--good)}
   .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
-  .organ{background:var(--card2);border:1px solid var(--line);border-radius:16px;padding:24px;transition:transform .15s,border-color .15s}
-  .organ:hover{transform:translateY(-3px);border-color:#3a3358}
-  .organ .ic{font-size:30px}.organ h3{font-size:20px;margin:10px 0 7px}
+  .organ{background:var(--card);border:1px solid var(--line);border-left:2px solid var(--acc);border-radius:10px;padding:24px;transition:transform .15s}
+  .organ:hover{transform:translateY(-2px)}
+  .organ h3{font-family:var(--serif);font-size:21px;margin:0 0 7px;font-weight:600}
   .organ p{font-size:14.5px;color:var(--mut)}
-  .organ code{display:inline-block;margin-top:12px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:var(--acc2)}
-  /* scenarios */
+  .organ code{display:inline-block;margin-top:12px;font-family:var(--mono);font-size:12.5px;color:var(--acc-ink);background:#efece4;padding:2px 7px;border-radius:5px}
   .scns{display:grid;grid-template-columns:repeat(2,1fr);gap:18px}
-  .scn{background:var(--card2);border:1px solid var(--line);border-radius:16px;padding:22px 22px 18px;transition:transform .15s,border-color .15s}
-  .scn:hover{transform:translateY(-3px);border-color:#3a3358}
+  .scn{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:22px 22px 18px;transition:transform .15s}
+  .scn:hover{transform:translateY(-2px)}
   .scn .top{display:flex;align-items:baseline;gap:10px}
-  .scn .num{font-size:13px;font-weight:800;color:var(--acc);background:#1e1940;border:1px solid #322a5c;border-radius:8px;padding:2px 9px}
-  .scn h3{font-size:17.5px;margin:0}
+  .scn .num{font-family:var(--mono);font-size:13px;font-weight:600;color:var(--acc-ink);background:#efece4;border:1px solid var(--line);border-radius:7px;padding:2px 9px}
+  .scn h3{font-family:var(--serif);font-size:18px;margin:0;font-weight:600}
   .scn p{font-size:14px;color:var(--mut);margin:10px 0 12px}
-  .scn pre{background:#0b0b12;border:1px solid #20202e;border-radius:10px;padding:12px 13px;overflow:auto;font-family:ui-monospace,Menlo,monospace;font-size:12px;line-height:1.5;color:#c7c4e0}
-  .scn pre b{color:var(--good);font-weight:700}
-  .scn .run{display:inline-block;margin-top:11px;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--acc2)}
-  /* diagrams + infographic */
-  .info img,.diagram{width:100%;border-radius:18px;border:1px solid #241f3a;box-shadow:0 30px 80px -40px #6f5cff55}
-  .diagram{display:block;background:#0b0b12}
-  /* stats */
+  .scn pre{background:#efece4;border:1px solid var(--line);border-radius:9px;padding:12px 13px;overflow:auto;font-family:var(--mono);font-size:12px;line-height:1.55;color:#3a3836}
+  .scn pre b{color:var(--good);font-weight:600}
+  .scn .run{display:inline-block;margin-top:11px;font-family:var(--mono);font-size:12px;color:var(--acc-ink)}
+  .info img,.diagram{width:100%;border-radius:14px;border:1px solid var(--line);box-shadow:none}
+  .diagram{display:block;background:var(--card)}
   .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
-  .stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:24px;text-align:center}
-  .stat .n{font-size:40px;font-weight:850;background:linear-gradient(90deg,#cfc8ff,#8b7cff);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:24px;text-align:center}
+  .stat .n{font-family:var(--serif);font-size:40px;font-weight:600;color:var(--acc-ink)}
   .stat .l{font-size:13.5px;color:var(--mut);margin-top:4px}
-  footer{padding:40px 0;text-align:center;color:#9494b6;font-size:14px}
-  @media(max-width:880px){.hero .wrap{grid-template-columns:1fr}.steps,.grid,.stats,.scns{grid-template-columns:1fr 1fr}h1{font-size:60px}.nlinks{display:none}}
+  footer{padding:44px 0;text-align:center;color:var(--mut);font-size:14px}
+  footer .sig{font-family:var(--serif);font-style:italic;color:var(--acc-ink);font-size:18px;display:block;margin-top:12px}
+  @media(max-width:880px){.hero .wrap{grid-template-columns:1fr}.steps,.grid,.stats,.scns{grid-template-columns:1fr 1fr}h1{font-size:58px}.nlinks{display:none}}
   @media(max-width:620px){.scns{grid-template-columns:1fr}}
-.mtabs{display:flex;gap:8px;justify-content:center;margin-bottom:16px}.mtab{background:var(--card2);border:1px solid var(--line);color:var(--mut);border-radius:10px;padding:8px 18px;font-weight:700;font-size:14px;cursor:pointer}.mtab.on{border-color:var(--acc);color:#fff}#hmap{height:520px;max-width:1000px;margin:0 auto;border:1px solid var(--line);border-radius:18px;background:#0b0b12}.mnote{text-align:center;color:var(--mut);font-size:13px;margin-top:14px}.jvm-tooltip{background:#14141f!important;border:1px solid var(--line)!important;border-radius:8px!important;color:var(--fg)!important;padding:6px 10px!important}</style>
+  .mtabs{display:flex;gap:8px;justify-content:center;margin-bottom:16px}
+  .mtab{background:var(--card);border:1px solid var(--line);color:var(--mut);border-radius:9px;padding:8px 18px;font-weight:600;font-size:14px;cursor:pointer}
+  .mtab.on{border-color:var(--acc);color:var(--acc-ink);background:#efece4}
+  #hmap{height:520px;max-width:1000px;margin:0 auto;border:1px solid var(--line);border-radius:14px;background:var(--card)}
+  .mnote{text-align:center;color:var(--mut);font-size:13px;margin-top:14px}
+  .jvm-tooltip{background:#fffdf9!important;border:1px solid var(--line)!important;border-radius:8px!important;color:var(--fg)!important;padding:6px 10px!important;font-family:var(--mono)!important;font-size:12px!important}
+</style>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/jsvectormap@1.5.3/dist/css/jsvectormap.min.css"></head>
 <body>
 <nav><div class="wrap">
@@ -107,7 +111,7 @@
 
 <header class="hero" id="top"><div class="wrap">
   <div>
-    <div class="eyebrow">👁️🧠 Verified Agents Framework</div>
+    <div class="eyebrow">Verified Agents Framework</div>
     <h1>Verel</h1>
     <p class="lede">The agent framework where nothing is <b>“done”</b> until a grader returns a
        <b>verdict</b> — checked by real senses including <b>eyes</b> — and only <b>verified</b>
@@ -246,17 +250,18 @@ quorum read, leader DOWN → still returns
 
 <section id="map-section"><div class="wrap">
   <div class="sech"><div class="k">Global adoption</div><h2>Where it's installed</h2>
-    <p>Real PyPI downloads by country &mdash; last 30 days, via BigQuery. <b>Verel ~8.1k</b> &middot; <b>AgentVision ~4.1k</b> downloads across 60+ countries.</p></div>
+    <p>Real PyPI downloads by country &mdash; last 30 days, via BigQuery. <b>Verel ~9.6k</b> &middot; <b>AgentVision ~5.6k</b> downloads across 60+ countries.</p></div>
   <div class="mtabs"><button class="mtab on" data-p="verel">Verel</button><button class="mtab" data-p="agentvision">AgentVision</button></div>
   <div id="hmap"></div>
-  <p class="mnote">Hover a country for its 30-day download count &middot; snapshot 2026-06-22</p>
+  <p class="mnote">Hover a country for its 30-day download count &middot; snapshot 2026-06-23</p>
 </div></section>
 <section><div class="wrap"><div class="sech"><div class="k">Adopt</div><h2>Drop it into your workflow &amp; agents</h2></div><p>CI gate in one step (<code>uses: amitpatole/verel@v0.32.0</code>) — tests + lint + types in one verdict — a pre-commit hook, or <code>verel-ci check</code> in any script. For agents: <code>verel-mcp</code> exposes the verdict bus + memory, with AgentVision as the eyes.</p></div></section>
 <footer>
   <p>Verel gates its own development with its own verdict bus. © Amit Patole · eyes by
-     <a href="https://github.com/amitpatole/agent-vision" style="color:var(--acc)">AgentVision</a></p>
+     <a href="https://github.com/amitpatole/agent-vision" style="color:var(--acc-ink)">AgentVision</a></p>
+  <span class="sig">— amitpatole</span>
 </footer>
-<script src="https://cdn.jsdelivr.net/npm/jsvectormap@1.5.3/dist/js/jsvectormap.min.js"></script><script src="https://cdn.jsdelivr.net/npm/jsvectormap@1.5.3/dist/maps/world.js"></script><script>window.HFCOUNTRY={"projects": {"verel": {"US": 4871, "us": 4871, "DE": 611, "de": 611, "HK": 336, "hk": 336, "JP": 320, "jp": 320, "CN": 313, "cn": 313, "SG": 206, "sg": 206, "GB": 204, "gb": 204, "FR": 203, "fr": 203, "FI": 153, "fi": 153, "NO": 125, "no": 125, "IT": 122, "it": 122, "KR": 100, "kr": 100, "DK": 72, "dk": 72, "RU": 72, "ru": 72, "NL": 62, "nl": 62, "SE": 53, "se": 53, "IE": 53, "ie": 53, "CA": 42, "ca": 42, "IN": 32, "in": 32, "AU": 22, "au": 22, "CL": 18, "cl": 18, "MD": 17, "md": 17, "BE": 16, "be": 16, "NP": 15, "np": 15, "PL": 14, "pl": 14, "TH": 12, "th": 12, "LT": 11, "lt": 11, "TW": 5, "tw": 5, "ES": 2, "es": 2, "PT": 2, "pt": 2, "SA": 2, "sa": 2, "EE": 2, "ee": 2, "TR": 2, "tr": 2, "VG": 2, "vg": 2, "NZ": 2, "nz": 2, "IM": 2, "im": 2, "AE": 1, "ae": 1, "CZ": 1, "cz": 1, "ID": 1, "id": 1, "TN": 1, "tn": 1, "MO": 1, "mo": 1, "MT": 1, "mt": 1, "IL": 1, "il": 1, "BR": 1, "br": 1, "AL": 1, "al": 1, "QA": 1, "qa": 1, "PA": 1, "pa": 1, "HU": 1, "hu": 1, "KH": 1, "kh": 1, "LV": 1, "lv": 1, "ZA": 1, "za": 1, "GL": 1, "gl": 1, "PK": 1, "pk": 1, "VN": 1, "vn": 1, "BG": 1, "bg": 1, "CY": 1, "cy": 1, "AT": 1, "at": 1, "RS": 1, "rs": 1, "GR": 1, "gr": 1, "BS": 1, "bs": 1}, "agentvision": {"US": 2227, "us": 2227, "DE": 614, "de": 614, "CN": 182, "cn": 182, "HK": 148, "hk": 148, "JP": 145, "jp": 145, "FR": 120, "fr": 120, "GB": 104, "gb": 104, "SG": 103, "sg": 103, "FI": 64, "fi": 64, "NO": 52, "no": 52, "KR": 46, "kr": 46, "DK": 36, "dk": 36, "RU": 33, "ru": 33, "NL": 32, "nl": 32, "IE": 28, "ie": 28, "CA": 25, "ca": 25, "SE": 21, "se": 21, "CL": 11, "cl": 11, "AU": 11, "au": 11, "BE": 10, "be": 10, "IN": 10, "in": 10, "TW": 6, "tw": 6, "CH": 3, "ch": 3, "LT": 3, "lt": 3, "TH": 2, "th": 2, "MD": 2, "md": 2, "VN": 2, "vn": 2, "RO": 2, "ro": 2, "CY": 1, "cy": 1, "TR": 1, "tr": 1, "RS": 1, "rs": 1, "IM": 1, "im": 1, "BG": 1, "bg": 1, "MO": 1, "mo": 1, "EE": 1, "ee": 1, "NP": 1, "np": 1, "LV": 1, "lv": 1, "KZ": 1, "kz": 1, "KH": 1, "kh": 1, "IQ": 1, "iq": 1}}, "labels": {"verel": "Verel", "agentvision": "AgentVision"}};</script><script>
+<script src="https://cdn.jsdelivr.net/npm/jsvectormap@1.5.3/dist/js/jsvectormap.min.js"></script><script src="https://cdn.jsdelivr.net/npm/jsvectormap@1.5.3/dist/maps/world.js"></script><script>window.HFCOUNTRY={"projects": {"verel": {"US": 5666, "us": 5666, "DE": 703, "de": 703, "HK": 402, "hk": 402, "JP": 390, "jp": 390, "CN": 373, "cn": 373, "GB": 256, "gb": 256, "FR": 256, "fr": 256, "SG": 236, "sg": 236, "FI": 175, "fi": 175, "NO": 162, "no": 162, "NL": 129, "nl": 129, "IT": 122, "it": 122, "KR": 108, "kr": 108, "DK": 106, "dk": 106, "RU": 88, "ru": 88, "SE": 65, "se": 65, "IE": 63, "ie": 63, "CA": 49, "ca": 49, "IN": 41, "in": 41, "AU": 26, "au": 26, "CL": 22, "cl": 22, "MD": 18, "md": 18, "BE": 16, "be": 16, "NP": 15, "np": 15, "LT": 15, "lt": 15, "PL": 14, "pl": 14, "TH": 12, "th": 12, "TW": 6, "tw": 6, "VG": 3, "vg": 3, "EE": 3, "ee": 3, "SA": 2, "sa": 2, "TR": 2, "tr": 2, "IM": 2, "im": 2, "AT": 2, "at": 2, "NZ": 2, "nz": 2, "PT": 2, "pt": 2, "ES": 2, "es": 2, "GL": 1, "gl": 1, "EG": 1, "eg": 1, "ZA": 1, "za": 1, "TN": 1, "tn": 1, "QA": 1, "qa": 1, "KH": 1, "kh": 1, "AL": 1, "al": 1, "AM": 1, "am": 1, "IL": 1, "il": 1, "PA": 1, "pa": 1, "RS": 1, "rs": 1, "MO": 1, "mo": 1, "GR": 1, "gr": 1, "HU": 1, "hu": 1, "LU": 1, "lu": 1, "AE": 1, "ae": 1, "MT": 1, "mt": 1, "ID": 1, "id": 1}, "agentvision": {"US": 3090, "us": 3090, "DE": 837, "de": 837, "CN": 239, "cn": 239, "HK": 202, "hk": 202, "JP": 195, "jp": 195, "FR": 156, "fr": 156, "SG": 144, "sg": 144, "GB": 135, "gb": 135, "FI": 81, "fi": 81, "NO": 74, "no": 74, "NL": 69, "nl": 69, "KR": 56, "kr": 56, "RU": 49, "ru": 49, "DK": 46, "dk": 46, "IE": 37, "ie": 37, "SE": 35, "se": 35, "CA": 27, "ca": 27, "CL": 16, "cl": 16, "AU": 15, "au": 15, "BE": 12, "be": 12, "IN": 10, "in": 10, "LT": 7, "lt": 7, "TW": 7, "tw": 7, "EE": 3, "ee": 3, "AT": 3, "at": 3, "MD": 3, "md": 3, "CH": 3, "ch": 3, "RO": 2, "ro": 2, "VN": 2, "vn": 2, "TH": 2, "th": 2, "VG": 2, "vg": 2, "CY": 1, "cy": 1, "KH": 1, "kh": 1, "LV": 1, "lv": 1, "BG": 1, "bg": 1, "IM": 1, "im": 1, "IQ": 1, "iq": 1, "IL": 1, "il": 1, "NP": 1, "np": 1, "QA": 1, "qa": 1, "KZ": 1, "kz": 1, "TR": 1, "tr": 1, "RS": 1, "rs": 1, "IT": 1, "it": 1, "MO": 1, "mo": 1}}, "labels": {"verel": "Verel", "agentvision": "AgentVision"}};</script><script>
 (function(){
   var C=window.HFCOUNTRY; if(!C||!window.jsVectorMap) return;
   var cur=Object.keys(C.projects)[0], map=null;
@@ -265,8 +270,8 @@ quorum read, leader DOWN → still returns
     cur=p; var h=document.getElementById('hmap'); if(!h) return;
     if(map){try{map.destroy();}catch(e){}} h.innerHTML='';
     map=new jsVectorMap({selector:'#hmap',map:'world',zoomButtons:true,backgroundColor:'transparent',
-      regionStyle:{initial:{fill:'#1c1c2b',stroke:'#0a0a11',strokeWidth:0.4},hover:{fill:'#5ad1e6'}},
-      series:{regions:[{attribute:'fill',scale:['#241f45','#6a5acd','#8b7cff','#5ad1e6'],normalizeFunction:'polynomial',values:vals(p)}]},
+      regionStyle:{initial:{fill:'#e6e1d6',stroke:'#f7f5f1',strokeWidth:0.5},hover:{fill:'#7a72b5'}},
+      series:{regions:[{attribute:'fill',scale:['#ece8df','#bcb4dd','#8f86c2','#564f8c'],normalizeFunction:'polynomial',values:vals(p)}]},
       onRegionTooltipShow:function(e,tt,code){var v=vals(cur)[code]||vals(cur)[code&&code.toUpperCase()]||0;tt.text('<b>'+tt.text()+'</b><br>'+v.toLocaleString()+' downloads',true);}});
     document.querySelectorAll('.mtab').forEach(function(b){b.classList.toggle('on',b.dataset.p===cur);});
   }
