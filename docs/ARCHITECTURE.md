@@ -15,7 +15,7 @@ see the [changelog](https://github.com/amitpatole/verel/blob/main/CHANGELOG.md).
 
 ---
 
-## The five organs
+## The six organs
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/amitpatole/verel/main/media/architecture.png" alt="Verel system architecture" width="100%">
@@ -55,8 +55,13 @@ to a single verdict under a few load-bearing rules:
 ## The Brain — memory that compounds (`verel.memory`)
 
 Memory is state stored outside the model and selectively re-injected. Verel owns the **trust
-layer** over a (swappable) backend — `LocalMemory` (zero-dependency SQLite) or `mem0` — behind
-a single `MemoryView` protocol.
+layer** over a **pluggable** backend behind a single `MemoryView` protocol. A backend is selected by
+name (`VEREL_MEMORY_BACKEND`) through a registry: built-in `local` (zero-dependency SQLite) and
+`remote` (a shared hosted brain over HTTP(S)), plus external databases (Postgres/pgvector, LanceDB,
+Redis) shipped as `pip install verel[<db>]` extras — and third parties can register their own via the
+`verel.memory_backends` entry-point group. Because every backend implements the same `MemoryView`
+contract, everything below (consolidation, the promotion gate, replication, the failure ledger) works
+unchanged whichever store is selected; the store provides relevance, Verel owns the ranking and trust.
 
 Each record carries **two orthogonal quantities, never collapsed into one**:
 - `epistemic_confidence` — how true we believe it is. Moved **only** by corroboration (+) and
@@ -237,7 +242,7 @@ Default LLM provider is Ollama Cloud; OpenAI is the bundled fallback, and the pr
 
 ## Roadmap
 
-**Done (all five organs, end-to-end):** verdict bus with attestation; AgentVision sight
+**Done (all six organs, end-to-end):** verdict bus with attestation; AgentVision sight
 adapter; the memory trust layer with consolidation + promotion gate (LocalMemory and mem0);
 semantic recall; the fleet (manager + scheduler + worktrees); the tool-smith with subprocess
 and container isolation; the full CI/CD stage table with self-healing and rollback; a

@@ -206,5 +206,8 @@ python examples/demo_shared_brain.py      # 6 · shared brain — un-poisonable,
 ```
 
 More feature-level demos (consolidation into structured rules, the tool-smith lifecycle, semantic
-recall, the H2 cross-tenant transfer experiment) live in
-[`examples/`](https://github.com/amitpatole/verel/tree/main/examples).
+recall, **pluggable memory backends** — `demo_backend_registry.py`, the H2 cross-tenant transfer
+experiment) live in [`examples/`](https://github.com/amitpatole/verel/tree/main/examples).
+
+New here? The fastest hands-on path is **[Try it yourself](try-it.md)** — a from-scratch,
+copy-paste walkthrough (no API key) where you catch a real bug, fix it, and watch Verel remember it.
