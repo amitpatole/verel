@@ -556,9 +556,13 @@ wire in **cleartext** — the bearer token, the cluster credential, and every si
 sniffable on a routable network. Item 3 closes that: confidentiality on any non-loopback path, fail
 closed, with loopback staying zero-config.
 
-- **Server TLS.** `MemoryServer(certfile=, keyfile=, ssl_context=)` wraps the listening socket with an
-  `ssl.SSLContext` (`server_side=True`); `url` then reports `https://`. Pass a cert/key pair or a
-  fully-built context (e.g. with mTLS / a custom cipher policy).
+- **Server TLS.** `MemoryServer(certfile=, keyfile=, ssl_context=)` serves over an `ssl.SSLContext`
+  (TLS 1.2+ floor from `create_default_context`); `url` then reports `https://`. Pass a cert/key pair
+  or a fully-built context (e.g. with mTLS / a custom cipher policy). The handshake runs in the
+  per-connection **worker thread**, not the accept loop (`TLSThreadingHTTPServer` wraps each accepted
+  socket with `do_handshake_on_connect=False`), so a client that connects and never sends a ClientHello
+  can't starve the single-threaded `accept()` — the existing handler timeout reaps it. (Wrapping the
+  listener directly, the obvious approach, makes `accept()` handshake inline → a 1-packet unauthenticated DoS.)
 - **Bind policy, tightened (fail closed).** A **non-loopback bind now requires BOTH an `auth_token`
   AND TLS.** Without a cert the server *refuses to start* on a routable host — it will not silently
   serve a bearer-authenticated brain in cleartext. Loopback (`127.0.0.1`, `::1`, `localhost`) is
@@ -575,8 +579,10 @@ closed, with loopback staying zero-config.
   default — so an `https://` (even cert-pinned) base URL `302`'d to routable `http://` would otherwise
   leak the token past the construction-time guard. A `_SecureRedirectHandler` closes this: on any
   redirect it refuses a cleartext-routable target while a secret is attached, and strips the sensitive
-  headers whenever the origin (scheme, host, port) changes — the token never crosses to a server other
-  than the one it was minted for.
+  headers whenever the origin (scheme, host, port, default-port-normalized) changes — the token never
+  crosses to a server other than the one it was minted for. The client opener also **ignores ambient
+  proxy env** (`HTTP_PROXY`/`ALL_PROXY`): honoring it would ship `Authorization` to the proxy in
+  cleartext even for a loopback http target — these are internal cluster hops, so they connect direct.
 - **MCP wiring.** `_brain()`/`_remote_principal()` read `VEREL_BRAIN_CACERT` (CA bundle for the brain's
   cert) and `VEREL_BRAIN_INSECURE` (the same explicit cleartext opt-out), operator env only.
 

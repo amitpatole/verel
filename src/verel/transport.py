@@ -14,8 +14,11 @@ from __future__ import annotations
 
 import ssl
 import urllib.request
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
+
+_DEFAULT_PORTS = {"http": 80, "https": 443}
 
 # Hosts that never leave the machine — plain HTTP and no token are fine (the zero-config dev roundtrip).
 # NB: "" is deliberately NOT here — an empty host is the WILDCARD bind (ThreadingHTTPServer(("", p))
@@ -62,6 +65,27 @@ def scheme(tls: bool) -> str:
     return "https" if tls else "http"
 
 
+class TLSThreadingHTTPServer(ThreadingHTTPServer):
+    """A `ThreadingHTTPServer` that does the TLS handshake in the per-connection WORKER thread, not in
+    the single-threaded accept loop. Wrapping the *listener* with the default
+    `do_handshake_on_connect=True` makes `accept()` block on the handshake — one client that connects
+    and never sends a ClientHello starves the whole server (an unauthenticated, pre-auth DoS on exactly
+    the routable bind TLS exists for). Instead we wrap each accepted socket WITHOUT handshaking (fast,
+    no I/O) in `get_request`, so the accept loop stays free; the handshake then happens lazily on the
+    first read inside the worker thread, bounded by the handler's socket timeout (the slowloris guard)."""
+
+    def __init__(self, server_address, handler_class, *, ssl_context: ssl.SSLContext | None = None):
+        self._ssl_context = ssl_context
+        super().__init__(server_address, handler_class)
+
+    def get_request(self):
+        sock, addr = super().get_request()
+        if self._ssl_context is not None:
+            sock = self._ssl_context.wrap_socket(sock, server_side=True,
+                                                  do_handshake_on_connect=False)
+        return sock, addr
+
+
 def make_client_context(cafile: str | Path | None,
                         ssl_context: ssl.SSLContext | None) -> ssl.SSLContext | None:
     """The client TLS context: a caller-supplied context wins (mTLS / pinning); else a default
@@ -96,6 +120,11 @@ class _SecureRedirectHandler(urllib.request.HTTPRedirectHandler):
     sensitive headers whenever the origin (scheme, host, port) changes, so the secret never crosses to a
     different server than the one it was minted for."""
 
+    @staticmethod
+    def _origin(url: str) -> tuple:
+        p = urlparse(url)
+        return (p.scheme, p.hostname, p.port or _DEFAULT_PORTS.get(p.scheme))
+
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         new = super().redirect_request(req, fp, code, msg, headers, newurl)
         if new is None:
@@ -103,18 +132,25 @@ class _SecureRedirectHandler(urllib.request.HTTPRedirectHandler):
         carried = {k for k in req.headers if k.lower() in _SENSITIVE_HEADERS}
         if carried:
             guard_cleartext_secret(newurl, has_secret=True, insecure=False)  # raises on http-routable
-        old, dst = urlparse(req.full_url), urlparse(newurl)
-        if (old.scheme, old.hostname, old.port) != (dst.scheme, dst.hostname, dst.port):
+        # Compare origins with default ports normalized, so https://h and https://h:443 are the SAME
+        # origin (don't strip a legit same-server redirect that just adds/drops the explicit port).
+        if self._origin(req.full_url) != self._origin(newurl):
             for k in carried:                       # cross-origin → never forward the secret
                 new.headers.pop(k, None)
         return new
 
 
 def build_opener(ssl_context: ssl.SSLContext | None) -> urllib.request.OpenerDirector:
-    """A urllib opener that verifies TLS with `ssl_context` (None → system roots, verification ON) and
-    applies the secure-redirect policy above. Use this instead of the module-level `urlopen` so the
-    redirect path can't leak a token."""
-    return urllib.request.build_opener(_SecureRedirectHandler,
+    """A urllib opener that verifies TLS with `ssl_context` (None → system roots, verification ON),
+    applies the secure-redirect policy above, and IGNORES ambient proxy env. Use this instead of the
+    module-level `urlopen` so neither a redirect nor a proxy can leak a token.
+
+    Proxy: these are internal cluster hops to a configured URL. urllib's default `ProxyHandler` honors
+    `HTTP_PROXY`/`ALL_PROXY`, which for an http target (even loopback) ships `Authorization` to the
+    proxy in CLEARTEXT — silently breaking "loopback never leaves the box". An empty `ProxyHandler({})`
+    disables env proxies so the client connects directly to the URL it was given."""
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}),
+                                       _SecureRedirectHandler,
                                        urllib.request.HTTPSHandler(context=ssl_context))
 
 

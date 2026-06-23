@@ -22,11 +22,12 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from ..transport import (
+    TLSThreadingHTTPServer,
     build_opener,
     build_server_context,
     enforce_bind_policy,
@@ -126,9 +127,8 @@ class ControlPlaneServer:
         self._tls = ssl_context is not None
         enforce_bind_policy(host, auth_token=auth_token, tls=self._tls, service="lease authority")
         self.store = SqliteLeaseStore(db_path)
-        self._httpd = ThreadingHTTPServer((host, port), _make_handler(self.store, auth_token))
-        if ssl_context is not None:
-            self._httpd.socket = ssl_context.wrap_socket(self._httpd.socket, server_side=True)
+        self._httpd = TLSThreadingHTTPServer((host, port), _make_handler(self.store, auth_token),
+                                             ssl_context=ssl_context)
         self._thread: threading.Thread | None = None
 
     @property
