@@ -287,16 +287,45 @@ def _config_dir() -> str:
 
 
 def _brain():
-    """The shared verified brain — ONE persistent store per server (env VEREL_MEMORY_STORE, else
-    ~/.config/verel/brain.db). Deliberately NOT agent-controllable: a tool arg can't repoint it at an
-    arbitrary path (that would be arbitrary file read/write), and a fixed store is what lets a Cursor
-    session, a Claude Code session, and a CI agent draw from the SAME brain."""
+    """The shared verified brain — local by default, REMOTE when configured. All read paths (recall)
+    use this. Config is operator env, NOT agent-controllable (a tool arg can't repoint it):
+      - VEREL_BRAIN_URL set → a hosted MemoryServer over HTTP (RemoteMemory), with VEREL_BRAIN_TOKEN
+        (bearer) and VEREL_CLUSTER_TOKEN (replication) if set. This is what lets a fleet on different
+        machines draw from ONE authenticated brain.
+      - else → a per-install persistent LocalMemory (VEREL_MEMORY_STORE or ~/.config/verel/brain.db)."""
+    url = os.environ.get("VEREL_BRAIN_URL")
+    if url:
+        from .memory import RemoteMemory
+
+        return RemoteMemory(url, auth_token=os.environ.get("VEREL_BRAIN_TOKEN"),
+                            cluster_token=os.environ.get("VEREL_CLUSTER_TOKEN"))
     from .memory import LocalMemory
 
     path = os.environ.get("VEREL_MEMORY_STORE") or os.path.join(_config_dir(), "brain.db")
     if path != ":memory:":
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     return LocalMemory(path)
+
+
+def _remote_principal():
+    """The (RemoteMemory, Principal) pair for AUTHENTICATED writes to a remote brain, or None when the
+    brain is local. A remote brain requires a principal identity (VEREL_PRINCIPAL_SEED, 64 hex chars)
+    to author signed beliefs — without it, writes fail closed (you can read, but not author)."""
+    url = os.environ.get("VEREL_BRAIN_URL")
+    if not url:
+        return None
+    from .memory import Principal, RemoteMemory
+
+    seed_hex = os.environ.get("VEREL_PRINCIPAL_SEED", "")
+    try:
+        seed = bytes.fromhex(seed_hex.strip())
+    except ValueError as e:
+        raise ValueError(f"VEREL_PRINCIPAL_SEED must be 64 hex chars: {e}") from e
+    if len(seed) != 32:
+        raise ValueError("VEREL_PRINCIPAL_SEED must decode to exactly 32 bytes")
+    rmem = RemoteMemory(url, auth_token=os.environ.get("VEREL_BRAIN_TOKEN"),
+                        cluster_token=os.environ.get("VEREL_CLUSTER_TOKEN"))
+    return rmem, Principal(seed)
 
 
 def _evidence_verifies(evidence) -> tuple[bool, str]:
@@ -374,6 +403,28 @@ def _tool_remember(args: dict) -> dict:
     subject = str(fact.get("subject", ""))[:_MAX_FIELD]
     predicate = str(fact.get("predicate", ""))[:_MAX_FIELD]
     evidence = args.get("evidence")
+
+    # REMOTE brain: author as an AUTHENTICATED principal — sign the claim and let the server enforce
+    # every guard (reserved-key, non-FACT backstop, cross-principal protection) + the verified tier.
+    try:
+        remote = _remote_principal()
+    except ValueError as e:
+        return _err(str(e))   # remote configured but the principal seed is missing/invalid → fail closed
+    if remote is not None:
+        import urllib.error
+        rmem, principal = remote
+        try:
+            res = rmem.remember_signed(principal, subject=subject, predicate=predicate, scope=scope,
+                                       text=fact["text"], kind=MemoryKind.FACT,
+                                       evidence=evidence if isinstance(evidence, dict) else None)
+        except urllib.error.URLError as e:
+            return _err(f"remote brain unreachable: {e.reason}")
+        rec = res.get("record") or {}
+        return {"id": rec.get("id", ""), "trust": rec.get("trust", "candidate"), "scope": scope,
+                "reverified": res.get("reverified", False), "author": res.get("author", ""),
+                "conflict": res.get("conflict", False), "remote": True,
+                "reason": res.get("reason", "")}
+
     ev_ok, ev_ref = _evidence_verifies(evidence)
     # A FACT-BOUND attestation (a verifying GateReceipt with verdict=PASS over THIS exact claim) earns
     # the verified tier; a receipt that merely verifies but isn't bound to this fact is grounding only
