@@ -27,7 +27,7 @@ jobs:
       - run: pip install playwright
       - run: python -m playwright install --with-deps chromium
       - run: python brand/render_og.py
-      - name: Commit rendered OG images
+      - name: Publish rendered OG images to og-assets branch
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -35,7 +35,9 @@ jobs:
           if git diff --cached --quiet; then
             echo "no OG image changes"
           else
-            # GITHUB_TOKEN pushes don't retrigger workflows; [skip ci] is belt-and-suspenders
+            # main is a protected branch (PR + checks required), so the bot can't push to it.
+            # Publish the generated assets to an unprotected og-assets branch instead; the
+            # Space og:image references that branch via raw.githubusercontent.
             git commit -m "Render OG card images [skip ci]"
-            git push
+            git push --force origin HEAD:og-assets
           fi
