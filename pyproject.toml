@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "verel"
-version = "0.32.0"
+version = "0.33.0"
 description = "The agent framework where nothing is done until a grader returns a verdict — verification + grounded perception (AgentVision eyes), compounding memory, a fleet, agent-built tooling, and agent-run CI/CD."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -24,6 +24,7 @@ dependencies = [
 
 [project.optional-dependencies]
 sight = ["agentvision[render]"]
+hearing = ["audel[asr]"]  # Audel-backed ears (DSP grounding + local ASR); add [cloud]/[clap] for analyze
 container = ["pyseccomp"]  # seccomp-bpf syscall filter for the §7.7 bwrap container runner
 attest = ["pynacl>=1.5"]  # ed25519 publicly-verifiable receipts (substrate §11); HMAC works without it
 mem0 = ["mem0ai>=2.0", "chromadb>=0.5"]
