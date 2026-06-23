@@ -29,11 +29,10 @@ from urllib.parse import parse_qs, urlparse
 from ..transport import (
     _DEFAULT_MAX_CONNECTIONS,
     TLSThreadingHTTPServer,
-    build_opener,
     build_server_context,
+    client_opener,
     enforce_bind_policy,
     guard_cleartext_secret,
-    make_client_context,
     scheme,
     send,
 )
@@ -124,13 +123,15 @@ class ControlPlaneServer:
     def __init__(self, db_path: str | Path, *, host: str = "127.0.0.1", port: int = 0,
                  auth_token: str | None = None, certfile: str | Path | None = None,
                  keyfile: str | Path | None = None, ssl_context: ssl.SSLContext | None = None,
-                 max_connections: int = _DEFAULT_MAX_CONNECTIONS):
-        ssl_context = build_server_context(certfile, keyfile, ssl_context)
+                 client_ca: str | Path | None = None,
+                 max_connections: int = _DEFAULT_MAX_CONNECTIONS, max_per_ip: int | None = None):
+        ssl_context = build_server_context(certfile, keyfile, ssl_context, client_ca=client_ca)
         self._tls = ssl_context is not None
         enforce_bind_policy(host, auth_token=auth_token, tls=self._tls, service="lease authority")
         self.store = SqliteLeaseStore(db_path)
         self._httpd = TLSThreadingHTTPServer((host, port), _make_handler(self.store, auth_token),
-                                             ssl_context=ssl_context, max_connections=max_connections)
+                                             ssl_context=ssl_context, max_connections=max_connections,
+                                             max_per_ip=max_per_ip)
         self._thread: threading.Thread | None = None
 
     @property
@@ -158,12 +159,14 @@ class RemoteLeaseStore:
 
     def __init__(self, base_url: str, *, auth_token: str | None = None, timeout: float = 10.0,
                  cafile: str | Path | None = None, ssl_context: ssl.SSLContext | None = None,
-                 insecure: bool = False):
+                 insecure: bool = False, client_cert: str | Path | None = None,
+                 client_key: str | Path | None = None, pin_sha256: str | list | set | None = None):
         self.base = base_url.rstrip("/")
         self.token = auth_token
         self.timeout = timeout
         self._insecure = insecure
-        self._opener = build_opener(make_client_context(cafile, ssl_context))
+        self._opener = client_opener(cafile, ssl_context, client_cert=client_cert,
+                                     client_key=client_key, pin_sha256=pin_sha256)
         guard_cleartext_secret(self.base, has_secret=bool(auth_token), insecure=insecure)
 
     def _req(self, method: str, path: str, body: dict | None = None) -> dict:

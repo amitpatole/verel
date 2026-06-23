@@ -12,6 +12,7 @@ The rule, fail-closed:
 
 from __future__ import annotations
 
+import re
 import ssl
 import threading
 import urllib.request
@@ -39,17 +40,29 @@ def is_loopback(host: str) -> bool:
 
 
 def build_server_context(certfile: str | Path | None, keyfile: str | Path | None,
-                         ssl_context: ssl.SSLContext | None) -> ssl.SSLContext | None:
+                         ssl_context: ssl.SSLContext | None,
+                         *, client_ca: str | Path | None = None) -> ssl.SSLContext | None:
     """The server-side TLS context: a ready context wins, else a default one loaded from cert/key.
-    None → plaintext (only allowed on loopback per `enforce_bind_policy`)."""
+    None → plaintext (only allowed on loopback per `enforce_bind_policy`).
+
+    `client_ca` turns on **mTLS**: the server then REQUIRES every client to present a certificate signed
+    by that CA (`CERT_REQUIRED`) — transport-layer client authentication on top of the bearer/signature
+    layers. mTLS needs the server to also present its own cert (certfile/ssl_context)."""
     if ssl_context is not None:
-        return ssl_context
-    if certfile is not None:
+        ctx = ssl_context
+    elif certfile is not None:
         ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
         ctx.load_cert_chain(certfile=str(certfile),
                             keyfile=str(keyfile) if keyfile is not None else None)
-        return ctx
-    return None
+    else:
+        if client_ca is not None:
+            raise ValueError("client_ca (mTLS) requires the server to present a cert too "
+                             "(pass certfile=/keyfile= or ssl_context=)")
+        return None
+    if client_ca is not None:
+        ctx.verify_mode = ssl.CERT_REQUIRED
+        ctx.load_verify_locations(cafile=str(client_ca))
+    return ctx
 
 
 def enforce_bind_policy(host: str, *, auth_token: str | None, tls: bool, service: str) -> None:
@@ -87,13 +100,22 @@ class TLSThreadingHTTPServer(ThreadingHTTPServer):
     another thread. The cap self-heals as handlers finish or time out."""
 
     def __init__(self, server_address, handler_class, *, ssl_context: ssl.SSLContext | None = None,
-                 max_connections: int = _DEFAULT_MAX_CONNECTIONS):
+                 max_connections: int = _DEFAULT_MAX_CONNECTIONS, max_per_ip: int | None = None):
         if max_connections < 1:
             # a non-positive cap would silently drop EVERY connection (look like a total hang) — reject
             # the misconfiguration with a clear error instead.
             raise ValueError(f"max_connections must be >= 1, got {max_connections}")
+        if max_per_ip is not None and max_per_ip < 1:
+            raise ValueError(f"max_per_ip must be >= 1 or None, got {max_per_ip}")
         self._ssl_context = ssl_context
         self._slots = threading.BoundedSemaphore(max_connections)
+        # Per-source-IP fairness: cap how many of the global slots ONE source can hold, so a single
+        # routable peer can't monopolize the whole server (the global cap alone permits that). Off by
+        # default (None) — all loopback traffic shares 127.0.0.1, so a per-IP cap there would throttle
+        # legit local concurrency; it's meant for routable/exposed binds.
+        self._max_per_ip = max_per_ip
+        self._per_ip: dict[str, int] = {}
+        self._per_ip_lock = threading.Lock()
         super().__init__(server_address, handler_class)
 
     def get_request(self):
@@ -103,17 +125,42 @@ class TLSThreadingHTTPServer(ThreadingHTTPServer):
                                                   do_handshake_on_connect=False)
         return sock, addr
 
+    def _admit_ip(self, ip: str) -> bool:
+        if self._max_per_ip is None:
+            return True
+        with self._per_ip_lock:
+            if self._per_ip.get(ip, 0) >= self._max_per_ip:
+                return False
+            self._per_ip[ip] = self._per_ip.get(ip, 0) + 1
+            return True
+
+    def _release_ip(self, ip: str) -> None:
+        if self._max_per_ip is None:
+            return
+        with self._per_ip_lock:
+            n = self._per_ip.get(ip, 0) - 1
+            if n <= 0:
+                self._per_ip.pop(ip, None)
+            else:
+                self._per_ip[ip] = n
+
     def process_request(self, request, client_address):
-        # Acquire a slot in the ACCEPT thread (before spawning a worker). Over the cap → drop now, so a
-        # flood can't park more than `max_connections` threads. close_request (not shutdown_request)
+        # Acquire a global slot in the ACCEPT thread (before spawning a worker). Over the cap → drop now,
+        # so a flood can't park more than `max_connections` threads. close_request (not shutdown_request)
         # avoids releasing a slot we never took.
         if not self._slots.acquire(blocking=False):
+            self.close_request(request)
+            return
+        ip = client_address[0] if client_address else ""
+        if not self._admit_ip(ip):           # this source already holds its per-IP share → drop
+            self._slots.release()
             self.close_request(request)
             return
         try:
             super().process_request(request, client_address)   # spawns the worker thread
         except BaseException:
-            self._slots.release()   # the worker never started → release the slot we just took
+            self._release_ip(ip)
+            self._slots.release()   # the worker never started → release what we just took
             raise
 
     def process_request_thread(self, request, client_address):
@@ -121,22 +168,65 @@ class TLSThreadingHTTPServer(ThreadingHTTPServer):
         # the verify_request()==False path where process_request never acquired, which would over-release
         # the BoundedSemaphore. Pairing acquire(process_request)/release(here) is balanced on every path:
         # accepted+spawned → released here; over-cap drop → never acquired; spawn failure → released above.
+        ip = client_address[0] if client_address else ""
         try:
             super().process_request_thread(request, client_address)
         finally:
+            self._release_ip(ip)
             self._slots.release()
 
 
-def make_client_context(cafile: str | Path | None,
-                        ssl_context: ssl.SSLContext | None) -> ssl.SSLContext | None:
-    """The client TLS context: a caller-supplied context wins (mTLS / pinning); else a default
-    verifying context over `cafile` (an internal CA / self-signed cert). None → urllib's default
+def make_client_context(cafile: str | Path | None, ssl_context: ssl.SSLContext | None,
+                        *, client_cert: str | Path | None = None,
+                        client_key: str | Path | None = None) -> ssl.SSLContext | None:
+    """The client TLS context: a caller-supplied context wins; else a default verifying context over
+    `cafile` (an internal CA / self-signed cert), or system roots. `client_cert`/`client_key` present a
+    CLIENT certificate for mTLS (a server with `client_ca=` requires it). None → urllib's default
     (system roots) for https, ignored for http."""
     if ssl_context is not None:
         return ssl_context
     if cafile is not None:
-        return ssl.create_default_context(cafile=str(cafile))
-    return None
+        ctx = ssl.create_default_context(cafile=str(cafile))
+    elif client_cert is not None:
+        ctx = ssl.create_default_context()   # system roots for server verify; we add the client cert
+    else:
+        return None
+    if client_cert is not None:
+        ctx.load_cert_chain(certfile=str(client_cert),
+                            keyfile=str(client_key) if client_key is not None else None)
+    return ctx
+
+
+def cert_sha256(certfile: str | Path) -> str:
+    """The sha256 hex digest of a certificate's DER encoding — the value to pin via `pin_sha256=`.
+    (Reads the leaf cert from a PEM file.)"""
+    import hashlib
+
+    try:
+        pem = Path(certfile).read_text()
+    except UnicodeDecodeError as e:
+        raise ValueError(f"{certfile} is not a PEM certificate (expected text, got binary) — "
+                         "pass a PEM file") from e
+    der = ssl.PEM_cert_to_DER_cert(pem)
+    return hashlib.sha256(der).hexdigest()
+
+
+_HEX64 = re.compile(r"[0-9a-f]{64}")
+
+
+def _normalize_fp(fp: str) -> str:
+    # drop ALL whitespace (spaces, tabs, newlines) + colons, lowercase — tolerant of openssl's
+    # AA:BB:.. formatting and stray copy-paste whitespace.
+    return "".join(fp.split()).replace(":", "").lower()
+
+
+def _validated_fp(fp: str) -> str:
+    """Normalize and REQUIRE a full sha256 (64 hex chars). A malformed/empty pin must fail LOUD at
+    build time — never become a silent never-match (a typo'd pin) or an empty-string fail-open primitive."""
+    norm = _normalize_fp(fp)
+    if not _HEX64.fullmatch(norm):
+        raise ValueError(f"invalid sha256 pin {fp!r} — expected 64 hex chars (see transport.cert_sha256)")
+    return norm
 
 
 def guard_cleartext_secret(base_url: str, *, has_secret: bool, insecure: bool) -> None:
@@ -181,18 +271,64 @@ class _SecureRedirectHandler(urllib.request.HTTPRedirectHandler):
         return new
 
 
-def build_opener(ssl_context: ssl.SSLContext | None) -> urllib.request.OpenerDirector:
+def _pinning_https_handler(ssl_context: ssl.SSLContext | None,
+                           pins: frozenset) -> urllib.request.HTTPSHandler:
+    """An HTTPSHandler whose connections additionally pin the server's leaf certificate by sha256 — so a
+    cert from a DIFFERENT (even validly-CA-signed) key is rejected, defeating a mis-issued/compromised
+    CA. Additive to normal CA/hostname verification (which still runs via `ssl_context`)."""
+    import hashlib
+    import http.client
+
+    class _PinnedConn(http.client.HTTPSConnection):
+        def connect(self):
+            super().connect()
+            der = self.sock.getpeercert(binary_form=True)
+            fp = hashlib.sha256(der).hexdigest() if der else ""
+            if fp not in pins:
+                self.close()
+                raise ssl.SSLCertVerificationError(
+                    f"server certificate pin mismatch (sha256 {fp or 'unavailable'} not in pinned set)")
+
+    class _Handler(urllib.request.HTTPSHandler):
+        def https_open(self, req):
+            return self.do_open(_PinnedConn, req, context=ssl_context)
+
+    return _Handler()
+
+
+def build_opener(ssl_context: ssl.SSLContext | None,
+                 *, pin_sha256: str | list | set | frozenset | None = None
+                 ) -> urllib.request.OpenerDirector:
     """A urllib opener that verifies TLS with `ssl_context` (None → system roots, verification ON),
     applies the secure-redirect policy above, and IGNORES ambient proxy env. Use this instead of the
     module-level `urlopen` so neither a redirect nor a proxy can leak a token.
+
+    `pin_sha256` (a hex digest or an iterable of them; see `cert_sha256`) additionally PINS the server's
+    leaf certificate — a cert outside the pinned set is rejected even if a trusted CA signed it.
 
     Proxy: these are internal cluster hops to a configured URL. urllib's default `ProxyHandler` honors
     `HTTP_PROXY`/`ALL_PROXY`, which for an http target (even loopback) ships `Authorization` to the
     proxy in CLEARTEXT — silently breaking "loopback never leaves the box". An empty `ProxyHandler({})`
     disables env proxies so the client connects directly to the URL it was given."""
-    return urllib.request.build_opener(urllib.request.ProxyHandler({}),
-                                       _SecureRedirectHandler,
-                                       urllib.request.HTTPSHandler(context=ssl_context))
+    if pin_sha256 is not None:
+        raw = [pin_sha256] if isinstance(pin_sha256, str) else list(pin_sha256)
+        pins = frozenset(_validated_fp(p) for p in raw)
+        if not pins:
+            raise ValueError("pin_sha256 is empty — pass at least one sha256 fingerprint, or None")
+        https: urllib.request.HTTPSHandler = _pinning_https_handler(ssl_context, pins)
+    else:
+        https = urllib.request.HTTPSHandler(context=ssl_context)
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}), _SecureRedirectHandler, https)
+
+
+def client_opener(cafile: str | Path | None = None, ssl_context: ssl.SSLContext | None = None, *,
+                  client_cert: str | Path | None = None, client_key: str | Path | None = None,
+                  pin_sha256: str | list | set | frozenset | None = None
+                  ) -> urllib.request.OpenerDirector:
+    """The one opener every remote client builds: redirect-safe + proxy-ignoring, with the client TLS
+    context (`cafile` server-CA / `client_cert`+`client_key` for mTLS) and optional `pin_sha256`."""
+    ctx = make_client_context(cafile, ssl_context, client_cert=client_cert, client_key=client_key)
+    return build_opener(ctx, pin_sha256=pin_sha256)
 
 
 def send(opener: urllib.request.OpenerDirector, req: urllib.request.Request, *, base_url: str,
