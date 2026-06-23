@@ -389,6 +389,14 @@ def _tool_remember(args: dict) -> dict:
         # strip the provenance record-separator so an evidence note can't split the provenance list
         provenance.append("evidence:" + evidence[:200].replace("\x1f", " "))
 
+    # Reserved-key guard (mirror authenticated_remember): the AuthorTrust ledger is FACT-kind
+    # (predicate=author_trust / scope=meta:authors), so the non-FACT backstop below can't catch a
+    # FACT-vs-FACT collision with it — and this brain store is shared with the hosted signed-write
+    # path's AuthorTrust, so clobbering the ledger biases trust for every principal. Refuse here too.
+    from .memory import is_reserved_key
+    if is_reserved_key(predicate, scope):
+        return _err("reserved key — that predicate/scope is server-managed, not client-writable")
+
     mem = _brain()
     rid = make_id(make_key(subject, predicate, scope))
     existing = mem.get(rid)

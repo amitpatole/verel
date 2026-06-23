@@ -43,6 +43,16 @@ _RESERVED_SCOPES = frozenset({"meta:authors"})
 _RESERVED_PREDICATES = frozenset({"author_trust", "fails", "design_rule", "schema", "tool"})
 
 
+def is_reserved_key(predicate: str, scope: str) -> bool:
+    """True if (predicate, scope) names server-managed control state a client write must never touch
+    (the reputation ledger, failure ledger, induced rules/schemas, the skill registry). The one
+    FACT-kind control record (AuthorTrust) needs this predicate/scope check because the kind-based
+    structural backstop can't catch a FACT-vs-FACT collision. Normalized exactly as make_key, so a
+    case/whitespace variant can't dodge it while still colliding with the target's subj_pred_key.
+    Shared by BOTH the remote (`authenticated_remember`) and local (`verel_remember`) write paths."""
+    return scope.strip().lower() in _RESERVED_SCOPES or predicate.strip().lower() in _RESERVED_PREDICATES
+
+
 def _write_payload(key_id: str, subject: str, predicate: str, scope: str, text: str) -> str:
     """The bytes a principal signs to author a belief — binds the identity to the exact claim, so a
     signature can't be lifted onto a different fact (domain-tagged, injective; see verel._sign)."""
@@ -138,9 +148,8 @@ def authenticated_remember(into: MemoryView, *, subject: str, predicate: str, sc
         return AuthnWrite(True, False, key_id, False, False,
                           f"signed writes may only author facts, not {kind.value} (server-managed)")
     # Refuse keys that collide with server-managed control state (reputation ledger, failure ledger,
-    # induced rules/schemas). Normalize predicate/scope exactly as make_key does so a case/whitespace
-    # variant can't dodge the guard while still colliding with the target's subj_pred_key.
-    if scope.strip().lower() in _RESERVED_SCOPES or predicate.strip().lower() in _RESERVED_PREDICATES:
+    # induced rules/schemas). See is_reserved_key — shared with the local write path.
+    if is_reserved_key(predicate, scope):
         return AuthnWrite(True, False, key_id, False, False,
                           "reserved key — that predicate/scope is server-managed, not client-writable")
     author = key_id
