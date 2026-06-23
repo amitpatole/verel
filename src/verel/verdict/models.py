@@ -265,7 +265,7 @@ class GateReceipt(BaseModel):
     `precise=false` (to skip its signature check) and just recompute the unsigned fingerprint. The
     same field shape as RunReceipt lets it reuse the ed25519/HMAC signing machinery (`keys`, `gate`)."""
 
-    issued_by: str  # e.g. "verel@0.32.0"
+    issued_by: str  # e.g. "verel@0.34.0"
     verdict: Verdict
     fingerprint: str  # recomputes from (verdict + per-grader outcome/receipt/kind); tamper-evident
     graders: list[GraderAttestation] = Field(default_factory=list)
