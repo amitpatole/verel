@@ -93,6 +93,19 @@ def test_parse_bandit_severity_mapping():
     assert sev["B307"] == Severity.ERROR and sev["B101"] == Severity.INFO
 
 
+def test_bandit_spec_gates_high_and_excludes_tests():
+    """The security grader must match its documented HIGH/CRITICAL-gate intent and not drown in
+    test-only patterns (every `assert` is B101) or vendored code under .venv — else it can never pass
+    on a normal project (dogfooding finding)."""
+    from verel.ci.graders import bandit_spec
+
+    cmd = bandit_spec("/repo").command
+    assert "--severity-level" in cmd and cmd[cmd.index("--severity-level") + 1] == "high"
+    assert "--confidence-level" in cmd
+    exclude = cmd[cmd.index("--exclude") + 1]
+    assert "./tests" in exclude and "./.venv" in exclude
+
+
 def test_parse_npm_audit():
     out = json.dumps({"vulnerabilities": {"lodash": {"severity": "critical",
                      "via": [{"title": "Prototype Pollution"}]}}})
