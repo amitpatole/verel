@@ -25,7 +25,7 @@ jobs:
       - name: Create venv + install (core + dev + attest)
         run: |
           uv venv --python 3.11
-          uv pip install -e ".[dev,attest]"   # attest = pynacl, so the ed25519 receipt tests RUN in CI
+          uv pip install -e ".[dev,attest,postgres]"   # attest=pynacl (receipt tests); postgres=psycopg/pgvector so the pg-backend security UNIT tests RUN in CI (live-DB tests still skip without VEREL_PG_SMOKE)
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
       - name: Lint (ruff)
         run: ruff check src tests examples
