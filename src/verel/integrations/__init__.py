@@ -28,13 +28,24 @@ __all__ = [
     "verify_github_signature",
     "parse_pr_event",
     "post_commit_status",
+    # R3 — agent-SDK shims (lazy)
+    "gate",
+    "openai_tools",
+    "anthropic_tools",
+    "run_tool_call",
+    "langchain_tools",
 ]
+
+_REST = {"GateServer", "verify_github_signature", "parse_pr_event", "post_commit_status"}
+_SDK = {"gate", "openai_tools", "anthropic_tools", "run_tool_call", "langchain_tools"}
 
 
 def __getattr__(name: str):
-    # Lazy re-export of the REST surface (keeps `import verel.integrations` from pulling http.server
-    # until something actually needs the server).
-    if name in ("GateServer", "verify_github_signature", "parse_pr_event", "post_commit_status"):
+    # Lazy re-export so `import verel.integrations` stays light (no http.server / SDK pull until used).
+    if name in _REST:
         from . import rest
         return getattr(rest, name)
+    if name in _SDK:
+        from . import sdk
+        return getattr(sdk, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

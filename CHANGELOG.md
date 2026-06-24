@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.45.0 — agent-SDK shims: one gate hook for any framework (Reach R3)
+
+Verel grades artifacts, so the integration is the same everywhere — give the agent a tool that gates
+its own work before it declares "done". `verel.integrations.sdk` ships the framework-agnostic pieces,
+**zero new dependencies**:
+
+- **`gate(repo, criteria=…, files=…)`** — the universal callable. Runs the CI gate (tests + lint +
+  types) and, with `criteria`, folds in the spec/intent grader; returns `{"verdict": pass|warn|fail,
+  "issues": […]}` (combined = worst of the two). Any framework that takes a Python callable as a tool
+  uses this directly: **LangChain/LangGraph** (`StructuredTool.from_function`), **CrewAI** (`@tool`),
+  **AutoGen** (`register_function`).
+- **`openai_tools()` / `anthropic_tools()`** — the gate as a function-calling / tool-use schema for
+  the OpenAI and Anthropic (Claude Agent SDK) APIs; **`run_tool_call(name, arguments)`** executes the
+  tool call your loop receives (accepts the model's JSON string or a dict).
+- `langchain_tools()` lazily adapts to a `StructuredTool` when LangChain is installed.
+
+`examples/demo_sdk_shims.py`; docs recipe in Get started. **608 tests.**
+
 ## 0.44.0 — spec/intent conformance grader + GitHub PR context (Verified Review B + Reach R2)
 
 Catches the headline AI-PR failure mode — *"the ticket says A, the code does B."*
