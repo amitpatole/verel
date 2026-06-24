@@ -304,6 +304,24 @@ def _tool_spec(args: dict) -> dict:
     }
 
 
+def _tool_smell(args: dict) -> dict:
+    """Over-engineering smell: flags over-complex functions (gates) and speculative abstractions
+    (advisory) in the changed files. Deterministic AST analysis — no code execution."""
+    repo = args.get("repo")
+    if not repo or not isinstance(repo, str) or not os.path.isdir(os.path.abspath(repo)):
+        return _err("repo (existing directory) is required")
+    files = args.get("files") or []
+    if not isinstance(files, list) or not all(isinstance(f, str) for f in files):
+        return _err("files (changed source paths) must be a list of strings")
+    from .smell import grade_smell
+    budget = args.get("complexity_budget", 12)
+    rep = grade_smell(os.path.abspath(repo), list(files),
+                      complexity_budget=int(budget) if isinstance(budget, int) else 12)
+    return {"verdict": rep.verdict.value,
+            "issues": [{"grader": i.source.value, "severity": i.severity.value,
+                        "locator": i.locator, "message": i.message} for i in rep.issues]}
+
+
 def _tool_invariants(args: dict) -> dict:
     """Business-rule / invariant grader: do declared invariants still hold over the repo? Rules are
     operator-declared (a `verel_invariants` file or the `invariants` arg), compiled to checks and run
@@ -668,6 +686,11 @@ TOOLS: dict[str, dict[str, Any]] = {
                          "required": ["repo"]},
                          "description": "Do declared business rules / invariants still hold? A falsified "
                                         "invariant gates (checks run under OS-isolation)."},
+    "verel_smell": {"fn": _tool_smell, "schema": {"type": "object", "properties": {
+                        "repo": _REPO, "files": {"type": "array", "items": {"type": "string"}},
+                        "complexity_budget": {"type": "integer"}}, "required": ["repo", "files"]},
+                    "description": "Over-engineering smell: over-complex functions gate; speculative "
+                                   "abstractions are flagged. Deterministic, no code execution."},
     "verel_recall": {"fn": _tool_recall, "schema": _RECALL_SCHEMA,
                      "description": "Read the shared verified brain (resolves down the scope lattice)."},
     "verel_remember": {"fn": _tool_remember, "schema": _REMEMBER_SCHEMA,

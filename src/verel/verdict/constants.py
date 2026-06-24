@@ -16,6 +16,7 @@ PRECISE_GRADERS = {
     GraderKind.TYPECHECK,
     GraderKind.LINT,
     GraderKind.MUTATION,  # deterministic: a surviving injected fault is hard evidence, not a hunch
+    GraderKind.SMELL,  # deterministic complexity metrics gate; the LLM "needless abstraction" stays advisory
     GraderKind.DOM,
     GraderKind.OCR,
     GraderKind.CV,
