@@ -80,6 +80,7 @@ class IssueKind(str, Enum):
     DURATION = "duration"
     # Shared cross-domain kinds.
     INTENT_MISMATCH = "intent_mismatch"
+    SURVIVED_MUTANT = "survived_mutant"  # a fault injected into the change that no test caught
     OTHER = "other"
 
 
@@ -99,6 +100,7 @@ class GraderKind(str, Enum):
     TEST = "test"
     TYPECHECK = "typecheck"
     LINT = "lint"
+    MUTATION = "mutation"  # test-effectiveness: a surviving mutant ⇒ tests don't constrain the change
     LLM_JUDGE = "llm_judge"
     PERF = "perf"
     SECURITY = "security"

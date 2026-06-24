@@ -8,7 +8,7 @@
   <a href="https://pypi.org/project/verel/"><img src="https://img.shields.io/pypi/v/verel?color=8b7cff&label=pip%20install%20verel" alt="PyPI"></a>
   <a href="https://pepy.tech/projects/verel"><img src="https://static.pepy.tech/personalized-badge/verel?period=total&units=international_system&left_color=black&right_color=green&left_text=downloads" alt="PyPI Downloads"></a>
   <a href="https://amitpatole.github.io/verel/"><img src="https://img.shields.io/badge/docs-amitpatole.github.io-5ad1e6" alt="Docs"></a>
-  <img src="https://img.shields.io/badge/tests-521%20passing-46d39a" alt="tests">
+  <img src="https://img.shields.io/badge/tests-549%20passing-46d39a" alt="tests">
   <img src="https://img.shields.io/badge/ruff%20%2B%20mypy-clean-5ad1e6" alt="lint">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT">
   <img src="https://img.shields.io/badge/LLM-Ollama%20Cloud%20%C2%B7%20OpenAI-8b7cff" alt="LLM">
@@ -72,7 +72,7 @@ New here? **[5-minute tutorial →](docs/tutorial.md)**
 | ⚖️ **Verdict bus** | `verel.verdict` | One schema for every sense, with an advisory **ceiling clamp**, **grader attestation**, scrubbed fingerprints, and strict-subset **stuck/progress** detection. |
 | 🚁 **Fleet** | `verel.fleet` | Agents managing agents — an **LLM manager** fans out, a scheduler runs workers in **isolated git worktrees** under budget, each gated by the bus. **Concurrent managers** are safe via **fencing leases** (a stale leader's writes are rejected) — enforced even at the remote by a **git pre-receive fencing sink** (a stale push is refused), and across machines by a **hosted control plane** (lease authority behind an HTTP API). **Multi-repo** changes run as one cross-linked DAG and commit as an **atomic saga** (a failure compensates the repos that already landed, in reverse). |
 | 🔧 **Tool-smith** | `verel.toolsmith` | Agents build their own tools: detect → scaffold → test → register → reuse, **sandboxed** (`bwrap`), admitted only on a passing attested eval. |
-| ♻️ **Agent-run CI/CD** | `verel.ci` | Self-healing pipeline (inner-loop → pre-commit → pre-merge → canary) with a deterministic **rollback engine** that never acts on advisory evidence. Graders span **Python / JS-TS / Go** (tests · lint · types) plus **perf** (budget) and **security** (SAST/audit) senses — all on one bus, one gate. |
+| ♻️ **Agent-run CI/CD** | `verel.ci` | Self-healing pipeline (inner-loop → pre-commit → pre-merge → canary) with a deterministic **rollback engine** that never acts on advisory evidence. Graders span **Python / JS-TS / Go** (tests · lint · types) plus **perf** (budget), **security** (SAST/audit), and **test-effectiveness** (mutation — a surviving injected fault means the tests prove nothing, so it gates) senses — all on one bus, one gate. Plug into any agent in one line: `verel mcp install` / `verel rules`. |
 
 ## Eyes & Brain — Verel × AgentVision
 
@@ -132,7 +132,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: amitpatole/verel@v0.41.0
+      - uses: amitpatole/verel@v0.42.0
         with:
           repo: .
           install: "-e .[dev]"     # your project deps so its tests import
@@ -142,7 +142,7 @@ jobs:
 
 ```yaml
 - repo: https://github.com/amitpatole/verel
-  rev: v0.41.0
+  rev: v0.42.0
   hooks: [{ id: verel-precommit }]
 ```
 

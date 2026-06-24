@@ -117,10 +117,11 @@ def postmerge_stage(repo: str, *, smoke_paths: list[str] | None = None,
 
 def premerge_stage(repo: str, *, covers: list[str] | None = None, language: str = "python",
                    with_types: bool = True, security: bool = False,
-                   perf: GraderSpec | None = None) -> Stage:
+                   perf: GraderSpec | None = None, mutation: list[str] | None = None) -> Stage:
     """Full suite + lint (+types) — the sandbox-CI gate before a merge is allowed (§7.4).
-    Optionally adds a SECURITY scanner (HIGH/CRITICAL gate) and a PERF budget grader. Pair with a
-    regression-guard by passing a ledger to run_stage."""
+    Optionally adds a SECURITY scanner (HIGH/CRITICAL gate), a PERF budget grader, and a MUTATION
+    test-effectiveness grader (`mutation` = the changed source files to mutate; Python only). Pair
+    with a regression-guard by passing a ledger to run_stage."""
     tc = _toolchain(language)
     graders = [tc.test(repo, covers)]
     required = {GraderKind.TEST}
@@ -138,4 +139,9 @@ def premerge_stage(repo: str, *, covers: list[str] | None = None, language: str 
     if perf is not None:
         graders.append(perf)
         required.add(GraderKind.PERF)
+    if mutation:
+        from .graders import mutation_spec
+
+        graders.append(mutation_spec(repo, mutation, covers))
+        required.add(GraderKind.MUTATION)
     return Stage(f"pre_merge:{language}", graders, required)

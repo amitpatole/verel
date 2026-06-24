@@ -194,6 +194,29 @@ surviving replica.
 
 ---
 
+## 7. A green test suite that proves nothing — caught
+
+**The situation.** An agent's PR ships passing tests — but do they actually *test* the change? A
+suite can call the code and assert nothing, and "all green" hides it. Verel's **test-effectiveness**
+grader injects small faults into the changed code and re-runs the suite: a fault no test catches (a
+*surviving mutant*) is a hard, deterministic FAIL — not an opinion. Strengthen the assertion and the
+same gate goes green.
+
+```text
+── Green suite, but it asserts nothing ── baseline_pass=True  mutants=3  survivors=3  →  FAIL
+     surviving mutant: return→None at billing.py:2 — no test catches it
+     surviving mutant: *→/ at billing.py:2 — no test catches it
+     surviving mutant: +→- at billing.py:2 — no test catches it
+── Same code, now a real assertion ── baseline_pass=True  mutants=3  survivors=0  →  PASS
+```
+
+`tests exist` is not `tests test`. The grader gates (`GraderKind.MUTATION` is deterministic
+evidence, not advisory), so an agent can't pad a PR with toothless tests to look done.
+
+> `python examples/demo_mutation.py` (no API key — built-in AST mutator + the repo's own pytest)
+
+---
+
 ## Run them all
 
 ```bash
@@ -203,6 +226,7 @@ python examples/demo_distributed_fleet.py # 3 · fenced concurrent managers + at
 python examples/demo_polyglot_ci.py       # 4 · Python/JS/Go + perf + security on one gate
 python examples/demo_capability_jail.py   # 5 · a tool jailed to the syscalls it earned
 python examples/demo_shared_brain.py      # 6 · shared brain — un-poisonable, HA, crash-tolerant
+python examples/demo_mutation.py          # 7 · a green-but-toothless suite FAILS the gate
 ```
 
 More feature-level demos (consolidation into structured rules, the tool-smith lifecycle, semantic

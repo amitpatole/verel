@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.42.0 — Verified Review: test-effectiveness grader + one-line agent adoption
+
+First slice of "Verified Review" — catch the failure modes of AI-authored PRs — plus the
+plug-and-play adoption surface so Verel inserts into a team's existing agent stack.
+
+- **Test-effectiveness grader (mutation).** A green suite proves nothing if it asserts nothing.
+  `verel.ci.mutation` injects small faults into the changed source (a zero-dependency `ast` mutator:
+  comparison/arithmetic/boolean swaps, `True/False` flip, `return→None`) and re-runs the suite; a
+  **surviving mutant** (one no test catches) is a deterministic FAIL. New `GraderKind.MUTATION` is
+  **precise/gating** (not advisory) — an agent can't pad a PR with toothless tests. Diff-scoped +
+  capped + total-wall-clock-budgeted so it stays under the CI ceiling and always restores files.
+  Wire via `premerge_stage(..., mutation=["changed.py"])` or `mutation_spec`. Security: in-place
+  writes are path-traversal-guarded and the run budget keeps it from being killed mid-mutation.
+- **One-line adoption.** `verel mcp install` prints the `verel-mcp` server config + where each host
+  expects it; `verel rules --target cursor|claude|agents|copilot|windsurf [--write]` emits a
+  rules-file snippet that makes any agent call `verel_gate` before declaring "done" (idempotent,
+  preserves existing content). Verel grades artifacts, so it plugs into whatever agent stack you run.
+- New `verel.integrations` package (the "Reach" adapter seam) + `examples/demo_mutation.py`. **549 tests.**
+
 ## 0.41.0 — pluggable memory-backend registry (foundation for external DB stores)
 
 Formalizes how Verel's shared brain selects its storage, so external databases can become

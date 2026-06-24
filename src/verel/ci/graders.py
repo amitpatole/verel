@@ -204,6 +204,38 @@ def ruff_spec(repo: str, covers: list[str] | None = None):
                       cwd=repo, covers=covers or [])
 
 
+def parse_mutation(out: str, err: str) -> list[Issue]:
+    """Read the JSON summary from `python -m verel.ci.mutation`. A surviving mutant ⇒ ERROR (gates);
+    a non-green baseline ⇒ ERROR (can't assess effectiveness on a red suite)."""
+    line = next((ln for ln in reversed(out.splitlines()) if ln.strip().startswith("{")), "")
+    try:
+        data = json.loads(line) if line else {}
+    except json.JSONDecodeError:
+        return [Issue(kind=IssueKind.OTHER, severity=Severity.ERROR, source=GraderKind.MUTATION,
+                      message="mutation: could not parse runner output")]
+    if not data.get("baseline_pass", False):
+        return [Issue(kind=IssueKind.OTHER, severity=Severity.ERROR, source=GraderKind.MUTATION,
+                      message="mutation: baseline suite is not green — cannot assess test effectiveness")]
+    issues = []
+    for s in data.get("survivors", []):
+        loc = f"{s.get('file')}:{s.get('line')}"
+        issues.append(Issue(
+            kind=IssueKind.SURVIVED_MUTANT, severity=Severity.ERROR, source=GraderKind.MUTATION,
+            message=f"surviving mutant ({s.get('op')}) at {loc} — no test catches this change",
+            locator=loc, locator_precise=True, detail_json=json.dumps(s)))
+    return issues
+
+
+def mutation_spec(repo: str, targets: list[str], covers: list[str] | None = None, *,
+                  cap: int = 25, timeout: int = 120):
+    """Test-effectiveness grader: mutate `targets` (the changed source files) and re-run the suite.
+    Gates (`GraderKind.MUTATION` ∈ PRECISE_GRADERS) on any surviving mutant."""
+    cmd = ["python", "-m", "verel.ci.mutation", "--repo", repo, "--targets", ",".join(targets),
+           "--cap", str(cap), "--timeout", str(timeout)]
+    return GraderSpec(GraderKind.MUTATION, cmd, cwd=repo, covers=covers or list(targets),
+                      parser=parse_mutation)
+
+
 def mypy_spec(repo: str, covers: list[str] | None = None):
     return GraderSpec(GraderKind.TYPECHECK, ["mypy", "--no-error-summary", "."],
                       cwd=repo, covers=covers or [])
