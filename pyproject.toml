@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "verel"
-version = "0.48.0"
+version = "0.49.0"
 description = "The agent framework where nothing is done until a grader returns a verdict — verification + grounded perception (AgentVision eyes), compounding memory, a fleet, agent-built tooling, and agent-run CI/CD."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -28,6 +28,7 @@ hearing = ["audel[asr]"]  # Audel-backed ears (DSP grounding + local ASR); add [
 container = ["pyseccomp"]  # seccomp-bpf syscall filter for the §7.7 bwrap container runner
 attest = ["pynacl>=1.5"]  # ed25519 publicly-verifiable receipts (substrate §11); HMAC works without it
 mem0 = ["mem0ai>=2.0", "chromadb>=0.5"]
+postgres = ["psycopg[binary]>=3", "pgvector>=0.3"]  # external multi-machine brain — Postgres + pgvector ANN
 mcp = ["mcp>=1.0", "anyio>=4"]
 dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.6", "mypy>=1.10", "bandit>=1.7"]  # bandit = the pre-merge `security` grader; must be installed for that gate to run (else it fails closed)
 
@@ -42,6 +43,7 @@ verel-mcp = "verel.mcp_server:main"
 [project.entry-points."verel.memory_backends"]
 local = "verel.memory.local:LocalMemory"
 remote = "verel.memory.hosted:RemoteMemory"
+postgres = "verel.memory.pg_backend:PostgresMemory"
 
 [project.urls]
 Homepage = "https://github.com/amitpatole/verel"
