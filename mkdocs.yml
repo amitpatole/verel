@@ -81,6 +81,7 @@ exclude_docs: |
   VEREL_DESIGN.md
   CRITIC_CONVERGENCE.md
   SUBSTRATE_DESIGN.md
+  VERIFIED_REVIEW_DESIGN.md
 
 extra:
   social:
