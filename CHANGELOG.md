@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.50.0 — LanceDB brain backend (embedded, vector-native)
+
+A **zero-infrastructure** vector store for the brain: LanceDB is embedded (a directory on disk, no
+server), so this is the drop-in way to get real ANN recall without standing anything up.
+`pip install verel[lancedb]`, point `VEREL_LANCEDB_PATH` at a directory, set
+`VEREL_MEMORY_BACKEND=lancedb` — no service, no code.
+
+- **`verel.memory.lance_backend.LanceMemory`.** The full `MemoryView` over LanceDB + pyarrow, proven
+  by the same `tests/memory_contract.py` harness (lexical **and** ANN). With an embedder, recall is
+  approximate-nearest-neighbour over a Lance index; without one it falls back to the same lexical
+  token-overlap as `LocalMemory`. The trust layer (interference rule, decay, documented `rank()`) is
+  unchanged. Upserts via `merge_insert`; `close()` releases native handles cleanly.
+- **Single-writer**, like `LocalMemory`: an instance serializes its own read-modify-write under a
+  lock; concurrent multi-process writers to one dataset are not interference-rule-safe → front it with
+  a `MemoryServer` (which already wraps any `MemoryView` behind its lock) for shared use.
+- **Security (embedded — no network, no credentials):** LanceDB's `.where(...)` is a SQL-like filter
+  string, so it's an injection sink. The surface is kept tiny — scope/kind/trust are filtered in
+  **Python** (never in a predicate), and the only values reaching `.where()` are record ids, each
+  escaped via `_lit` (doubled single-quotes, control chars rejected). The dataset path is
+  operator-env only and path-normalized. Pinned by an injection regression test + a focused
+  adversarial review. Because decay runs in Python (`apply_decay`), a malformed `detail_json` from a
+  replica can't wedge it.
+- Registered as the built-in `lancedb` backend + `verel.memory_backends` entry-point;
+  `lancedb = ["lancedb>=0.5"]` extra. Env: `VEREL_LANCEDB_PATH`, `VEREL_LANCEDB_TABLE`,
+  `VEREL_EMBEDDER`. The embedded contract runs in CI (no server needed).
+
+**690 tests.**
+
 ## 0.49.0 — Postgres/pgvector brain backend (external, multi-machine)
 
 The brain gets its first **external, networked** store: many agents on different machines write
