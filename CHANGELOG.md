@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.44.0 — spec/intent conformance grader + GitHub PR context (Verified Review B + Reach R2)
+
+Catches the headline AI-PR failure mode — *"the ticket says A, the code does B."*
+
+- **Spec/intent grader (`verel.ci.spec`).** The LLM extracts checkable acceptance criteria from the
+  **ticket** (PR/issue text — never the agent's diff), compiles each into N independent pytest checks,
+  **executes** them, and gates on a grounded `INTENT_MISMATCH` violation (`verel_spec` MCP tool;
+  `grade_pr` pulls criteria + diff from a GitHub PR). The LLM only *proposes* checks; **majority vote**
+  over independent checks decides, so one wrong generated test can't false-fail a merge; an
+  unverifiable criterion is advisory; a non-empty ticket that yields no criteria reads as unverified
+  (WARN), never a confident PASS.
+- **GitHub PR context (`verel.integrations.github`).** Reads a PR's diff + changed files + linked-issue
+  acceptance criteria (`VEREL_GITHUB_TOKEN`) — the "ticket" comes from the team's GitHub, not a new file.
+- **Security cadence — 4 adversarial multi-agent rounds, final round empty.** Round 1 caught a CRITICAL
+  RCE (a static allowlist can't sandbox a Turing-complete language: `getattr(__builtins__,'open')` etc.).
+  Fixed *architecturally* — generated checks now execute under real OS isolation (bwrap `--unshare-all`
+  no-net + read-only fs + seccomp denylist + rlimits + a memory cgroup), and **fail closed** (the
+  criterion stays advisory, code is never run) when no isolation or memory bound is available. The MCP
+  tool never exposes the weaker subprocess tier. Subsequent rounds fixed host-DoS (rlimits/seccomp/tmpfs
+  memory-cgroup), criteria-suppression, and bounded the linked-issue fetch. **600 tests.**
+
 ## 0.43.0 — gate over HTTP: REST server + HMAC-verified GitHub PR webhook
 
 Reach track (R1): gate from any stack — CI, a script, or a GitHub PR webhook — with no MCP host.

@@ -64,7 +64,7 @@ offline examples in `examples/`) run with no key at all.
 | **CLI** | `verel …` | `doctor` · `loop` · `fleet` · `heal` · `ci` |
 | **CI CLI / git hook** | `verel-ci …` | a verdict-bus gate in CI or a pre-commit hook |
 | **MCP server** | `verel-mcp` | exposing gate / recall / build-tool / ci-check to an MCP host |
-| **GitHub Action** | `amitpatole/verel@v0.43.0` | failing a build on a FAIL verdict |
+| **GitHub Action** | `amitpatole/verel@v0.44.0` | failing a build on a FAIL verdict |
 | **pre-commit** | `.pre-commit-hooks.yaml` | gating commits |
 
 ### CLI reference
@@ -93,7 +93,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: amitpatole/verel@v0.43.0
+      - uses: amitpatole/verel@v0.44.0
         with:
           repo: .
           install: "-e .[dev]"      # your project deps so its tests import
@@ -102,7 +102,7 @@ jobs:
 ```yaml
 # .pre-commit-config.yaml
 - repo: https://github.com/amitpatole/verel
-  rev: v0.43.0
+  rev: v0.44.0
   hooks: [{ id: verel-precommit }]
 ```
 
@@ -185,6 +185,31 @@ from verel.ci.mutation import run_mutation
 res = run_mutation(".", ["billing.py"], cap_per_file=25)
 print(res.baseline_pass, res.survivors)   # survivors → the tests don't constrain that code
 ```
+
+### Spec / intent conformance — "the ticket says A, the code does B"
+
+Does the change actually implement the ticket? `verel.ci.spec` extracts checkable acceptance criteria
+from the **ticket** (the PR/issue text — never the agent's diff), has the LLM compile each into pytest
+checks, **executes** them, and gates on a grounded violation (`INTENT_MISMATCH`). The LLM only
+*proposes* checks; *execution* decides — a hallucinated judge can neither block a good merge nor pass
+a broken one.
+
+```python
+from verel.ci.spec import grade_spec, default_chat
+
+rep = grade_spec(".", ticket_text, ["billing.py"], chat=default_chat())  # gates on a violated criterion
+```
+
+- **Majority vote** over N independent generated checks per criterion, so one wrong generated test
+  can't false-fail a merge; a criterion that can't be grounded is **advisory**, never a gate. A
+  non-empty ticket that yields *no* criteria is reported as unverified (WARN), never a confident PASS.
+- **`verel_spec` MCP tool** and **`grade_pr`** (pull criteria + diff straight from a GitHub PR via
+  `verel.integrations.github`, `VEREL_GITHUB_TOKEN`).
+- **Security:** generated checks are LLM-authored from a possibly-hostile ticket, so they execute under
+  real OS isolation by default (`isolation="container"`: bwrap `--unshare-all` no-network, read-only
+  fs, seccomp denylist, rlimits) and **fail closed** (the criterion stays advisory, code is never run)
+  when bwrap is absent. `isolation="subprocess"` is a documented opt-out for a **trusted-local** repo
+  only — never for external-contributor PRs.
 
 ### Self-healing
 
