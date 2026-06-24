@@ -220,6 +220,11 @@ class MemoryServer:
                  certfile: str | Path | None = None, keyfile: str | Path | None = None,
                  ssl_context: ssl.SSLContext | None = None, client_ca: str | Path | None = None,
                  max_connections: int = _DEFAULT_MAX_CONNECTIONS, max_per_ip: int | None = None):
+        # An empty/whitespace secret is NOT a credential — normalize to None so a blank `VEREL_*_TOKEN=`
+        # can't bind a routable surface that authenticates an empty bearer, nor make the cluster channel
+        # match an empty `X-Cluster-Token` (fail-open-on-empty-secret).
+        auth_token = (auth_token or "").strip() or None
+        cluster_token = (cluster_token or "").strip() or None
         # Build the server-side TLS context (if any) BEFORE the bind-policy check, so a routable bind
         # can prove it has transport confidentiality, then fail closed if it's authenticated-but-cleartext.
         # client_ca turns on mTLS (require a client cert signed by it).

@@ -70,7 +70,9 @@ def enforce_bind_policy(host: str, *, auth_token: str | None, tls: bool, service
     (never leaves the box). `service` names the surface in the error (e.g. 'memory service')."""
     if is_loopback(host):
         return
-    if auth_token is None:
+    # An EMPTY/whitespace token is "no auth", not "auth" — else a blank `VEREL_*_TOKEN=` misconfig
+    # would bind a routable surface that authenticates an empty `Authorization: Bearer ` (fail-open).
+    if not (auth_token and auth_token.strip()):
         raise ValueError(f"refusing to bind routable host {host!r} without auth_token — that exposes "
                          f"an unauthenticated {service}; pass auth_token=... or bind 127.0.0.1")
     if not tls:

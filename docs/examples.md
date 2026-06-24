@@ -227,6 +227,7 @@ python examples/demo_polyglot_ci.py       # 4 · Python/JS/Go + perf + security 
 python examples/demo_capability_jail.py   # 5 · a tool jailed to the syscalls it earned
 python examples/demo_shared_brain.py      # 6 · shared brain — un-poisonable, HA, crash-tolerant
 python examples/demo_mutation.py          # 7 · a green-but-toothless suite FAILS the gate
+python examples/demo_rest_gate.py         # 8 · gate over HTTP + an HMAC-verified PR webhook
 ```
 
 More feature-level demos (consolidation into structured rules, the tool-smith lifecycle, semantic

@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.43.0 — gate over HTTP: REST server + HMAC-verified GitHub PR webhook
+
+Reach track (R1): gate from any stack — CI, a script, or a GitHub PR webhook — with no MCP host.
+
+- **`verel serve --repo .`** runs an HTTP gate over one configured repo (`verel.integrations.rest`):
+  `POST /gate` → `{verdict, issues}`; `POST /github` verifies GitHub's `X-Hub-Signature-256` HMAC
+  over the raw body before gating; `GET /health`. The repo is fixed at startup — a caller can't
+  redirect CI at another path. Built on the hardened `verel.transport`: loopback is zero-config, a
+  routable bind **requires a token AND TLS** or refuses to start. Secrets from env
+  (`VEREL_GATE_TOKEN`, `VEREL_GATE_WEBHOOK_SECRET`), never argv. `examples/demo_rest_gate.py`.
+- **Security cadence — 3 adversarial rounds (multi-agent), all findings fixed + regression-pinned:**
+  empty/blank token can no longer authenticate (`enforce_bind_policy` + both servers treat `""` as
+  no-auth — also closed the same latent hole for the brain's `cluster_token`); concurrent gate runs
+  are bounded by a semaphore (→ `503` when busy) so a request flood can't fork-bomb the host; HTTP
+  request-smuggling closed (reject `Transfer-Encoding` / duplicate `Content-Length`, `Connection:
+  close` on every error); webhook `repo`/`sha` are shape-validated (no URL-injection/SSRF into
+  `post_commit_status`); a non-object webhook body skips cleanly instead of erroring; non-ASCII auth
+  headers deny cleanly instead of 500.
+- Docs: `verel serve` in cli.md + getting-started; **573 tests**.
+
 ## 0.42.0 — Verified Review: test-effectiveness grader + one-line agent adoption
 
 First slice of "Verified Review" — catch the failure modes of AI-authored PRs — plus the
