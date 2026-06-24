@@ -59,10 +59,20 @@ jobs:
 
 **Native git hook:** `verel-ci install --repo .`
 
-## In your agents
+## In your agents — plug in, don't rip and replace
 
-- **`verel-mcp`** exposes the verdict bus + memory to any MCP host (Cursor, Claude, …).
-- Add **`verel[sight]`** so the agent's work is gated by the **eyes**
+Verel grades *artifacts*, so it inserts into whatever agent stack you already run. One line:
+
+```bash
+verel mcp install                    # add the verel-mcp server to your host (Cursor/Claude/Cline/…)
+verel rules --target cursor --write  # tell the agent: call verel_gate before "done" (also agents|claude|copilot)
+```
+
+- **`verel-mcp`** exposes the verdict bus + memory to any MCP host; the agent calls `verel_gate`
+  before declaring done and self-corrects on a grounded FAIL.
+- **`verel rules`** drops the gate instruction into `.cursorrules` / `CLAUDE.md` / `AGENTS.md` /
+  copilot-instructions so *any* agent gates its own work — zero-code adoption.
+- Add **`verel[sight]`** so the agent's work is also gated by the **eyes**
   ([AgentVision](https://amitpatole.github.io/agent-vision/)) — visual defects, intent match,
   and (via `verel.senses.watch`) verified playback over time.
 

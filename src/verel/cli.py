@@ -113,6 +113,33 @@ def _verify(args) -> int:
     return 0 if res.valid else 1
 
 
+def _mcp(args) -> int:
+    from .integrations import mcp_config_json, mcp_install_hint
+    print(mcp_config_json() if getattr(args, "json", False) else mcp_install_hint())
+    return 0
+
+
+def _rules(args) -> int:
+    from pathlib import Path
+
+    from .integrations import rules_snippet
+    filename, content = rules_snippet(args.target)
+    if not args.write:
+        print(content)
+        return 0
+    path = Path(filename)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists() and "Verification gate (Verel)" in path.read_text():
+        print(f"{filename} already contains the Verel gate instruction — nothing to do.")
+        return 0
+    with path.open("a", encoding="utf-8") as fh:
+        if path.stat().st_size:
+            fh.write("\n\n")
+        fh.write(content if content.endswith("\n") else content + "\n")
+    print(f"wrote the Verel gate instruction to {filename}")
+    return 0
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="verel", description="verified agents framework")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -143,6 +170,18 @@ def main(argv=None) -> int:
     vf.add_argument("--require-public", action="store_true",
                     help="reject HMAC receipts; require ed25519 public verifiability")
 
+    mc = sub.add_parser("mcp", help="plug Verel into an MCP agent host")
+    mcsub = mc.add_subparsers(dest="mcp_cmd", required=True)
+    mci = mcsub.add_parser("install", help="print the verel-mcp server config + where to add it")
+    mci.add_argument("--json", action="store_true", help="print only the JSON config block")
+
+    rl = sub.add_parser("rules", help="emit a rules-file snippet so any agent gates via Verel")
+    from .integrations import RULES_TARGETS
+    rl.add_argument("--target", choices=sorted(RULES_TARGETS), default="agents",
+                    help="agent host (default: agents → AGENTS.md)")
+    rl.add_argument("--write", action="store_true",
+                    help="write/append the snippet to its file in the current repo (else print)")
+
     args = p.parse_args(argv)
     if args.cmd == "version":
         print(__version__)
@@ -160,6 +199,10 @@ def main(argv=None) -> int:
         return ci_main(args.ci_args)
     if args.cmd == "verify":
         return _verify(args)
+    if args.cmd == "mcp":
+        return _mcp(args)
+    if args.cmd == "rules":
+        return _rules(args)
     return 2
 
 
