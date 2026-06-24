@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.46.0 — business-rule / invariant grader (Verified Review C)
+
+Catches *"business rules get ignored."* Declare cross-cutting invariants — *"an order total always
+includes tax", "a refund never exceeds the charge"* — and Verel enforces them by execution.
+
+- **`verel.ci.invariants`.** Declared invariants (a `verel_invariants.{yaml,yml,txt}` in the repo —
+  one per line — or a passed list) are compiled by the LLM into property checks, **run**, and a
+  falsified invariant **gates** (`verel_invariants` MCP tool; `load_invariants` / `grade_invariants`).
+  Majority-voted like the spec grader; an ungroundable rule is advisory.
+- **Reuses grader B's hardened, fail-closed execution** (`verel.ci.spec.run_check` — bwrap
+  `--unshare-all` + seccomp + rlimits + memory cgroup) **unchanged**, so it inherits B's 4-round
+  security audit. The new surface (a plain-text invariants file — no `yaml.load`, fixed filenames —
+  and a validated rule list) was independently reviewed: **clean, no new attack surface.** Rules are
+  human-declared (not from a hostile ticket), so the injection surface is smaller than B's.
+
+`examples/demo_invariant_grader.py`. **614 tests.**
+
 ## 0.45.0 — agent-SDK shims: one gate hook for any framework (Reach R3)
 
 Verel grades artifacts, so the integration is the same everywhere — give the agent a tool that gates

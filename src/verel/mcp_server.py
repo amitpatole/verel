@@ -304,6 +304,32 @@ def _tool_spec(args: dict) -> dict:
     }
 
 
+def _tool_invariants(args: dict) -> dict:
+    """Business-rule / invariant grader: do declared invariants still hold over the repo? Rules are
+    operator-declared (a `verel_invariants` file or the `invariants` arg), compiled to checks and run
+    under OS-isolation; a falsified invariant gates."""
+    repo = args.get("repo")
+    if not repo or not isinstance(repo, str) or not os.path.isdir(os.path.abspath(repo)):
+        return _err("repo (existing directory) is required")
+    files = args.get("files") or []
+    if not isinstance(files, list) or not all(isinstance(f, str) for f in files):
+        return _err("files must be a list of changed source paths")
+    from .ci.invariants import grade_invariants, load_invariants
+    from .ci.spec import default_chat
+    repo_abs = os.path.abspath(repo)
+    invs = args.get("invariants")
+    if not invs:
+        invs = load_invariants(repo_abs)  # declared in the repo
+    elif not (isinstance(invs, list) and all(isinstance(s, str) for s in invs)):
+        return _err("invariants must be a list of strings")
+    if not invs:
+        return _err("no invariants declared (pass `invariants` or add a verel_invariants.yaml)")
+    rep = grade_invariants(repo_abs, invs, list(files), chat=default_chat())
+    return {"verdict": rep.verdict.value,
+            "issues": [{"grader": i.source.value, "severity": i.severity.value,
+                        "locator": i.locator, "message": i.message} for i in rep.issues]}
+
+
 def _brain():
     """The shared verified brain — selected by operator env, NOT agent-controllable (a tool arg can't
     repoint it). Selection (`src/verel/memory/registry.py`):
@@ -634,6 +660,14 @@ TOOLS: dict[str, dict[str, Any]] = {
                    "required": ["repo", "criteria"]},
                    "description": "Does the code satisfy the ticket's intent? LLM proposes checks from "
                                   "the ticket, execution verifies; a violated criterion gates."},
+    "verel_invariants": {"fn": _tool_invariants, "schema": {"type": "object", "properties": {
+                             "repo": _REPO,
+                             "invariants": {"type": "array", "items": {"type": "string"},
+                                            "description": "declared rules (else verel_invariants.yaml)"},
+                             "files": {"type": "array", "items": {"type": "string"}}},
+                         "required": ["repo"]},
+                         "description": "Do declared business rules / invariants still hold? A falsified "
+                                        "invariant gates (checks run under OS-isolation)."},
     "verel_recall": {"fn": _tool_recall, "schema": _RECALL_SCHEMA,
                      "description": "Read the shared verified brain (resolves down the scope lattice)."},
     "verel_remember": {"fn": _tool_remember, "schema": _REMEMBER_SCHEMA,
