@@ -82,6 +82,7 @@ exclude_docs: |
   CRITIC_CONVERGENCE.md
   SUBSTRATE_DESIGN.md
   VERIFIED_REVIEW_DESIGN.md
+  SECURITY_RESIDUALS.md
 
 extra:
   social:

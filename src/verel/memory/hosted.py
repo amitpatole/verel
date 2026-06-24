@@ -179,8 +179,14 @@ def _make_handler(store: MemoryView, lock: threading.Lock, token: str | None,
                                         "conflict": res.conflict, "reason": res.reason,
                                         "record": _rec_json(rid)})
             if self.path == "/recall":
+                # Clamp caller-supplied k at the HTTP boundary so an absurd k can't drive an unbounded
+                # scan/fetch in ANY backend (defense in depth; the pg backend also clamps internally).
+                try:
+                    k = max(1, min(int(b.get("k", 5)), 1000))
+                except (TypeError, ValueError, OverflowError):  # OverflowError: int(float('inf'))
+                    k = 5
                 hits = store.recall(b["query"], scope=b.get("scope"), kind=_kind(b.get("kind")),
-                                    k=b.get("k", 5), ts=b.get("ts", 0.0))
+                                    k=k, ts=b.get("ts", 0.0))
                 return self._send(200, {"records": [_rec_json(r) for r in hits]})
             if self.path == "/all":
                 recs = store.all(scope=b.get("scope"), kind=_kind(b.get("kind")))
