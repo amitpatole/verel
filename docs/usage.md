@@ -162,6 +162,7 @@ stage = premerge_stage(
     ".", language="go",            # python | js | go
     security=True,                 # SAST (bandit) / dependency audit (npm)
     perf=perf_spec(".", ["./bench"], budgets={"p95_ms": 150}),  # regression past budget gates
+    mutation=["billing.py"],       # test-effectiveness: surviving mutants in changed files gate
 )
 res = run_stage(stage)
 ```
@@ -169,7 +170,21 @@ res = run_stage(stage)
 Each `GraderSpec` carries its own parser, so `pytest`, `go test -json`, and a TAP runner — all
 `GraderKind.TEST` — coexist on one bus. Language toolchains live in `verel.ci.LANGS`; the graders
 are `pytest_spec`/`ruff_spec`/`mypy_spec`, `jstest_spec`/`eslint_spec`/`tsc_spec`,
-`gotest_spec`/`govet_spec`, plus `bandit_spec`/`npm_audit_spec`/`perf_spec`.
+`gotest_spec`/`govet_spec`, plus `bandit_spec`/`npm_audit_spec`/`perf_spec`/`mutation_spec`.
+
+### Test-effectiveness (mutation) — "tests exist" is not "tests test"
+
+A green suite proves nothing if it asserts nothing. `mutation_spec` injects faults into the changed
+source and re-runs the suite; a **surviving mutant** (one no test catches) is a deterministic FAIL
+(`GraderKind.MUTATION` is precise/gating, not advisory). Diff-scoped + capped to stay under the CI
+budget; the suite is your own tests, so there's no new sandbox surface.
+
+```python
+from verel.ci.mutation import run_mutation
+
+res = run_mutation(".", ["billing.py"], cap_per_file=25)
+print(res.baseline_pass, res.survivors)   # survivors → the tests don't constrain that code
+```
 
 ### Self-healing
 
