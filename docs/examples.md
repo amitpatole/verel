@@ -251,6 +251,7 @@ python examples/demo_shared_brain.py      # 6 · shared brain — un-poisonable,
 python examples/demo_mutation.py          # 7 · a green-but-toothless suite FAILS the gate
 python examples/demo_rest_gate.py         # 8 · gate over HTTP + an HMAC-verified PR webhook
 python examples/demo_spec_grader.py       # 9 · "ticket says A, code does B" → a grounded FAIL
+python examples/demo_invariant_grader.py  # 10 · a declared business rule violated → a grounded FAIL
 ```
 
 More feature-level demos (consolidation into structured rules, the tool-smith lifecycle, semantic

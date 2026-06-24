@@ -64,7 +64,7 @@ offline examples in `examples/`) run with no key at all.
 | **CLI** | `verel …` | `doctor` · `loop` · `fleet` · `heal` · `ci` |
 | **CI CLI / git hook** | `verel-ci …` | a verdict-bus gate in CI or a pre-commit hook |
 | **MCP server** | `verel-mcp` | exposing gate / recall / build-tool / ci-check to an MCP host |
-| **GitHub Action** | `amitpatole/verel@v0.45.0` | failing a build on a FAIL verdict |
+| **GitHub Action** | `amitpatole/verel@v0.46.0` | failing a build on a FAIL verdict |
 | **pre-commit** | `.pre-commit-hooks.yaml` | gating commits |
 
 ### CLI reference
@@ -93,7 +93,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: amitpatole/verel@v0.45.0
+      - uses: amitpatole/verel@v0.46.0
         with:
           repo: .
           install: "-e .[dev]"      # your project deps so its tests import
@@ -102,7 +102,7 @@ jobs:
 ```yaml
 # .pre-commit-config.yaml
 - repo: https://github.com/amitpatole/verel
-  rev: v0.45.0
+  rev: v0.46.0
   hooks: [{ id: verel-precommit }]
 ```
 
@@ -210,6 +210,24 @@ rep = grade_spec(".", ticket_text, ["billing.py"], chat=default_chat())  # gates
   fs, seccomp denylist, rlimits) and **fail closed** (the criterion stays advisory, code is never run)
   when bwrap is absent. `isolation="subprocess"` is a documented opt-out for a **trusted-local** repo
   only — never for external-contributor PRs.
+
+### Business rules / invariants — "business rules get ignored"
+
+Declare cross-cutting invariants — *"an order total always includes tax", "a refund never exceeds the
+charge"* — in a `verel_invariants.yaml` (one per line) or pass them in. `verel.ci.invariants` compiles
+each into property checks, runs them under the same OS-isolation as the spec grader, and gates on a
+falsified rule. Rules are **human-declared** (not from a ticket), so the injection surface is smaller.
+
+```python
+from verel.ci.invariants import grade_invariants, load_invariants
+from verel.ci.spec import default_chat
+
+rules = load_invariants(".")                       # from verel_invariants.yaml, or pass a list of strings
+rep = grade_invariants(".", rules, ["billing.py"], chat=default_chat())  # a violated rule gates
+```
+
+Also the **`verel_invariants` MCP tool**. Like the spec grader, execution defaults to container
+isolation and fails closed without it.
 
 ### Self-healing
 
