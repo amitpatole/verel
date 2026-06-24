@@ -64,7 +64,7 @@ offline examples in `examples/`) run with no key at all.
 | **CLI** | `verel …` | `doctor` · `loop` · `fleet` · `heal` · `ci` |
 | **CI CLI / git hook** | `verel-ci …` | a verdict-bus gate in CI or a pre-commit hook |
 | **MCP server** | `verel-mcp` | exposing gate / recall / build-tool / ci-check to an MCP host |
-| **GitHub Action** | `amitpatole/verel@v0.47.0` | failing a build on a FAIL verdict |
+| **GitHub Action** | `amitpatole/verel@v0.48.0` | failing a build on a FAIL verdict |
 | **pre-commit** | `.pre-commit-hooks.yaml` | gating commits |
 
 ### CLI reference
@@ -93,7 +93,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: amitpatole/verel@v0.47.0
+      - uses: amitpatole/verel@v0.48.0
         with:
           repo: .
           install: "-e .[dev]"      # your project deps so its tests import
@@ -102,7 +102,7 @@ jobs:
 ```yaml
 # .pre-commit-config.yaml
 - repo: https://github.com/amitpatole/verel
-  rev: v0.47.0
+  rev: v0.48.0
   hooks: [{ id: verel-precommit }]
 ```
 
@@ -228,6 +228,27 @@ rep = grade_invariants(".", rules, ["billing.py"], chat=default_chat())  # a vio
 
 Also the **`verel_invariants` MCP tool**. Like the spec grader, execution defaults to container
 isolation and fails closed without it.
+
+### Gate the boundary — the action gateway (`verel.gateway`)
+
+Instead of trusting the agent to call the gate, put the gate *in front of its actions*. The gateway
+classifies each tool call and enforces a verdict on the consequential ones — the agent needn't know
+it's there:
+
+```python
+from verel.gateway import Gateway, Policy, repo_gate
+
+gw = Gateway(invoke=my_tool_runner, policy=Policy(dry_run=True),
+             gate=repo_gate("."), approve=ask_human)
+gw.handle("read_file", {...})     # SAFE        → forwarded
+gw.handle("create_pr", {...})     # CONSEQUENTIAL → forwarded only if the gate PASSes, else BLOCKED
+gw.handle("deploy_prod", {...})   # IRREVERSIBLE  → DRY-RUN by default; applied only on human approval
+```
+
+- **Fail closed:** an unclassifiable or un-gateable consequential action is **blocked**, never
+  forwarded unverified; an irreversible action is **never auto-applied** (dry-run + explicit approval).
+- Built behind a clean **verdict / enforce / adapters** seam, so it lifts into the boundary organ
+  (`immel`) and act-then-verify organ (`actel`) later unchanged.
 
 ### Over-engineering smell — "abstractions nobody needed"
 

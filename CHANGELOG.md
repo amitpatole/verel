@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.48.0 — the action gateway: gate the boundary (Verified Review capstone, G)
+
+Instead of trusting the agent to call the gate, put the gate **in front of its actions**. The gateway
+classifies each tool call and enforces a verdict on the consequential ones — the agent needn't know
+it's there. This completes the Verified-Review track.
+
+- **`verel.gateway`.** `Gateway.handle(tool, args)` classifies the call (token-based, not substring):
+  **SAFE** (read-only) forwards; **CONSEQUENTIAL** (writes) forwards **only on a gate PASS**, else
+  blocked; **IRREVERSIBLE** (destructive/outward-facing) is **dry-run by default** and applied only on
+  explicit **human approval**. `Policy` (allow/deny/overrides), `repo_gate` adapter.
+- **Fail closed (the actel/immel non-negotiables), enforced + regression-pinned:** only a normalized
+  `"pass"` forwards a consequential action — warn / error / missing / malformed / a gate that *raises*
+  all **block**; an irreversible action is **never auto-applied**; an unclassifiable or un-gateable
+  action is blocked. (A security round caught a HIGH fail-open — block-on-`fail` instead of
+  forward-only-on-`pass` — now fixed and pinned; a confirmation round came back clean.)
+- Built behind a clean **verdict / enforce / adapters** seam so it lifts into the boundary organ
+  (`immel`) and act-then-verify organ (`actel`) later unchanged (adoption-first, segregate-later).
+
+`examples/demo_gateway.py`. **637 tests.**
+
 ## 0.47.0 — over-engineering / scope-creep smell grader (Verified Review D)
 
 Catches *"random abstractions for problems nobody was trying to solve."*
