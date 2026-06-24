@@ -34,6 +34,7 @@ _ENTRY_POINT_GROUP = "verel.memory_backends"
 _BUILTINS: dict[str, str] = {
     "local": "verel.memory.local:LocalMemory",
     "remote": "verel.memory.hosted:RemoteMemory",
+    "postgres": "verel.memory.pg_backend:PostgresMemory",
 }
 
 
