@@ -40,6 +40,24 @@ The rules snippet instructs the agent: before declaring any task done, call `ver
 done only on `verdict: pass`; never edit tests to go green. `--write` appends idempotently (a second
 run is a no-op) and preserves existing file content.
 
+### Gate over HTTP (`verel serve`) — for CI, webhooks, any language
+
+A language-agnostic gate: run a small HTTP server over one repo; any CI step, script, or webhook
+`POST`s and gets the verdict — no MCP host needed.
+
+```bash
+verel serve --repo .                       # loopback, zero-config: POST /gate · POST /github · GET /health
+VEREL_GATE_TOKEN=… verel serve --repo . --host 0.0.0.0 \
+  --certfile cert.pem --keyfile key.pem    # a routable bind REQUIRES a token AND TLS, or it refuses to start
+```
+
+- `POST /gate` → runs the gate on the configured repo, returns `{verdict, issues}` (bearer-auth when
+  `VEREL_GATE_TOKEN` is set). The repo is fixed at startup — a caller can't redirect CI at another path.
+- `POST /github` → verifies GitHub's `X-Hub-Signature-256` HMAC over the raw body
+  (`VEREL_GATE_WEBHOOK_SECRET`) before doing anything, then gates the PR and returns the verdict.
+- Secrets come from the environment, never the command line. Bind policy, TLS, body-size cap,
+  slowloris timeout, and connection caps are inherited from the hardened `verel.transport`.
+
 ## `verel-ci` — the CI gate
 
 Runs the verdict bus (tests + lint + types) and exits non-zero on a `fail` verdict, so it

@@ -447,8 +447,8 @@ def parse_npm_audit(out: str, err: str = "") -> list[Issue]:
 
 # Dirs that are never the shipped attack surface — bandit on a whole repo otherwise drowns the gate in
 # test-only patterns (every `assert` is B101) and vendored/third-party code under a local virtualenv.
-_BANDIT_EXCLUDE = ("./tests,./test,./tools,./scripts,./.venv,./venv,./env,./build,./dist,./.git,"
-                   "./node_modules,./.tox")
+_BANDIT_EXCLUDE = ("./tests,./test,./tools,./scripts,./examples,./.venv,./venv,./env,./build,./dist,"
+                   "./.git,./node_modules,./.tox")
 
 
 def bandit_spec(repo: str, covers: list[str] | None = None, *, paths: list[str] | None = None):

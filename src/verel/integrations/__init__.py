@@ -23,4 +23,18 @@ __all__ = [
     "mcp_config_json",
     "mcp_install_hint",
     "rules_snippet",
+    # R1 — REST gate server + GitHub webhook (lazy: imported on demand so the base import stays light)
+    "GateServer",
+    "verify_github_signature",
+    "parse_pr_event",
+    "post_commit_status",
 ]
+
+
+def __getattr__(name: str):
+    # Lazy re-export of the REST surface (keeps `import verel.integrations` from pulling http.server
+    # until something actually needs the server).
+    if name in ("GateServer", "verify_github_signature", "parse_pr_event", "post_commit_status"):
+        from . import rest
+        return getattr(rest, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

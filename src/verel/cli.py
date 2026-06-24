@@ -113,6 +113,28 @@ def _verify(args) -> int:
     return 0 if res.valid else 1
 
 
+def _serve(args) -> int:
+    import os
+    import threading
+
+    from .integrations import GateServer
+    # Secrets from env (never argv — argv leaks in the process list): a bearer token and the GitHub
+    # webhook secret. A routable bind with no token + TLS fails closed inside GateServer.
+    srv = GateServer(
+        args.repo, host=args.host, port=args.port,
+        auth_token=os.environ.get("VEREL_GATE_TOKEN"),
+        webhook_secret=os.environ.get("VEREL_GATE_WEBHOOK_SECRET"),
+        certfile=args.certfile, keyfile=args.keyfile, lint=not args.no_lint,
+    ).start()
+    print(f"verel gate server on {srv.url}  (repo={srv.repo})", flush=True)
+    print("  POST /gate  ·  POST /github  ·  GET /health", flush=True)
+    try:
+        threading.Event().wait()  # serve until interrupted
+    except KeyboardInterrupt:
+        srv.stop()
+    return 0
+
+
 def _mcp(args) -> int:
     from .integrations import mcp_config_json, mcp_install_hint
     print(mcp_config_json() if getattr(args, "json", False) else mcp_install_hint())
@@ -175,6 +197,14 @@ def main(argv=None) -> int:
     mci = mcsub.add_parser("install", help="print the verel-mcp server config + where to add it")
     mci.add_argument("--json", action="store_true", help="print only the JSON config block")
 
+    sv = sub.add_parser("serve", help="run the REST gate server over a repo (POST /gate, /github)")
+    sv.add_argument("--repo", default=".", help="the repo this server gates")
+    sv.add_argument("--host", default="127.0.0.1", help="bind host (routable host requires TLS + token)")
+    sv.add_argument("--port", type=int, default=8750)
+    sv.add_argument("--certfile", help="TLS cert (required for a non-loopback bind)")
+    sv.add_argument("--keyfile", help="TLS key")
+    sv.add_argument("--no-lint", action="store_true", help="skip the lint grader")
+
     rl = sub.add_parser("rules", help="emit a rules-file snippet so any agent gates via Verel")
     from .integrations import RULES_TARGETS
     rl.add_argument("--target", choices=sorted(RULES_TARGETS), default="agents",
@@ -203,6 +233,8 @@ def main(argv=None) -> int:
         return _mcp(args)
     if args.cmd == "rules":
         return _rules(args)
+    if args.cmd == "serve":
+        return _serve(args)
     return 2
 
 
