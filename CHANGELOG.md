@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.49.0 — Postgres/pgvector brain backend (external, multi-machine)
+
+The brain gets its first **external, networked** store: many agents on different machines write
+directly to ONE Postgres. `pip install verel[postgres]`, set `VEREL_MEMORY_BACKEND=postgres` +
+`VEREL_POSTGRES_URL`, no code — the registry resolves it like any built-in.
+
+- **`verel.memory.pg_backend.PostgresMemory`.** The full `MemoryView` contract over psycopg3 +
+  pgvector, proven by the same `tests/memory_contract.py` harness (lexical **and** ANN paths) the
+  in-tree backends pass. Pushdown recall (scope/kind/trust filter in SQL, pgvector `<=>` ANN order,
+  then Verel's documented `rank()` in Python); `apply_replica` verbatim/idempotent; decay prunes on
+  the exact conjunction; confidence never moved by decay/recall.
+- **Correct under concurrent writers** — the reason an external store exists. Every read-modify-write
+  mutator runs under a per-key `pg_advisory_xact_lock`, so concurrent corroborate/supersede on the
+  same `(subject,predicate,scope)` serialize. Pinned by two concurrency proofs: 8×5 concurrent
+  identical writes → `support_count==40`, one row (no lost corroboration); 8 concurrent distinct
+  writes → one row + an N−1 correction chain (no lost supersession).
+- **Security cadence (networked store with credentials):** parameterized queries only (constant
+  column lists, all values bound — B608 clean); the DSN/password is **scrubbed from every error**; a
+  **routable host is refused without validating TLS** (`sslmode=verify-full`/`verify-ca`, fail closed);
+  statement timeout bounds every query. An audit caught a **fail-open** hole — a URL DSN with no
+  userinfo (`postgresql://host/db`) skipped the TLS guard — and a silently-dropped CA bundle on URL
+  DSNs; both fixed and regression-pinned. Multi-round adversarial red-team across SQLi / secret-leak /
+  TLS-bypass / DoS / concurrency / invariant lenses.
+- Env: `VEREL_POSTGRES_URL` (or `VEREL_POSTGRES_DSN`), `VEREL_PG_SSLMODE`, `VEREL_PG_CACERT`,
+  `VEREL_EMBEDDER`. Registered as the built-in `postgres` backend + the `verel.memory_backends`
+  entry-point. Live smoke + concurrency + injection tests behind `VEREL_PG_SMOKE=1`.
+
+**653 tests.**
+
 ## 0.48.0 — the action gateway: gate the boundary (Verified Review capstone, G)
 
 Instead of trusting the agent to call the gate, put the gate **in front of its actions**. The gateway
