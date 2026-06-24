@@ -43,7 +43,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: amitpatole/verel@v0.44.0
+      - uses: amitpatole/verel@v0.45.0
         with:
           repo: .
           install: "-e .[dev]"     # your project deps so its tests import
@@ -57,7 +57,7 @@ HMAC-verified `POST /github` so any CI, script, or GitHub PR webhook can gate wi
 
 ```yaml
 - repo: https://github.com/amitpatole/verel
-  rev: v0.44.0
+  rev: v0.45.0
   hooks: [{ id: verel-precommit }]
 ```
 
@@ -79,5 +79,24 @@ verel rules --target cursor --write  # tell the agent: call verel_gate before "d
 - Add **`verel[sight]`** so the agent's work is also gated by the **eyes**
   ([AgentVision](https://amitpatole.github.io/agent-vision/)) — visual defects, intent match,
   and (via `verel.senses.watch`) verified playback over time.
+
+### In an agent framework (one tool)
+
+Not on MCP? `verel.integrations.sdk` gives a framework-agnostic `gate()` callable + function-calling
+schemas, so the agent calls it before declaring done — works with OpenAI / Anthropic / Claude Agent
+SDK / LangGraph / CrewAI / AutoGen:
+
+```python
+from verel.integrations.sdk import gate, openai_tools, anthropic_tools, run_tool_call
+
+gate(".", criteria=ticket_text)          # universal callable → {"verdict": "pass"|"warn"|"fail", ...}
+
+tools = openai_tools()                    # or anthropic_tools() — function-calling schema
+result = run_tool_call("verel_gate", model_tool_call.arguments)   # run the call your loop receives
+```
+
+LangChain/LangGraph/CrewAI/AutoGen accept the plain `gate` callable as a tool
+(`StructuredTool.from_function(gate)` / `@tool` / `register_function`); `langchain_tools()` adapts it
+for you when LangChain is installed.
 
 See the [Architecture](ARCHITECTURE.md) for how the organs fit together.
