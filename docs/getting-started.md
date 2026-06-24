@@ -43,7 +43,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: amitpatole/verel@v0.43.0
+      - uses: amitpatole/verel@v0.44.0
         with:
           repo: .
           install: "-e .[dev]"     # your project deps so its tests import
@@ -57,7 +57,7 @@ HMAC-verified `POST /github` so any CI, script, or GitHub PR webhook can gate wi
 
 ```yaml
 - repo: https://github.com/amitpatole/verel
-  rev: v0.43.0
+  rev: v0.44.0
   hooks: [{ id: verel-precommit }]
 ```
 

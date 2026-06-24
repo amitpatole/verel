@@ -9,6 +9,8 @@ Verel is configured by a few environment variables — there is no config file.
 | `OPENAI_API_KEY` | — | Required when `VEREL_LLM_PROVIDER=openai`. |
 | `VEREL_REGISTRY_SECRET` | *dev value* | Signing secret for the skill registry — **set a real one in production**. |
 | `VEREL_RUNNER_SECRET` | *dev value* | Grader-runner signing identity — **set a real one in production**. |
+| `VEREL_GITHUB_TOKEN` | — | Token the REST webhook / spec grader use to read a PR's diff + linked-issue criteria and post commit status. |
+| `VEREL_GATE_TOKEN` / `VEREL_GATE_WEBHOOK_SECRET` | — | Bearer token + GitHub webhook HMAC secret for `verel serve` (the REST gate). |
 
 ## Memory backend
 

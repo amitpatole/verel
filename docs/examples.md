@@ -217,6 +217,28 @@ evidence, not advisory), so an agent can't pad a PR with toothless tests to look
 
 ---
 
+## 9. "The ticket said A, the PR did B" — caught before merge
+
+**The situation.** An agent's PR passes its own tests but doesn't actually implement what the ticket
+asked. Verel's **spec grader** extracts the acceptance criteria from the *ticket* (not the diff), has
+the LLM compile each into pytest checks, **runs them**, and gates on a violation — the verdict comes
+from executing code, not from an opinion.
+
+```text
+── code matches the ticket ──  verdict=pass
+── ticket says A, code does B ──  verdict=fail
+     [error] the code does not satisfy the ticket: total_with_tax([60,40],0.10) == 110.0
+```
+
+The model only *proposes* the checks; a majority vote over independent generated checks decides, so a
+single wrong test can't false-fail a merge, and a criterion that can't be grounded stays advisory
+(never a gate). Generated checks run under real OS isolation (bwrap no-net + read-only fs + seccomp +
+rlimits) and fail closed without it — executing LLM-authored code from a possibly-hostile PR safely.
+
+> `python examples/demo_spec_grader.py` (no API key — the LLM is stubbed; the checks really execute)
+
+---
+
 ## Run them all
 
 ```bash
@@ -228,6 +250,7 @@ python examples/demo_capability_jail.py   # 5 · a tool jailed to the syscalls i
 python examples/demo_shared_brain.py      # 6 · shared brain — un-poisonable, HA, crash-tolerant
 python examples/demo_mutation.py          # 7 · a green-but-toothless suite FAILS the gate
 python examples/demo_rest_gate.py         # 8 · gate over HTTP + an HMAC-verified PR webhook
+python examples/demo_spec_grader.py       # 9 · "ticket says A, code does B" → a grounded FAIL
 ```
 
 More feature-level demos (consolidation into structured rules, the tool-smith lifecycle, semantic

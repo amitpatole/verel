@@ -281,6 +281,29 @@ def _tool_ci_check(args: dict) -> dict:
     }
 
 
+def _tool_spec(args: dict) -> dict:
+    """Spec/intent conformance: does the diff satisfy the ticket's acceptance criteria? The LLM
+    proposes checks from the TICKET, execution verifies them; a violated criterion gates."""
+    repo = args.get("repo")
+    if not repo or not isinstance(repo, str) or not os.path.isdir(os.path.abspath(repo)):
+        return _err("repo (existing directory) is required")
+    criteria = args.get("criteria")
+    if not isinstance(criteria, str) or not criteria.strip():
+        return _err("criteria (the ticket / acceptance-criteria text) is required")
+    files = args.get("files") or []
+    if not isinstance(files, list) or not all(isinstance(f, str) for f in files):
+        return _err("files must be a list of changed source paths")
+    from .ci.spec import default_chat, grade_spec
+    n = args.get("checks_per_criterion", 2)
+    rep = grade_spec(os.path.abspath(repo), criteria, list(files),
+                     chat=default_chat(), n=int(n) if isinstance(n, int) else 2)
+    return {
+        "verdict": rep.verdict.value,
+        "issues": [{"grader": i.source.value, "severity": i.severity.value,
+                    "locator": i.locator, "message": i.message} for i in rep.issues],
+    }
+
+
 def _brain():
     """The shared verified brain — selected by operator env, NOT agent-controllable (a tool arg can't
     repoint it). Selection (`src/verel/memory/registry.py`):
@@ -602,6 +625,15 @@ TOOLS: dict[str, dict[str, Any]] = {
                                     "(ed25519 = publicly verifiable)."},
     "verel_ci_check": {"fn": _tool_ci_check, "schema": {"type": "object", "properties": {"repo": _REPO},
                        "required": ["repo"]}, "description": "Run the inner-loop CI stage on a repo."},
+    "verel_spec": {"fn": _tool_spec, "schema": {"type": "object", "properties": {
+                       "repo": _REPO,
+                       "criteria": {"type": "string", "description": "the ticket / acceptance-criteria text"},
+                       "files": {"type": "array", "items": {"type": "string"},
+                                 "description": "changed source files to check against"},
+                       "checks_per_criterion": {"type": "integer"}},
+                   "required": ["repo", "criteria"]},
+                   "description": "Does the code satisfy the ticket's intent? LLM proposes checks from "
+                                  "the ticket, execution verifies; a violated criterion gates."},
     "verel_recall": {"fn": _tool_recall, "schema": _RECALL_SCHEMA,
                      "description": "Read the shared verified brain (resolves down the scope lattice)."},
     "verel_remember": {"fn": _tool_remember, "schema": _REMEMBER_SCHEMA,
