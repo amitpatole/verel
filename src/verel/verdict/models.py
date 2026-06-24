@@ -81,6 +81,7 @@ class IssueKind(str, Enum):
     # Shared cross-domain kinds.
     INTENT_MISMATCH = "intent_mismatch"
     SURVIVED_MUTANT = "survived_mutant"  # a fault injected into the change that no test caught
+    COMPLEXITY = "complexity"  # over-complex / over-engineered code (cyclomatic, speculative generality)
     OTHER = "other"
 
 
@@ -101,6 +102,7 @@ class GraderKind(str, Enum):
     TYPECHECK = "typecheck"
     LINT = "lint"
     MUTATION = "mutation"  # test-effectiveness: a surviving mutant ⇒ tests don't constrain the change
+    SMELL = "smell"  # code-smell / over-engineering (the future `olfel` organ; deterministic metrics gate)
     LLM_JUDGE = "llm_judge"
     PERF = "perf"
     SECURITY = "security"

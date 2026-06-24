@@ -64,7 +64,7 @@ offline examples in `examples/`) run with no key at all.
 | **CLI** | `verel …` | `doctor` · `loop` · `fleet` · `heal` · `ci` |
 | **CI CLI / git hook** | `verel-ci …` | a verdict-bus gate in CI or a pre-commit hook |
 | **MCP server** | `verel-mcp` | exposing gate / recall / build-tool / ci-check to an MCP host |
-| **GitHub Action** | `amitpatole/verel@v0.46.0` | failing a build on a FAIL verdict |
+| **GitHub Action** | `amitpatole/verel@v0.47.0` | failing a build on a FAIL verdict |
 | **pre-commit** | `.pre-commit-hooks.yaml` | gating commits |
 
 ### CLI reference
@@ -93,7 +93,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: amitpatole/verel@v0.46.0
+      - uses: amitpatole/verel@v0.47.0
         with:
           repo: .
           install: "-e .[dev]"      # your project deps so its tests import
@@ -102,7 +102,7 @@ jobs:
 ```yaml
 # .pre-commit-config.yaml
 - repo: https://github.com/amitpatole/verel
-  rev: v0.46.0
+  rev: v0.47.0
   hooks: [{ id: verel-precommit }]
 ```
 
@@ -228,6 +228,19 @@ rep = grade_invariants(".", rules, ["billing.py"], chat=default_chat())  # a vio
 
 Also the **`verel_invariants` MCP tool**. Like the spec grader, execution defaults to container
 isolation and fails closed without it.
+
+### Over-engineering smell — "abstractions nobody needed"
+
+`verel.smell` turns over-engineering into a measurable signal — **deterministic AST analysis, no code
+execution**. A function over a cyclomatic-complexity budget **gates**; a public class/function added in
+the diff but referenced nowhere is flagged as **speculative generality** (advisory). The future home
+is the `olfel` organ; today it's a self-contained module + the `verel_smell` MCP tool.
+
+```python
+from verel.smell import grade_smell
+
+rep = grade_smell(".", ["billing.py"], complexity_budget=12)   # over-complex functions gate
+```
 
 ### Self-healing
 

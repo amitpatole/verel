@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.47.0 — over-engineering / scope-creep smell grader (Verified Review D)
+
+Catches *"random abstractions for problems nobody was trying to solve."*
+
+- **`verel.smell`.** Deterministic AST analysis — **no code execution, no new attack surface**. A
+  changed function over a cyclomatic-complexity budget gates (`GraderKind.SMELL` is precise/gating);
+  a public class/function added in the diff but referenced nowhere is flagged as **speculative
+  generality** (advisory). `grade_smell` + the `verel_smell` MCP tool.
+- This is the **smell organ `olfel`**'s future home — built in `verel` now as a self-contained module
+  that emits standard verdict-bus Reports, so it lifts into `olfel` later unchanged (per the
+  adoption-first / monolith-now-segregate-later strategy).
+
+`examples/demo_smell_grader.py`. **621 tests.**
+
 ## 0.46.0 — business-rule / invariant grader (Verified Review C)
 
 Catches *"business rules get ignored."* Declare cross-cutting invariants — *"an order total always
