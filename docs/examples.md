@@ -253,6 +253,7 @@ python examples/demo_rest_gate.py         # 8 · gate over HTTP + an HMAC-verifi
 python examples/demo_spec_grader.py       # 9 · "ticket says A, code does B" → a grounded FAIL
 python examples/demo_invariant_grader.py  # 10 · a declared business rule violated → a grounded FAIL
 python examples/demo_smell_grader.py      # 11 · over-engineering → complexity gates, speculative flagged
+python examples/demo_gateway.py           # 12 · gate the action boundary: write blocked, deploy dry-run
 ```
 
 More feature-level demos (consolidation into structured rules, the tool-smith lifecycle, semantic
