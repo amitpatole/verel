@@ -18,9 +18,19 @@ from memory_contract import CONTRACT_CHECKS, make_fact
 
 from verel.memory.embed import HashEmbedder
 
-# Tests that need a LIVE Postgres carry @requires_pg; the pure security/unit tests below run always.
+# Tests that need a LIVE Postgres carry @requires_pg; @requires_psycopg covers unit tests that need
+# the psycopg import (the [postgres] extra) but no server; pure-Python tests run always.
+try:
+    import psycopg as _psycopg  # noqa: F401
+    _HAS_PSYCOPG = True
+except ImportError:
+    _HAS_PSYCOPG = False
+
+requires_psycopg = pytest.mark.skipif(
+    not _HAS_PSYCOPG, reason="psycopg not installed (pip install verel[postgres])")
 requires_pg = pytest.mark.skipif(
-    not os.environ.get("VEREL_PG_SMOKE"), reason="set VEREL_PG_SMOKE=1 with a live Postgres")
+    not (os.environ.get("VEREL_PG_SMOKE") and _HAS_PSYCOPG),
+    reason="set VEREL_PG_SMOKE=1 with a live Postgres and verel[postgres]")
 
 DSN = os.environ.get("VEREL_POSTGRES_URL", "postgresql://postgres:verel@127.0.0.1:5433/verel")
 
@@ -124,6 +134,7 @@ def test_scope_value_is_bound_not_interpolated():
 # ---- security: a routable host without validating TLS is refused (fail closed) -
 # Red-team cluster A: the guard must resolve the host the way libpq actually connects — every shape
 # below reaches a routable host, so every one must be REFUSED without verify-full/verify-ca.
+@requires_psycopg
 @pytest.mark.parametrize("dsn", [
     "postgresql://user:pw@db.example.com:5432/verel",
     "postgresql://db.example.com/verel",                 # NO userinfo
@@ -141,6 +152,7 @@ def test_routable_host_without_tls_refused(dsn):
         PostgresMemory(dsn)
 
 
+@requires_psycopg
 def test_pghost_env_target_is_guarded(monkeypatch):
     # Red-team cluster A: PGHOST/PGHOSTADDR/PGSSLMODE env supply the target/mode libpq uses even when
     # the DSN omits them — the guard must see them too, not just the DSN string.
@@ -151,6 +163,7 @@ def test_pghost_env_target_is_guarded(monkeypatch):
         PostgresMemory("dbname=verel user=verel")  # no host in the DSN at all
 
 
+@requires_psycopg
 def test_routable_host_allowed_with_validating_tls():
     # The guard must NOT over-refuse: a routable host WITH verify-full is allowed (it will then fail to
     # connect, scrubbed — but it must get past the TLS guard, i.e. not raise the guard ValueError).
@@ -160,6 +173,7 @@ def test_routable_host_allowed_with_validating_tls():
         PostgresMemory("host=db.invalid.example port=5599 sslmode=verify-full dbname=verel connect_timeout=1")
 
 
+@requires_psycopg
 def test_loopback_shapes_not_over_refused(monkeypatch):
     import verel.memory.pg_backend as pg
     from verel.memory.pg_backend import _routable_hosts
@@ -175,6 +189,7 @@ def test_loopback_shapes_not_over_refused(monkeypatch):
 
 
 # ---- security: the DSN/password never appears in any error (cluster E) --------
+@requires_psycopg
 def test_dsn_scrubbed_from_connection_error():
     from verel.memory.pg_backend import PostgresMemory
 
@@ -195,6 +210,7 @@ def test_scrub_redacts_url_userinfo_and_keyword_passwords():
     assert "Sup3rS3cret" not in _scrub(ValueError("postgresql://app:Sup3rS3cret@h/db failed"), "other")
 
 
+@requires_psycopg
 def test_from_env_make_conninfo_error_is_scrubbed(monkeypatch):
     # Red-team cluster E/#1: a malformed credentialed DSN made make_conninfo raise OUTSIDE any
     # try/except, leaking the password. from_env must scrub it.
