@@ -15,6 +15,7 @@ PRECISE_GRADERS = {
     GraderKind.TEST,
     GraderKind.TYPECHECK,
     GraderKind.LINT,
+    GraderKind.MUTATION,  # deterministic: a surviving injected fault is hard evidence, not a hunch
     GraderKind.DOM,
     GraderKind.OCR,
     GraderKind.CV,
