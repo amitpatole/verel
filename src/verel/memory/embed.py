@@ -64,14 +64,25 @@ class HashEmbedder:
         return [self._vec(t) for t in texts]
 
 
+# Native output dimensions per known OpenAI embedding model. `.dim` MUST match what `embed()` actually
+# returns, or a fixed-dim vector store (LanceDB) creates a wrong-width column and crashes on write.
+_OPENAI_DIMS = {
+    "text-embedding-3-small": 1536,
+    "text-embedding-3-large": 3072,
+    "text-embedding-ada-002": 1536,
+}
+
+
 class OpenAIEmbedder:
     """Real semantic embeddings via an OpenAI-compatible /v1/embeddings endpoint."""
 
     def __init__(self, model: str = "text-embedding-3-small",
-                 base_url: str = "https://api.openai.com/v1", dim: int = 1536):
+                 base_url: str = "https://api.openai.com/v1", dim: int | None = None):
         self.model = model
         self.base_url = base_url
-        self.dim = dim
+        # dim must reflect the MODEL's real output width — derive it from the model (overridable for
+        # an unknown model / a truncated-dimensions deployment), never a blanket 1536.
+        self.dim = int(dim) if dim is not None else _OPENAI_DIMS.get(model, 1536)
 
     def _key(self) -> str:
         if k := os.environ.get("OPENAI_API_KEY"):
@@ -113,5 +124,6 @@ def embedder_from_env() -> Embedder | None:
         return HashEmbedder()
     if name == "openai":
         model = os.environ.get("VEREL_EMBED_MODEL", "text-embedding-3-small")
-        return OpenAIEmbedder(model=model)
+        dim = os.environ.get("VEREL_EMBED_DIM")  # override for an unknown model / truncated dimensions
+        return OpenAIEmbedder(model=model, dim=int(dim) if dim else None)
     raise ValueError(f"unknown VEREL_EMBEDDER={name!r}; expected none|lexical|hash|openai")

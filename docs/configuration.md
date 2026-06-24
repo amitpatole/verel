@@ -15,13 +15,13 @@ Verel is configured by a few environment variables — there is no config file.
 ## Memory backend
 
 The shared **brain** (verified memory) is pluggable. Pick a backend by name; each reads its own
-connection env. Built-in names are `local` (default), `remote`, and `postgres`; more external-DB
-backends ship behind extras in later releases (`pip install verel[<db>]`) and register under the
-same selector.
+connection env. Built-in names are `local` (default), `remote`, `postgres`, and `lancedb`; more
+external-DB backends ship behind extras in later releases (`pip install verel[<db>]`) and register
+under the same selector.
 
 | Env var | Default | Purpose |
 |---|---|---|
-| `VEREL_MEMORY_BACKEND` | `local` | Backend to use — `local`, `remote`, `postgres`, or any registered name. If unset but `VEREL_BRAIN_URL` is set, defaults to `remote` (back-compat). |
+| `VEREL_MEMORY_BACKEND` | `local` | Backend to use — `local`, `remote`, `postgres`, `lancedb`, or any registered name. If unset but `VEREL_BRAIN_URL` is set, defaults to `remote` (back-compat). |
 | `VEREL_MEMORY_STORE` | `~/.config/verel/brain.db` | SQLite path for the `local` backend (`:memory:` for ephemeral). |
 | `VEREL_EMBEDDER` | `lexical` | Recall relevance signal — `none`/`lexical` (token overlap, zero-config), `hash` (offline vectors), or `openai` (semantic; needs an OpenAI key). Shared by every backend. |
 | `VEREL_BRAIN_URL` | — | `remote` backend: URL of a `MemoryServer` to share one brain across machines. |
@@ -64,6 +64,37 @@ export VEREL_EMBEDDER=hash                          # optional: ANN recall (offl
 The credential is **never logged or echoed in an error**, all queries are parameterized, and a
 statement timeout bounds each query. For *embedded* single-process use, `local` (SQLite) remains the
 zero-dependency default; use `postgres` when several machines share one verified brain.
+
+### LanceDB (`lancedb`)
+
+An **embedded** vector store — a directory on disk, no server — so it's the zero-infrastructure way to
+get real ANN recall (a vector-native upgrade over the SQLite default). With an embedder, recall is
+approximate-nearest-neighbour over a Lance index; without one it falls back to the same lexical recall
+as `local`.
+
+```bash
+pip install "verel[lancedb]"
+export VEREL_MEMORY_BACKEND=lancedb
+export VEREL_LANCEDB_PATH=~/.config/verel/lance   # a directory (created if absent)
+export VEREL_EMBEDDER=hash                          # optional: ANN recall (offline vectors)
+```
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `VEREL_LANCEDB_PATH` | `~/.config/verel/lance` | Dataset directory (operator-set; path-normalized). |
+| `VEREL_LANCEDB_TABLE` | `memory` | Table name within the dataset. |
+
+**Single-writer**, like `local`: one dataset is owned by one process. For a brain shared across
+machines/processes, front it with a hosted `MemoryServer` (set `VEREL_BRAIN_URL` on the clients) —
+the server serializes every write, so the interference rule stays correct. LanceDB's `.where()` filter
+is treated as untrusted SQL: scope/kind are filtered in Python and the only ids that reach a predicate
+are escaped.
+
+!!! note "The embedder is fixed per dataset"
+    The vector dimension is baked into the dataset when it's first created, so `VEREL_EMBEDDER` (and
+    the embedding model) **must stay the same** for a given `VEREL_LANCEDB_PATH`. Reopening a dataset
+    with a different embedder (a dim change, or adding/removing one) **fails closed with a clear
+    error** — point a fresh `VEREL_LANCEDB_PATH`/`VEREL_LANCEDB_TABLE` at the new configuration.
 
 ## LLM keys
 

@@ -15,6 +15,16 @@ def test_cosine_basics():
     assert cosine([], [1]) == 0.0
 
 
+def test_openai_embedder_dim_matches_model():
+    # Red-team HIGH: .dim MUST reflect the model's real output width (a fixed-dim vector store creates a
+    # wrong-width column and crashes on write if .dim lies). Not a blanket 1536.
+    from verel.memory.embed import OpenAIEmbedder
+
+    assert OpenAIEmbedder("text-embedding-3-small").dim == 1536
+    assert OpenAIEmbedder("text-embedding-3-large").dim == 3072   # was wrongly 1536 before the fix
+    assert OpenAIEmbedder("some-future-model", dim=42).dim == 42  # explicit override (VEREL_EMBED_DIM)
+
+
 def test_hash_embedder_is_deterministic_and_normalized():
     e = HashEmbedder(dim=64)
     a = e.embed(["overflow on narrow screens"])[0]
