@@ -1,0 +1,40 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard",
+    ":semanticCommits"
+  ],
+  "labels": ["dependencies"],
+  "rangeStrategy": "bump",
+  "github-actions": {
+    "enabled": true,
+    "pinDigests": true
+  },
+  "pip_requirements": { "enabled": true },
+  "packageRules": [
+    {
+      "description": "Group all GitHub Actions SHA bumps into one PR",
+      "matchManagers": ["github-actions"],
+      "groupName": "github-actions"
+    },
+    {
+      "description": "Chainguard images move fast and are rebuilt daily — bump promptly, no waiting",
+      "matchPackageNames": ["cgr.dev/chainguard/git"],
+      "minimumReleaseAge": "0 days",
+      "schedule": ["at any time"]
+    }
+  ],
+  "customManagers": [
+    {
+      "description": "Keep the GateRun clone image digest fresh (src/verel/operator/jobs.py)",
+      "customType": "regex",
+      "fileMatch": ["^src/verel/operator/jobs\\.py$"],
+      "matchStrings": [
+        "\"(?<depName>cgr\\.dev/chainguard/git)@(?<currentDigest>sha256:[a-f0-9]{64})\""
+      ],
+      "currentValueTemplate": "latest",
+      "datasourceTemplate": "docker"
+    }
+  ]
+}
