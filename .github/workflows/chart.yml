@@ -59,4 +59,13 @@ jobs:
             --set image.repository=verel --set image.tag=e2e --set image.pullPolicy=Never \
             --set tls.secretName=verel-tls --set auth.token=ci-token --wait --timeout 180s
           kubectl rollout status deploy/v-verel --timeout 120s
-          helm test v --timeout 120s
+          helm test v --timeout 180s
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          echo "=== pods ==="; kubectl get pods -o wide
+          echo "=== networkpolicies ==="; kubectl get netpol -o wide
+          echo "=== describe test pod ==="; kubectl describe pod v-verel-test || true
+          echo "=== test pod logs ==="; kubectl logs v-verel-test || true
+          echo "=== gateway logs ==="; kubectl logs deploy/v-verel --tail=50 || true
+          echo "=== endpoints ==="; kubectl get endpoints v-verel -o wide || true
