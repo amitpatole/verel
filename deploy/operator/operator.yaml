@@ -1,0 +1,66 @@
+# The Verel operator Deployment — the hardened image in --operator mode (verel-operator). Nonroot,
+# read-only rootfs, drop-ALL caps, seccomp RuntimeDefault. Unlike the workloads it manages, the
+# operator DOES mount its ServiceAccount token (it needs the API) — but that SA is least-privilege
+# (deploy/operator/rbac.yaml).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: verel-operator
+  namespace: verel-system
+  labels: { app.kubernetes.io/name: verel-operator, app.kubernetes.io/component: operator }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: verel-operator }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: verel-operator }
+    spec:
+      serviceAccountName: verel-operator
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: operator
+          image: ghcr.io/amitpatole/verel:1.0.0     # pinned (never :latest) — bumped per release
+          command: [verel-operator]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          env:
+            - { name: VEREL_GATERUN_IMAGE, value: ghcr.io/amitpatole/verel:1.0.0 }
+          ports:
+            - { name: healthz, containerPort: 8080 }
+          # liveness only — the operator is a singleton controller behind NO Service, so a readiness
+          # probe is meaningless (and reusing one probe for both is a kube-score anti-pattern).
+          livenessProbe:
+            httpGet: { path: /healthz, port: healthz }
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests: { cpu: 50m, memory: 128Mi, ephemeral-storage: 64Mi }
+            limits: { cpu: 500m, memory: 256Mi, ephemeral-storage: 256Mi }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+# Deny ALL pod-sourced ingress to the operator. The kopf liveness endpoint (:8080) is then reachable
+# only by the kubelet (node/host-sourced probes are not subject to NetworkPolicy), not by co-located
+# pods — closes the operator :8080 co-pod-reach residual. Egress is unconstrained (the operator needs
+# the API server). No ingress rules = default-deny.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: verel-operator
+  namespace: verel-system
+  labels: { app.kubernetes.io/name: verel-operator, app.kubernetes.io/component: operator }
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: verel-operator }
+  policyTypes: [Ingress]
+  ingress: []

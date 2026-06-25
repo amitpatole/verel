@@ -85,6 +85,16 @@ def test_health_and_gate_loopback_zeroconf(repo):
         srv.stop()
 
 
+def test_readiness_probe(repo):
+    # k8s readiness: /ready is 200 when the gated repo is accessible (liveness /health is process-up).
+    srv = GateServer(str(repo), lint=False).start()
+    try:
+        code, body = _get(srv.url + "/ready")
+        assert code == 200 and body["status"] == "ready"
+    finally:
+        srv.stop()
+
+
 def test_gate_requires_token_when_set(repo):
     srv = GateServer(str(repo), auth_token="t0ken", lint=False).start()
     try:

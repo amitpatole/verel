@@ -177,8 +177,13 @@ def _make_handler(repo: str, run_gate, token: str | None, webhook_secret: str | 
                 # as the next request (CL.0 desync / smuggling). Reject any non-zero body → 400 + close.
                 if int(self.headers.get("Content-Length", "0") or "0") != 0:
                     raise ValueError("GET must not carry a body")
-                if self.path == "/health":
+                if self.path == "/health":   # liveness: the process is up
                     return self._send(200, {"status": "ok"})
+                if self.path == "/ready":    # readiness: can actually serve gates (repo accessible)
+                    import os
+                    ok = os.path.isdir(repo) and os.access(repo, os.R_OK)
+                    return self._send(200 if ok else 503,
+                                      {"status": "ready" if ok else "not-ready", "repo": repo})
                 return self._send(404, {"error": "not found"})
             except ValueError as e:
                 return self._send(400, {"error": str(e)})
@@ -223,7 +228,7 @@ class GateServer:
                  auth_token: str | None = None, webhook_secret: str | None = None,
                  lint: bool = True, on_event=None, max_concurrent_gates: int = 4,
                  certfile: str | Path | None = None, keyfile: str | Path | None = None,
-                 ssl_context: ssl.SSLContext | None = None,
+                 ssl_context: ssl.SSLContext | None = None, insecure: bool = False,
                  max_connections: int = _DEFAULT_MAX_CONNECTIONS, max_per_ip: int | None = None):
         self.repo = os.path.realpath(str(repo))
         if not os.path.isdir(self.repo):
@@ -238,7 +243,8 @@ class GateServer:
         self._gate_sem = threading.BoundedSemaphore(max(1, max_concurrent_gates))
         ssl_context = build_server_context(certfile, keyfile, ssl_context)
         self._tls = ssl_context is not None
-        enforce_bind_policy(host, auth_token=auth_token, tls=self._tls, service="gate service")
+        enforce_bind_policy(host, auth_token=auth_token, tls=self._tls, service="gate service",
+                            insecure=insecure)
         self._httpd = TLSThreadingHTTPServer(
             (host, port), _make_handler(self.repo, lambda: self._run_gate(), auth_token,
                                         webhook_secret, on_event, self._gate_sem),

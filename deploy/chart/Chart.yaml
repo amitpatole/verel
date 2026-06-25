@@ -1,0 +1,30 @@
+apiVersion: v2
+name: verel
+description: |
+  Verel — verified agents. This chart deploys the GatewayService (the `verel serve` REST gate +
+  GitHub PR-webhook endpoint) as a hardened, TLS-fronted Deployment. Runs on Kubernetes and k3s.
+type: application
+# Chart version is bumped per chart change; appVersion tracks the Verel image tag it defaults to.
+version: 1.0.0
+appVersion: "1.0.0"
+home: https://amitpatole.github.io/verel/
+sources:
+  - https://github.com/amitpatole/verel
+keywords: [verel, agents, verification, ci, gate, kubernetes, k3s]
+maintainers:
+  - name: amitpatole
+    url: https://github.com/amitpatole
+annotations:
+  # Artifact Hub metadata (https://artifacthub.io/docs/topics/annotations/helm/)
+  artifacthub.io/license: MIT
+  artifacthub.io/signKey: |
+    fingerprint: cosign keyless (Sigstore) — verify with the GitHub OIDC identity
+    url: https://github.com/amitpatole/verel
+  artifacthub.io/links: |
+    - name: Install on Kubernetes / k3s
+      url: https://amitpatole.github.io/verel/kubernetes/
+    - name: Source
+      url: https://github.com/amitpatole/verel
+  artifacthub.io/maintainers: |
+    - name: amitpatole
+      email: amit.patole@gmail.com

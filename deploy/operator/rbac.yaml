@@ -1,0 +1,58 @@
+# Least-privilege RBAC for the Verel operator. It reconciles the four verel.dev CRDs into Jobs,
+# Deployments and Services, and READS (never writes) Secrets to validate a Brain's connection. No
+# wildcards, no escalate/bind, no cluster-admin.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: verel-operator
+  namespace: verel-system
+automountServiceAccountToken: true
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: verel-operator
+rules:
+  # the Verel CRDs (+ status)
+  - apiGroups: ["verel.dev"]
+    resources: [gateruns, brains, gatewayservices, verelfleets,
+                gateruns/status, brains/status, gatewayservices/status, verelfleets/status]
+    verbs: [get, list, watch, patch]   # kopf is patch-based (diff-base, finalizers, status) — no PUT
+  # GateRun → hardened Jobs (get = read-back for the verdict mirror; list/watch = the Job event handler)
+  - apiGroups: ["batch"]
+    resources: [jobs]
+    verbs: [create, get, list, watch]
+  # GateRun → a deny-egress NetworkPolicy fencing the untrusted pod (create only; conflict fails closed)
+  - apiGroups: ["networking.k8s.io"]
+    resources: [networkpolicies]
+    verbs: [create]
+  # GatewayService / VerelFleet → Deployments (create, or patch on conflict — no read/watch)
+  - apiGroups: ["apps"]
+    resources: [deployments]
+    verbs: [create, patch]
+  # Services for the gateway (create, or patch on conflict)
+  - apiGroups: [""]
+    resources: [services]
+    verbs: [create, patch]
+  # READ-ONLY, single-object GET only: validate a Brain's connection Secret EXISTS (the operator never
+  # reads its values; list/watch is intentionally NOT granted).
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get]
+  # kopf posts Events
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: verel-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: verel-operator
+subjects:
+  - kind: ServiceAccount
+    name: verel-operator
+    namespace: verel-system

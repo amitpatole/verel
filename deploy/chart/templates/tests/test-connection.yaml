@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "verel.fullname" . }}-test
+  labels: {{- include "verel.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    # one-shot test hook (restartPolicy: Never, runs once and exits) — probes don't apply.
+    "polaris.fairwinds.com/livenessProbeMissing-exempt": "true"
+    "polaris.fairwinds.com/readinessProbeMissing-exempt": "true"
+    "kube-score/ignore": "pod-probes"
+spec:
+  restartPolicy: Never
+  securityContext: {{- toYaml .Values.podSecurityContext | nindent 4 }}
+  containers:
+    - name: probe
+      # reuse the pinned, hardened gateway image (no extra :latest base) — it ships Python.
+      image: {{ include "verel.image" . | quote }}
+      imagePullPolicy: {{ .Values.image.pullPolicy }}
+      securityContext: {{- toYaml .Values.securityContext | nindent 8 }}
+      command: ["python"]
+      args:
+        - "-c"
+        - |
+          import ssl, time, urllib.request
+          ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
+          url = "{{ if and .Values.tls.enabled (not .Values.tls.insecure) }}https{{ else }}http{{ end }}://{{ include "verel.fullname" . }}:{{ .Values.service.port }}/health"
+          # retry: a just-installed Service's endpoints/kube-proxy routing can lag the Deployment's
+          # readiness (esp. on k3s) — poll for up to ~60s rather than fail on a one-shot race.
+          deadline = time.time() + 60
+          while True:
+              try:
+                  urllib.request.urlopen(url, context=ctx, timeout=5).read(); print("ok"); break
+              except Exception as e:
+                  if time.time() >= deadline: raise
+                  print("retrying:", e); time.sleep(3)
+      resources:
+        requests: { cpu: 50m, memory: 64Mi, ephemeral-storage: 32Mi }
+        limits: { cpu: 250m, memory: 128Mi, ephemeral-storage: 128Mi }

@@ -1,0 +1,42 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: verelfleets.verel.dev
+spec:
+  group: verel.dev
+  scope: Namespaced
+  names: { kind: VerelFleet, plural: verelfleets, singular: verelfleet, shortNames: [fleet] }
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+        scale: { specReplicasPath: .spec.workers, statusReplicasPath: .status.workers }
+      additionalPrinterColumns:
+        - { name: Workers, type: integer, jsonPath: .spec.workers }
+        - { name: Ready, type: integer, jsonPath: .status.readyWorkers }
+        - { name: Brain, type: string, jsonPath: .spec.brain }
+        - { name: Age, type: date, jsonPath: .metadata.creationTimestamp }
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              required: [brain]
+              properties:
+                workers: { type: integer, default: 2, minimum: 0, maximum: 100 }
+                brain:
+                  type: string
+                  pattern: '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
+                  description: "Name of the Brain CR the fleet shares (a DNS label)."
+                goal: { type: string, description: "The fleet's standing goal (passed to the workers)." }
+                # The worker image is the operator's trusted image — not author-supplied (pruned).
+            status:
+              type: object
+              properties:
+                workers: { type: integer }
+                readyWorkers: { type: integer }
+                message: { type: string }

@@ -1,0 +1,85 @@
+# Config-scanner gate: the deployed Verel workloads (chart + operator manifests + CRD-generated
+# Jobs/Deployments) MUST come up green on Polaris, kube-linter, and kube-score. Renders every workload
+# and audits it; fails the build on any Danger (Polaris), any finding (kube-linter), or any CRITICAL
+# (kube-score, minus the documented overrides in deploy/policy/README.md).
+name: policy
+on:
+  push:
+    paths: ["deploy/**", "src/verel/operator/**", ".github/workflows/policy.yml"]
+  pull_request:
+    paths: ["deploy/**", "src/verel/operator/**", ".github/workflows/policy.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    env:
+      KUBE_SCORE_VERSION: "1.18.0"
+      POLARIS_VERSION: "9.6.0"
+      # chart (primary path): only the pinned-image pull-policy override
+      CHART_IGNORE: "container-image-pull-policy"
+      # operator-managed services: + PDB (a PDB over the default single-replica gateway deadlocks
+      # node drains — see deploy/policy/README.md). NetworkPolicy IS emitted now (no ignore).
+      OP_IGNORE: "container-image-pull-policy,deployment-has-poddisruptionbudget"
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with: { python-version: "3.12" }
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+
+      - name: Install scanners (kube-linter, kube-score, polaris)
+        run: |
+          set -euo pipefail
+          curl -sSL -o kl.tar.gz https://github.com/stackrox/kube-linter/releases/latest/download/kube-linter-linux.tar.gz
+          tar xzf kl.tar.gz && sudo install kube-linter /usr/local/bin/
+          curl -sSL -o kube-score "https://github.com/zegl/kube-score/releases/download/v${KUBE_SCORE_VERSION}/kube-score_${KUBE_SCORE_VERSION}_linux_amd64"
+          sudo install kube-score /usr/local/bin/
+          curl -sSL -o polaris.tar.gz "https://github.com/FairwindsOps/polaris/releases/download/${POLARIS_VERSION}/polaris_linux_amd64.tar.gz"
+          tar xzf polaris.tar.gz polaris && sudo install polaris /usr/local/bin/
+
+      - name: Render all workloads
+        run: |
+          set -euo pipefail
+          pip install -e ".[operator]" pyyaml >/dev/null
+          mkdir -p render
+          helm template v deploy/chart --set tls.secretName=verel-tls --set auth.token=t --set replicaCount=2 > render/chart-tls.yaml
+          helm template v deploy/chart --set tls.insecure=true     --set auth.token=t --set replicaCount=2 > render/chart-insecure.yaml
+          python - <<'PY'
+          import yaml
+          from verel.operator.jobs import build_gaterun_job, build_gaterun_netpol
+          from verel.operator.deployments import (build_gateway_deployment, build_service,
+                                                  build_fleet_deployment, build_workload_netpol)
+          o = {"apiVersion":"verel.dev/v1alpha1","kind":"GateRun","name":"gr1","uid":"u","controller":True}
+          docs = [build_gaterun_job("gr1","verel",{"repo":"https://github.com/o/r"},owner=o),
+                  build_gaterun_netpol("gr1","verel",owner=o),
+                  build_gateway_deployment("gw","verel",{},owner=o), build_service("gw","verel",owner=o),
+                  build_workload_netpol("gw","verel",owner=o),
+                  build_fleet_deployment("fl","verel",{"brain":"main"},owner=o),
+                  build_workload_netpol("fl","verel",owner=o,same_namespace_only=True)]
+          open("render/operator-workloads.yaml","w").write(yaml.safe_dump_all(docs))
+          PY
+          { cat deploy/operator/operator.yaml; echo '---'; cat deploy/operator/rbac.yaml; } > render/operator-all.yaml
+
+      - name: kube-linter (zero findings)
+        run: for f in render/*.yaml; do echo "== $f =="; kube-linter lint "$f"; done
+
+      - name: Polaris (fail on Danger)
+        run: |
+          for f in render/*.yaml; do
+            echo "== $f =="
+            polaris audit --config deploy/policy/polaris.yaml --audit-path "$f" \
+              --format pretty --only-show-failed-tests --set-exit-code-on-danger
+          done
+
+      - name: kube-score (zero CRITICALs, documented ignores)
+        run: |
+          set -euo pipefail
+          for f in render/chart-tls.yaml render/chart-insecure.yaml; do
+            echo "== $f =="; kube-score score "$f" --ignore-test "$CHART_IGNORE"
+          done
+          for f in render/operator-workloads.yaml render/operator-all.yaml; do
+            echo "== $f =="; kube-score score "$f" --ignore-test "$OP_IGNORE"
+          done

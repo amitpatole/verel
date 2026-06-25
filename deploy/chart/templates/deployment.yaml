@@ -1,0 +1,123 @@
+{{- if and .Values.tls.enabled (not .Values.tls.insecure) (not .Values.tls.secretName) }}
+{{- fail "tls.secretName is required when tls.enabled=true and tls.insecure=false — provide a kubernetes.io/tls Secret, or set tls.insecure=true behind a TLS-terminating ingress." }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "verel.fullname" . }}
+  labels: {{- include "verel.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels: {{- include "verel.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "verel.selectorLabels" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "verel.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountToken }}
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: gateway
+          image: {{ include "verel.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          args:
+            - serve
+            - --host
+            - 0.0.0.0
+            - --port
+            - {{ .Values.service.port | quote }}
+            - --repo
+            - {{ .Values.repo.mountPath }}
+            {{- if and .Values.tls.enabled (not .Values.tls.insecure) }}
+            - --certfile
+            - /tls/tls.crt
+            - --keyfile
+            - /tls/tls.key
+            {{- end }}
+            {{- range .Values.extraArgs }}
+            - {{ . | quote }}
+            {{- end }}
+          env:
+            - name: VEREL_GATE_TOKEN
+              valueFrom:
+                secretKeyRef: { name: {{ include "verel.authSecretName" . }}, key: token }
+            - name: VEREL_GATE_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef: { name: {{ include "verel.authSecretName" . }}, key: webhookSecret, optional: true }
+            {{- if .Values.tls.insecure }}
+            - { name: VEREL_GATE_INSECURE, value: "1" }
+            {{- end }}
+            {{- range $k, $v := .Values.brain.env }}
+            - { name: {{ $k | quote }}, value: {{ $v | quote }} }
+            {{- end }}
+          {{- if .Values.brain.existingSecret }}
+          envFrom:
+            - secretRef: { name: {{ .Values.brain.existingSecret }} }
+          {{- end }}
+          ports:
+            - name: https
+              containerPort: {{ .Values.service.port }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: https
+              scheme: {{ if and .Values.tls.enabled (not .Values.tls.insecure) }}HTTPS{{ else }}HTTP{{ end }}
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: https
+              scheme: {{ if and .Values.tls.enabled (not .Values.tls.insecure) }}HTTPS{{ else }}HTTP{{ end }}
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - { name: repo, mountPath: {{ .Values.repo.mountPath }} }
+            - { name: tmp, mountPath: /tmp }
+            {{- if and .Values.tls.enabled (not .Values.tls.insecure) }}
+            - { name: tls, mountPath: /tls, readOnly: true }
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: repo
+          {{- if eq .Values.repo.source "pvc" }}
+          persistentVolumeClaim: { claimName: {{ required "repo.pvcName is required when repo.source=pvc" .Values.repo.pvcName }} }
+          {{- else if eq .Values.repo.source "hostPath" }}
+          hostPath: { path: {{ required "repo.hostPath is required when repo.source=hostPath" .Values.repo.hostPath }} }
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- if and .Values.tls.enabled (not .Values.tls.insecure) }}
+        - name: tls
+          secret: { secretName: {{ .Values.tls.secretName | quote }} }
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.affinity }}
+      affinity: {{- toYaml .Values.affinity | nindent 8 }}
+      {{- else }}
+      affinity:                       # default: prefer spreading replicas across nodes (HA)
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels: {{- include "verel.selectorLabels" . | nindent 20 }}
+                topologyKey: kubernetes.io/hostname
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}

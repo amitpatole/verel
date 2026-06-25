@@ -68,6 +68,7 @@ nav:
   - Guides:
       - Developer guide: usage.md
       - Architecture: ARCHITECTURE.md
+      - Deploy on Kubernetes / k3s: kubernetes.md
   - Reference:
       - CLI: cli.md
       - Configuration: configuration.md
@@ -84,6 +85,7 @@ exclude_docs: |
   SUBSTRATE_DESIGN.md
   VERIFIED_REVIEW_DESIGN.md
   SECURITY_RESIDUALS.md
+  K8S_DEPLOYMENT_DESIGN.md
 
 extra:
   social:
