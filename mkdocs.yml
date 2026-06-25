@@ -68,6 +68,7 @@ nav:
   - Guides:
       - Developer guide: usage.md
       - Architecture: ARCHITECTURE.md
+      - Deploy on Kubernetes / k3s: kubernetes.md
   - Reference:
       - CLI: cli.md
       - Configuration: configuration.md
