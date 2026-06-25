@@ -76,7 +76,9 @@ _PS_LAST = [0.0]  # last pypistats request time — pypistats rate-limits hard, 
 def _get(url: str, timeout: float = 15.0, retries: int = 2) -> dict | None:
     if not url.lower().startswith(("http://", "https://")):
         return None   # only fetch over http(s) — never a file:/ or custom scheme
-    is_ps = "pypistats.org" in url
+    # exact host match — a substring check would match e.g. http://evil.example/pypistats.org
+    host = (urlparse(url).hostname or "").lower()
+    is_ps = host == "pypistats.org" or host.endswith(".pypistats.org")
     for attempt in range(retries + 1):
         if is_ps:  # keep ≥1.5s between pypistats hits to stay under its rate limit
             gap = 1.5 - (time.time() - _PS_LAST[0])
