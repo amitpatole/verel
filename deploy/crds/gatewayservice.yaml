@@ -1,0 +1,42 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: gatewayservices.verel.dev
+spec:
+  group: verel.dev
+  scope: Namespaced
+  names: { kind: GatewayService, plural: gatewayservices, singular: gatewayservice, shortNames: [gw] }
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+        scale: { specReplicasPath: .spec.replicas, statusReplicasPath: .status.replicas }
+      additionalPrinterColumns:
+        - { name: Replicas, type: integer, jsonPath: .spec.replicas }
+        - { name: Ready, type: integer, jsonPath: .status.readyReplicas }
+        - { name: Age, type: date, jsonPath: .metadata.creationTimestamp }
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              properties:
+                replicas: { type: integer, default: 1, minimum: 0 }
+                image: { type: string }
+                tlsSecret: { type: string, description: "kubernetes.io/tls Secret for in-pod TLS." }
+                insecure:
+                  type: boolean
+                  default: false
+                  description: "Waive in-pod TLS (behind a TLS-terminating ingress); auth still required."
+                authSecret: { type: string, description: "Secret with keys: token, webhookSecret." }
+                repoMountPath: { type: string, default: /workspace }
+            status:
+              type: object
+              properties:
+                replicas: { type: integer }
+                readyReplicas: { type: integer }
+                message: { type: string }
