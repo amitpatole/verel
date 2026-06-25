@@ -313,14 +313,21 @@ promotion gate, the regression guard — works unchanged whichever you select. C
 
 ```python
 from verel.memory import load_backend, known_backends
-print(known_backends())                # ['local', 'remote'] (+ any installed external-DB extra)
-brain = load_backend("local")          # 'local' (SQLite, default) | 'remote' (shared hosted brain)
+print(known_backends())                # ['lancedb', 'local', 'postgres', 'redis', 'remote']
+brain = load_backend("local")          # honours VEREL_MEMORY_BACKEND; falls back to the named arg
 ```
+
+The names are **always listed** (built in); `pip install verel[<name>]` only adds the heavy driver —
+selecting one whose driver is absent fails closed with a clear hint. See the **[Memory backends
+reference](memory-backends.md)** for a per-backend env table, a runnable example each, the decision
+matrix, and the trust-layer features (lattice, librarian, lifecycle flags, replication) that work the
+same on every backend.
 
 - **`local`** — zero-dependency SQLite (`VEREL_MEMORY_STORE`, default `~/.config/verel/brain.db`).
 - **`remote`** — a whole fleet shares one authenticated brain over HTTP(S) (`VEREL_BRAIN_URL`).
-- **External DBs** (Postgres/pgvector, LanceDB, Redis) ship as `pip install verel[<db>]` extras that
-  register under the same selector — a third-party package can register its own backend too.
+- **`postgres` / `lancedb` / `redis`** — external DBs via `pip install verel[<db>]`, same selector.
+- **`mem0`** is **not** `VEREL_MEMORY_BACKEND`-selectable — it's constructed in code
+  (`make_ollama_mem0()`), see below.
 
 See [`examples/demo_backend_registry.py`](https://github.com/amitpatole/verel/tree/main/examples/demo_backend_registry.py)
 and the [Configuration → Memory backend](configuration.md#memory-backend) table.
@@ -372,10 +379,19 @@ Everything starts `candidate` / `inferred`; height, breadth, and survival never 
 
 ### mem0 backend
 
+mem0 is **constructed in code**, not selected via `VEREL_MEMORY_BACKEND` (it isn't in the registry).
+It wraps a mem0 client behind the same `MemoryView`, so the trust layer is unchanged.
+
 ```python
 from verel.memory import make_ollama_mem0      # needs verel[mem0]
 mem = make_ollama_mem0()                        # same MemoryView Protocol; recall is semantic
 ```
+
+!!! note
+    `make_ollama_mem0()` uses a local Chroma vector store and needs an **OpenAI key** for the embedder
+    (`OPENAI_API_KEY` or `~/.config/OpenAI/key`) — Ollama Cloud serves no embeddings endpoint. Prefer
+    **`lancedb`** for zero-infra vector recall or **`postgres`/`redis`** for a shared brain (those
+    *are* `VEREL_MEMORY_BACKEND`-selectable). See **[Memory backends](memory-backends.md)**.
 
 ---
 

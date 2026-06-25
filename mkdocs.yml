@@ -71,6 +71,7 @@ nav:
   - Reference:
       - CLI: cli.md
       - Configuration: configuration.md
+      - Memory backends: memory-backends.md
       - Python API: api.md
   - Help:
       - FAQ & troubleshooting: faq.md
