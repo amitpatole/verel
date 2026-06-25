@@ -13,6 +13,11 @@ kind: ClusterRole
 metadata:
   name: verel-operator
 rules:
+  # kopf discovers the CRDs it watches by listing them cluster-wide before it can watch the CRs —
+  # without this the operator fails to start (APIForbiddenError on customresourcedefinitions).
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: [customresourcedefinitions]
+    verbs: [list, watch]
   # the Verel CRDs (+ status)
   - apiGroups: ["verel.dev"]
     resources: [gateruns, brains, gatewayservices, verelfleets,
