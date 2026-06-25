@@ -1,0 +1,28 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "verel.fullname" . }}
+  labels: {{- include "verel.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "verel.selectorLabels" . | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        {{- if .Values.networkPolicy.ingressFrom }}
+        {{- toYaml .Values.networkPolicy.ingressFrom | nindent 8 }}
+        {{- else }}
+        # default: same-namespace only — restrict further via networkPolicy.ingressFrom (e.g. the
+        # ingress controller's namespace) for cross-namespace callers.
+        - podSelector: {}
+        {{- end }}
+      ports:
+        - { protocol: TCP, port: {{ .Values.service.port }} }
+  egress:
+    # DNS, plus everything else (the brain / GitHub status posts). Tighten per environment.
+    - ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    - {}
+{{- end }}

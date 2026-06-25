@@ -156,6 +156,20 @@ def test_empty_host_server_refuses_anonymous_bind(tmp_path):
         MemoryServer(db_path=str(tmp_path / "b.db"), host="")
 
 
+def test_insecure_optout_waives_tls_but_never_auth():
+    """The k8s behind-ingress opt-out: `insecure=True` waives the in-process TLS requirement on a
+    routable bind (a TLS-terminating proxy fronts it) but auth is STILL mandatory — it can't fail open."""
+    from verel.transport import enforce_bind_policy
+
+    # routable + token + insecure → allowed (no TLS); routable + token + NOT insecure → refused
+    enforce_bind_policy("0.0.0.0", auth_token="t", tls=False, service="gate", insecure=True)
+    with pytest.raises(ValueError, match="without TLS"):
+        enforce_bind_policy("0.0.0.0", auth_token="t", tls=False, service="gate", insecure=False)
+    # insecure NEVER drops the auth requirement
+    with pytest.raises(ValueError, match="auth_token"):
+        enforce_bind_policy("0.0.0.0", auth_token=None, tls=False, service="gate", insecure=True)
+
+
 # ---- red-team round-2 regression: a 3xx redirect must not ferry the token onto a cleartext/cross hop ----
 
 def test_redirect_refuses_downgrade_to_cleartext_routable():

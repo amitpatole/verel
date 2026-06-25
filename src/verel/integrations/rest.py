@@ -228,7 +228,7 @@ class GateServer:
                  auth_token: str | None = None, webhook_secret: str | None = None,
                  lint: bool = True, on_event=None, max_concurrent_gates: int = 4,
                  certfile: str | Path | None = None, keyfile: str | Path | None = None,
-                 ssl_context: ssl.SSLContext | None = None,
+                 ssl_context: ssl.SSLContext | None = None, insecure: bool = False,
                  max_connections: int = _DEFAULT_MAX_CONNECTIONS, max_per_ip: int | None = None):
         self.repo = os.path.realpath(str(repo))
         if not os.path.isdir(self.repo):
@@ -243,7 +243,8 @@ class GateServer:
         self._gate_sem = threading.BoundedSemaphore(max(1, max_concurrent_gates))
         ssl_context = build_server_context(certfile, keyfile, ssl_context)
         self._tls = ssl_context is not None
-        enforce_bind_policy(host, auth_token=auth_token, tls=self._tls, service="gate service")
+        enforce_bind_policy(host, auth_token=auth_token, tls=self._tls, service="gate service",
+                            insecure=insecure)
         self._httpd = TLSThreadingHTTPServer(
             (host, port), _make_handler(self.repo, lambda: self._run_gate(), auth_token,
                                         webhook_secret, on_event, self._gate_sem),

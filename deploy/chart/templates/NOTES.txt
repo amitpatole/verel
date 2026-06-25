@@ -1,0 +1,18 @@
+Verel GatewayService "{{ include "verel.fullname" . }}" is deploying.
+
+Image:   {{ include "verel.image" . }}
+Service: {{ include "verel.fullname" . }}:{{ .Values.service.port }} (ClusterIP)
+TLS:     {{ if .Values.tls.insecure }}terminated at the ingress (pod serves HTTP — VEREL_GATE_INSECURE){{ else if .Values.tls.enabled }}in-pod (secret {{ .Values.tls.secretName }}){{ else }}DISABLED{{ end }}
+
+Check it:
+  kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "verel.fullname" . }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "verel.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+  curl -k https://127.0.0.1:{{ .Values.service.port }}/health      # {"status":"ok"}
+  curl -k https://127.0.0.1:{{ .Values.service.port }}/ready       # {"status":"ready"}
+
+Gate a repo (needs the bearer token):
+  TOKEN=$(kubectl -n {{ .Release.Namespace }} get secret {{ include "verel.authSecretName" . }} -o jsonpath='{.data.token}' | base64 -d)
+  curl -k -H "Authorization: Bearer $TOKEN" -X POST https://127.0.0.1:{{ .Values.service.port }}/gate
+
+The repo this server gates is mounted at {{ .Values.repo.mountPath }} (source: {{ .Values.repo.source }}).
+Wire a git-sync sidecar / PVC / initContainer to populate it — see deploy/README.md.
