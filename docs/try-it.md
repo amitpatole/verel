@@ -26,9 +26,9 @@ verel doctor                  # sanity-check your environment
 `verel doctor` ends with the memory backend it will use:
 
 ```text
-verel 0.41.0
+verel 0.51.1
   ...
-  -> memory backend: local  (available: local, remote)
+  -> memory backend: local  (available: lancedb, local, postgres, redis, remote)
 ```
 
 ## 1. A repo with a real bug (1 min)
@@ -154,7 +154,7 @@ name with one env var, no code change:
 ```bash
 export VEREL_MEMORY_BACKEND=local          # the default (SQLite)
 export VEREL_MEMORY_STORE=team-brain.db    # or any path
-verel doctor                               # confirms: -> memory backend: local (available: local, remote)
+verel doctor                               # confirms: -> memory backend: local (available: lancedb, local, postgres, redis, remote)
 ```
 
 ```python

@@ -132,3 +132,39 @@ The **eyes** (AgentVision) read their own provider keys — see the
     `VEREL_REGISTRY_SECRET` and `VEREL_RUNNER_SECRET` ship with **development defaults** so the
     examples run out of the box. Set real, secret values in any shared or production
     environment — they sign skill-registry artifacts and grader run-receipts.
+
+## Embeddings (semantic recall)
+
+`VEREL_EMBEDDER` picks the recall relevance signal, shared by **every** memory backend:
+`none`/`lexical` (token overlap, zero-config, the default), `hash` (offline vectors — exercises the
+ANN path with no API), or `openai` (real semantic vectors, needs an OpenAI key). With `openai`:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `VEREL_EMBED_MODEL` | `text-embedding-3-small` | OpenAI embedding model id. |
+| `VEREL_EMBED_DIM` | model-derived | Override the vector dimension for an unknown model / truncated dimensions. Set this if the LanceDB backend can't derive the dim from the model (the dim is baked into a Lance dataset at creation). |
+
+The `openai` key resolves from `OPENAI_API_KEY` or `~/.config/OpenAI/key`. (Ollama Cloud serves no
+embeddings endpoint, so `lexical` is the zero-key option and `openai` the semantic one.)
+
+## Gate server (`verel serve`)
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `VEREL_GATE_TOKEN` | — | Bearer token for `POST /gate`. **Required** for any routable (non-loopback) bind. |
+| `VEREL_GATE_WEBHOOK_SECRET` | — | HMAC secret verifying GitHub's `X-Hub-Signature-256` on `POST /github`. |
+
+A routable `verel serve` bind **fails closed** unless it has BOTH a token and TLS (`--certfile`/
+`--keyfile`); loopback is zero-config.
+
+## Receipts, signing & trusted keys
+
+A gate can emit a **run-receipt** (a signed attestation that a grader really ran); `verel verify`
+checks it (see the [CLI reference](cli.md)).
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `VEREL_RUNNER_SECRET` | persisted per-install key | shared HMAC signing secret for receipts within one trust domain. |
+| `VEREL_RUNNER_ED25519_SEED` | persisted per-install key | 64-hex ed25519 seed for **publicly-verifiable** receipts (a stranger verifies with only the public key). |
+| `VEREL_TRUSTED_KEYS` | `~/.config/verel/trusted_keys` | directory of trusted `<key_id>.pub` files `verel verify` accepts for ed25519 receipts. |
+| `VEREL_TOOL_SECRET` | persisted per-install key | signs tool-smith skill-registry artifacts. |
