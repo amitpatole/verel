@@ -65,6 +65,11 @@ _SIGNED_MODE_POST = frozenset({"/write_signed", "/recall", "/all"})
 # upsert (trust + author taken as-is), so a bearer holder hitting it forges anything. It requires a
 # CLUSTER credential distinct from the client bearer token (X-Cluster-Token).
 _CLUSTER_POST = frozenset({"/apply", "/replicate"})
+# A SCOPED `/all` (scope=…) is a normal client read — the scope-lattice recall and consolidation use
+# it, and a client could already `/recall` that scope. But an UNSCOPED `/all` returns EVERY record
+# across ALL scopes/principals (a full-brain dump) — a coordinator / anti-entropy operation, not a
+# per-client read. So in signed-writes mode the unscoped dump needs the CLUSTER credential; a mere
+# bearer holder must not be able to exfiltrate the whole brain (R-001). Scoped /all stays bearer-OK.
 
 
 def _make_handler(store: MemoryView, lock: threading.Lock, token: str | None,
@@ -83,10 +88,10 @@ def _make_handler(store: MemoryView, lock: threading.Lock, token: str | None,
             return hmac.compare_digest(self.headers.get("Authorization", ""), f"Bearer {token}")
 
         def _cluster_authed(self, require_signed: bool) -> bool:
-            """The replication channel (/apply, /replicate) needs the CLUSTER credential, not the
+            """Cluster-credentialed ops (/apply, /replicate, /all) need the CLUSTER credential, not the
             client bearer. If a cluster token is configured it must match (constant-time). If none is
-            configured, the channel is allowed only in LEGACY (non-signed) mode — a multi-principal
-            server with no cluster token must not expose a verbatim-upsert path to bearer clients."""
+            configured, they are allowed only in LEGACY (non-signed) mode — a multi-principal server
+            with no cluster token must not expose a verbatim-upsert or full-dump path to bearer clients."""
             if cluster_token is not None:
                 return hmac.compare_digest(self.headers.get("X-Cluster-Token", ""), cluster_token)
             return not require_signed
@@ -129,6 +134,12 @@ def _make_handler(store: MemoryView, lock: threading.Lock, token: str | None,
                 # verbatim-upsert replication channel — needs the cluster credential, never a bearer.
                 if not self._cluster_authed(require_signed):
                     return self._send(403, {"error": "replication requires the cluster credential"})
+            elif self.path == "/all" and b.get("scope") is None and not self._cluster_authed(require_signed):
+                # the UNSCOPED full-brain dump (every scope/principal) is a coordinator op — cluster
+                # credential. A scoped /all stays a normal bearer read (R-001). Only an ABSENT scope is
+                # "unscoped": scope="" is a real (empty) addressable bucket, and the gate reads the same
+                # b.get("scope") the dispatch does, so there's no gate-vs-sink parse differential.
+                return self._send(403, {"error": "unscoped /all (full dump) needs the cluster credential"})
             elif require_signed and self.path not in _SIGNED_MODE_POST:
                 # multi-principal: a bearer token alone can't forge authorship or trust — authored
                 # writes must be SIGNED; trust transitions come from server-side eval, not a client call.

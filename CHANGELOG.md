@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.51.1 — hosted brain: the unscoped full-dump needs the cluster credential (R-001)
+
+Security hardening of the hosted `MemoryServer` (cross-backend, the shared-brain HTTP layer). In
+**signed-writes mode**, an **unscoped `/all`** — which returns *every* record across all
+scopes/principals (a full-brain dump) — now requires the **cluster credential** (`X-Cluster-Token`),
+not just a client bearer token. A mere bearer holder could previously exfiltrate the entire shared
+brain. A **scoped `/all`** (`scope=…`) stays a normal bearer read — the scope-lattice recall and
+consolidation legitimately use it, and a client could already `/recall` that scope. Legacy
+single-trust mode (no principals enrolled) is unchanged. Pinned by
+`test_signed_mode_unscoped_all_requires_cluster_credential`. Closes residual **R-001**.
+
+**728 tests.**
+
 ## 0.51.0 — Redis brain backend (networked, shared)
 
 A **networked, multi-writer** brain store on plain Redis: many agents on different machines point at
