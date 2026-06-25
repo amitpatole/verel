@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "verel"
-version = "0.51.1"
+version = "1.0.0"
 description = "The agent framework where nothing is done until a grader returns a verdict — verification + grounded perception (AgentVision eyes), compounding memory, a fleet, agent-built tooling, and agent-run CI/CD."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -31,6 +31,7 @@ mem0 = ["mem0ai>=2.0", "chromadb>=0.5"]
 postgres = ["psycopg[binary]>=3", "pgvector>=0.3"]  # external multi-machine brain — Postgres + pgvector ANN
 lancedb = ["lancedb>=0.5"]  # embedded vector store — zero-infra ANN recall (a vector-native LocalMemory)
 redis = ["redis>=5"]  # networked shared brain — atomic optimistic-concurrency RMW over Redis
+operator = ["kopf>=1.37", "kubernetes>=29"]  # the Kubernetes operator (Kopf) reconciling the Verel CRDs
 mcp = ["mcp>=1.0", "anyio>=4"]
 dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.6", "mypy>=1.10", "bandit>=1.7"]  # bandit = the pre-merge `security` grader; must be installed for that gate to run (else it fails closed)
 
@@ -38,6 +39,7 @@ dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.6", "mypy>=1.10", "bandit>=
 verel = "verel.cli:main"
 verel-ci = "verel.ci.__main__:main"
 verel-mcp = "verel.mcp_server:main"
+verel-operator = "verel.operator.__main__:main"
 
 # Memory-backend registry (src/verel/memory/registry.py). Built-ins resolve from a static map
 # first; this group lets a third-party package register its own MemoryView backend by name. Each

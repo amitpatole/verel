@@ -1,0 +1,38 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: brains.verel.dev
+spec:
+  group: verel.dev
+  scope: Namespaced
+  names: { kind: Brain, plural: brains, singular: brain, shortNames: [brn] }
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources: { status: {} }
+      additionalPrinterColumns:
+        - { name: Backend, type: string, jsonPath: .spec.backend }
+        - { name: Ready, type: string, jsonPath: .status.ready }
+        - { name: Age, type: date, jsonPath: .metadata.creationTimestamp }
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              required: [backend, connectionSecret]
+              properties:
+                backend: { type: string, enum: [postgres, redis, lancedb], description: "External brain store." }
+                connectionSecret:
+                  type: string
+                  maxLength: 253
+                  pattern: '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$'
+                  description: "Secret with the connection env (VEREL_POSTGRES_URL / VEREL_REDIS_URL / …)."
+                embedder: { type: string, enum: [none, lexical, hash, openai], default: lexical }
+            status:
+              type: object
+              properties:
+                ready: { type: string }
+                message: { type: string }

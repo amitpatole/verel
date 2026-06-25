@@ -1,0 +1,14 @@
+{{- /* Keep gateway capacity during voluntary disruptions. Only meaningful with >1 pod, so render
+       when autoscaling is on or replicaCount>1 (a PDB over a single replica would block node drains). */ -}}
+{{- if and .Values.podDisruptionBudget.enabled (or .Values.autoscaling.enabled (gt (int .Values.replicaCount) 1)) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "verel.fullname" . }}
+  labels: {{- include "verel.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  unhealthyPodEvictionPolicy: AlwaysAllow   # let node drains evict unhealthy pods (avoid drain deadlock)
+  selector:
+    matchLabels: {{- include "verel.selectorLabels" . | nindent 6 }}
+{{- end }}

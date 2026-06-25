@@ -1,0 +1,46 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: gatewayservices.verel.dev
+spec:
+  group: verel.dev
+  scope: Namespaced
+  names: { kind: GatewayService, plural: gatewayservices, singular: gatewayservice, shortNames: [gw] }
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+        scale: { specReplicasPath: .spec.replicas, statusReplicasPath: .status.replicas }
+      additionalPrinterColumns:
+        - { name: Replicas, type: integer, jsonPath: .spec.replicas }
+        - { name: Ready, type: integer, jsonPath: .status.readyReplicas }
+        - { name: Age, type: date, jsonPath: .metadata.creationTimestamp }
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              properties:
+                replicas: { type: integer, default: 1, minimum: 0, maximum: 100 }
+                insecure:
+                  type: boolean
+                  default: false
+                  description: "Waive in-pod TLS (behind a TLS-terminating ingress); auth still required."
+                repoMountPath:
+                  type: string
+                  default: /workspace
+                  maxLength: 256
+                  pattern: '^/[A-Za-z0-9._/-]{0,255}$'
+                # The image is the operator's trusted image; the token/TLS Secrets are operator-derived
+                # (`<name>-auth`, `<name>-tls`) — NOT author-supplied (confused-deputy defense). Create
+                # those Secrets out-of-band; the operator only references them by the derived name.
+            status:
+              type: object
+              properties:
+                replicas: { type: integer }
+                readyReplicas: { type: integer }
+                message: { type: string }
