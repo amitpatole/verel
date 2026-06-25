@@ -69,8 +69,10 @@ def build_gateway_deployment(name: str, namespace: str, spec: dict, *, owner: di
     needs auth + TLS or the explicit insecure opt-out behind an ingress.
 
     Confused-deputy defense: the image is the OPERATOR's trusted image (never spec.image), and the
-    Secrets it projects are DERIVED from the CR name (`<name>-auth`, `<name>-tls`) — a CR author can't
-    point the operator's privilege at an arbitrary in-namespace Secret to read into a chosen image."""
+    Secrets it projects are DERIVED from the CR name (`<name>-auth`, `<name>-tls`). A CR author thus
+    can't steer the operator at a *chosen* Secret name — only at the suffix-derived names in their own
+    namespace; and exfil still needs `pods/exec` on the pod, which a namespace pod-author already has
+    against any namespace Secret. So net privilege is unchanged from standard k8s namespace trust."""
     image = image or _DEFAULT_IMAGE
     replicas = int(spec.get("replicas", 1))
     insecure = bool(spec.get("insecure", False))

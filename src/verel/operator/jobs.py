@@ -69,6 +69,17 @@ def _safe_ref(ref: object) -> str:
         raise ValueError("GateRun.spec.ref must be a plain git ref (no leading '-', no whitespace)")
     return ref
 
+
+_STAGES = frozenset({"inner_loop", "pre_commit", "pre_merge", "post_merge"})
+
+
+def _safe_stage(stage: object) -> str:
+    # The CRD enum already constrains this server-side; re-validate here too (belt-and-suspenders,
+    # matching _safe_repo/_safe_ref) so a direct caller can't inject an arbitrary `--stage` argv value.
+    if stage not in _STAGES:
+        raise ValueError(f"GateRun.spec.stage must be one of {sorted(_STAGES)}")
+    return str(stage)
+
 _POD_SECURITY = {
     "runAsNonRoot": True,
     "runAsUser": _UID,
@@ -93,7 +104,7 @@ def build_gaterun_job(name: str, namespace: str, spec: dict, *, owner: dict | No
     resources (override the limits)."""
     repo = _safe_repo(spec.get("repo"))
     ref = _safe_ref(spec["ref"]) if spec.get("ref") else None
-    stage = spec.get("stage", "pre_merge")
+    stage = _safe_stage(spec.get("stage", "pre_merge"))
     # The gate image is the OPERATOR's trusted image — NOT author-supplied. Honouring spec.image would
     # let a GateRun author run an arbitrary image (and, combined with secret projection elsewhere, a
     # confused-deputy). The trusted gate is exactly what you want grading the repo.
