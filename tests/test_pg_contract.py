@@ -183,9 +183,10 @@ def test_loopback_shapes_not_over_refused(monkeypatch):
     monkeypatch.delenv("PGHOSTADDR", raising=False)
     assert [h for h in _routable_hosts("dbname=verel") if not pg.is_loopback(h)] == []
     assert [h for h in _routable_hosts("postgresql://127.0.0.1:5432/verel") if not pg.is_loopback(h)] == []
-    # but routable shapes are surfaced
-    assert "db.example.com" in _routable_hosts("postgresql://db.example.com/verel")
-    assert "10.0.0.5" in _routable_hosts("hostaddr=10.0.0.5 dbname=verel")
+    # but routable shapes are surfaced (exact-match the returned host list — a substring `in` check
+    # against a URL is the py/incomplete-url-substring-sanitization anti-pattern CodeQL flags)
+    assert _routable_hosts("postgresql://db.example.com/verel") == ["db.example.com"]
+    assert _routable_hosts("hostaddr=10.0.0.5 dbname=verel") == ["10.0.0.5"]
 
 
 # ---- security: the DSN/password never appears in any error (cluster E) --------
