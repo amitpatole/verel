@@ -127,11 +127,17 @@ def _serve(args) -> int:
         certfile=args.certfile, keyfile=args.keyfile, lint=not args.no_lint,
     ).start()
     print(f"verel gate server on {srv.url}  (repo={srv.repo})", flush=True)
-    print("  POST /gate  ·  POST /github  ·  GET /health", flush=True)
+    print("  POST /gate  ·  POST /github  ·  GET /health  ·  GET /ready", flush=True)
+    # Drain cleanly on SIGTERM (k8s pod termination) as well as SIGINT (Ctrl-C), so a rolling update
+    # stops accepting + shuts the server down within the grace period instead of being SIGKILLed.
+    import signal
+    stop = threading.Event()
+    signal.signal(signal.SIGTERM, lambda *_a: stop.set())
     try:
-        threading.Event().wait()  # serve until interrupted
+        stop.wait()
     except KeyboardInterrupt:
-        srv.stop()
+        pass
+    srv.stop()
     return 0
 
 

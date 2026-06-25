@@ -177,8 +177,13 @@ def _make_handler(repo: str, run_gate, token: str | None, webhook_secret: str | 
                 # as the next request (CL.0 desync / smuggling). Reject any non-zero body → 400 + close.
                 if int(self.headers.get("Content-Length", "0") or "0") != 0:
                     raise ValueError("GET must not carry a body")
-                if self.path == "/health":
+                if self.path == "/health":   # liveness: the process is up
                     return self._send(200, {"status": "ok"})
+                if self.path == "/ready":    # readiness: can actually serve gates (repo accessible)
+                    import os
+                    ok = os.path.isdir(repo) and os.access(repo, os.R_OK)
+                    return self._send(200 if ok else 503,
+                                      {"status": "ready" if ok else "not-ready", "repo": repo})
                 return self._send(404, {"error": "not found"})
             except ValueError as e:
                 return self._send(400, {"error": str(e)})

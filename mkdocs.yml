@@ -83,6 +83,7 @@ exclude_docs: |
   SUBSTRATE_DESIGN.md
   VERIFIED_REVIEW_DESIGN.md
   SECURITY_RESIDUALS.md
+  K8S_DEPLOYMENT_DESIGN.md
 
 extra:
   social:
