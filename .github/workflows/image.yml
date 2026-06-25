@@ -66,7 +66,7 @@ jobs:
       # Gate on FIXABLE HIGH/CRITICAL only (matches trivy's ignore-unfixed). An unfixed upstream CVE
       # isn't actionable at release; the daily Wolfi rebuild + renovate pick up fixes when they land.
       - name: Grype scan (defense in depth)
-        uses: anchore/scan-action@64a33b277ea7a1215a3c142735a1091341939ff5 # v4
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0 — current grype + fresh vuln DB (v4 shipped a stale DB)
         with:
           image: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
           severity-cutoff: high
