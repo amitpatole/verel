@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.0.0 — Verel on Kubernetes / k3s: a deployable, signed, multi-tenant platform
+
+The major release: Verel goes from a pip-installable library to a **deployable, signed, multi-tenant
+platform**. Design once, run on both vanilla Kubernetes and k3s.
+
+- **Hardened image** — a Chainguard-Wolfi-based, distroless, nonroot (UID 65532), no-shell image at
+  `ghcr.io/amitpatole/verel`, built multi-arch (amd64+arm64) with an SBOM + SLSA provenance, a
+  **trivy + grype** gate (0 HIGH/CRITICAL), and a **cosign keyless** signature. One image, three roles:
+  `verel serve`, `verel-mcp`, and `--operator`.
+- **Secure-by-default Helm chart** (`deploy/chart`) — the `GatewayService` gate server. Fails closed
+  (routable bind ⇒ bearer token **and** TLS, or an explicit insecure opt-out behind a TLS-terminating
+  ingress). Pod hardening, probes, HPA, NetworkPolicy, PodDisruptionBudget, least-privilege SA.
+- **Kopf operator + 4 CRDs** (`verel[operator]`) — **GateRun** (one-shot grade a repo/PR in a
+  defense-in-depth-isolated Job → verdict in `.status`), **Brain**, **GatewayService**, **VerelFleet**.
+  Least-privilege RBAC; the operator runs the same hardened image in `--operator` mode.
+- **Security cadence (operator, rounds R4–R7, multi-agent red-team)** — closed a HIGH **verdict-forgery**
+  (the verdict mirror now trusts only the Job whose server-assigned uid the operator recorded, never the
+  author-settable label/ownerReference), a node-disk-exhaustion DoS, and a CGNAT (100.64/10) egress gap;
+  trimmed RBAC to least-privilege; the operator emits per-workload NetworkPolicies. Two holistic rounds
+  came back clean. Documented residuals: DNS-port egress, no pod PID cap (both bounded, cluster-layer).
+- **Green on the config scanners** — every deployed workload passes **Polaris, kube-linter, and
+  kube-score** (`deploy/policy/`, `bash deploy/policy/scan.sh`, CI `policy.yml`). All images pinned (no
+  `:latest`), ephemeral-storage bounded, anti-affinity, NetworkPolicies everywhere.
+- **Docs** — a new *Deploy on Kubernetes / k3s* guide (chart + operator quickstarts, a GateRun demo, the
+  CRD reference, cosign-verify, and the cluster prerequisites).
+
+**754 tests.**
+
 ## 0.51.1 — hosted brain: the unscoped full-dump needs the cluster credential (R-001)
 
 Security hardening of the hosted `MemoryServer` (cross-backend, the shared-brain HTTP layer). In

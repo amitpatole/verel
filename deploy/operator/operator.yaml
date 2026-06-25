@@ -24,14 +24,14 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: operator
-          image: ghcr.io/amitpatole/verel:0.51.1     # pinned (never :latest) — bumped per release
+          image: ghcr.io/amitpatole/verel:1.0.0     # pinned (never :latest) — bumped per release
           command: [verel-operator]
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities: { drop: ["ALL"] }
           env:
-            - { name: VEREL_GATERUN_IMAGE, value: ghcr.io/amitpatole/verel:0.51.1 }
+            - { name: VEREL_GATERUN_IMAGE, value: ghcr.io/amitpatole/verel:1.0.0 }
           ports:
             - { name: healthz, containerPort: 8080 }
           # liveness only — the operator is a singleton controller behind NO Service, so a readiness
