@@ -40,7 +40,7 @@ jobs:
           kubectl apply -f deploy/crds/
           kubectl create namespace verel-system
           kubectl apply -f deploy/operator/rbac.yaml
-          sed 's#ghcr.io/amitpatole/verel:1.0.0#verel:e2e#g' deploy/operator/operator.yaml \
+          sed -E 's#ghcr.io/amitpatole/verel:[0-9.]+#verel:e2e#g' deploy/operator/operator.yaml \
             | kubectl apply -f -
           kubectl -n verel-system patch deployment verel-operator --type=json \
             -p='[{"op":"add","path":"/spec/template/spec/containers/0/imagePullPolicy","value":"IfNotPresent"}]'

@@ -113,8 +113,14 @@ cosign verify ghcr.io/amitpatole/verel:<version> \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
-The OCI Helm chart (`oci://ghcr.io/amitpatole/charts/verel`) and the Artifact Hub listing land with the
-v1.0.0 release; until then install from `deploy/chart` as above.
+The signed **OCI Helm chart** is published to `oci://ghcr.io/amitpatole/charts/verel` and listed on
+[Artifact Hub](https://artifacthub.io/packages/helm/verel/verel) (verified publisher, clean security
+report):
+
+```bash
+helm install verel oci://ghcr.io/amitpatole/charts/verel \
+  --set tls.secretName=verel-tls --set auth.token="$(openssl rand -hex 16)"
+```
 
 ## Security & cluster prerequisites
 
