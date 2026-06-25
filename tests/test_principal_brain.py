@@ -170,6 +170,30 @@ def test_signed_mode_blocks_unauthenticated_write_and_promote(tmp_path):
         srv.stop()
 
 
+def test_signed_mode_unscoped_all_requires_cluster_credential(tmp_path):
+    """R-001: in signed-writes mode the UNSCOPED `/all` (a full-brain dump of every scope/principal)
+    must require the CLUSTER credential — a mere bearer holder must not exfiltrate the whole brain. A
+    SCOPED `/all` stays a normal bearer read (the scope-lattice recall and consolidation use it)."""
+    import urllib.error
+
+    alice = Principal.generate()
+    srv = MemoryServer(db_path=str(tmp_path / "b.db"),
+                       trusted_principals=dict([alice.enroll()]),
+                       cluster_token="cluster-secret").start()  # nosec B106 — test literal
+    try:
+        srv.store.write(MemoryRecord(kind=MemoryKind.FACT, subject="s", predicate="p",
+                                     text="secret", scope="team"))
+        bearer = RemoteMemory(srv.url)
+        with pytest.raises(urllib.error.HTTPError) as ei:
+            bearer.all()                                   # UNSCOPED dump → refused for a bearer client
+        assert ei.value.code == 403
+        assert {r.text for r in bearer.all(scope="team")} == {"secret"}   # SCOPED → allowed
+        coord = RemoteMemory(srv.url, cluster_token="cluster-secret")
+        assert {r.text for r in coord.all()} == {"secret"}  # cluster credential → unscoped dump allowed
+    finally:
+        srv.stop()
+
+
 def test_enroll_after_open_start_auto_enables_signed_mode(tmp_path):
     import urllib.error
 
