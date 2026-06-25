@@ -68,6 +68,14 @@ def test_ref_rejects_option_injection_and_whitespace():
     assert "refs/pull/9/head" in clone
 
 
+def test_stage_is_validated_against_the_enum():
+    # belt-and-suspenders (the CRD enum also constrains it): a bad stage can't reach the --stage argv
+    for bad in ["--stage=x", "pre_merge; rm -rf /", "bogus", "", 1, None]:
+        with pytest.raises(ValueError, match="stage"):
+            _job({"stage": bad})
+    assert "post_merge" in _job({"stage": "post_merge"})["spec"]["template"]["spec"]["containers"][0]["args"]
+
+
 def test_image_is_operator_controlled_not_from_spec():
     # confused-deputy defense: spec.image is IGNORED — the operator's trusted image always runs.
     c = _job({"image": "attacker/evil:latest"}, image="ghcr.io/amitpatole/verel:1")
