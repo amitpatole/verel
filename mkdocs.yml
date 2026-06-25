@@ -68,12 +68,15 @@ nav:
   - Guides:
       - Developer guide: usage.md
       - Architecture: ARCHITECTURE.md
+      - Integrations: integrations.md
       - Deploy on Kubernetes / k3s: kubernetes.md
   - Reference:
       - CLI: cli.md
       - Configuration: configuration.md
+      - Graders: graders.md
       - Memory backends: memory-backends.md
       - Python API: api.md
+      - H2 experiment: H2_RESULTS.md
   - Help:
       - FAQ & troubleshooting: faq.md
 

@@ -131,9 +131,14 @@ print(result.verdict)            # Verdict.FAIL
 
 Load-bearing rules `gate()` enforces:
 
-- **Advisory ceiling** — per-issue trust keys off `Issue.source`. Precise sources
-  (`TEST`/`LINT`/`TYPECHECK`/`DOM`/`CV`/`OCR`/`SECURITY`/`PERF`) gate at full severity; advisory
-  ones (`VISION`/`LLM_JUDGE`) are clamped to at most `warn`.
+- **Advisory ceiling** — an issue is clamped to at most `warn` (it cannot gate) **iff** its report's
+  grader is in `ADVISORY_GRADERS = {VISION, LLM_JUDGE, ACOUSTIC, AUDIO_LLM}` **or** the issue's own
+  `confidence == LOW` (`verel/verdict/gate.py`, `constants.py`). Every other grader gates at full
+  severity — including `PERF` and `CONTRACT`, which gate even though they aren't in `PRECISE_GRADERS`
+  (membership in `PRECISE_GRADERS` is a *receipt-verification* concern, not the gating switch — see
+  below). The clamp keys off the **report's grader**, not a per-issue source list; the only place
+  per-issue `Issue.source` decides trust is the canary/rollback engine (next section). The full
+  grader-by-grader table lives in **[Graders](graders.md)**.
 - **Attestation** — a *required* grader must carry a signed `run_receipt` proving it ran the
   frozen suite over the changed files. A hollow `PASS, issues=[]` with no receipt **fails**.
 - **Stuck vs. progress** — `progressed(curr, prev)` is strict shrinkage of the gating-failure set;
@@ -186,6 +191,45 @@ per-install key. A verifier trusts a runner by placing `<key_id>.pub` in `~/.con
 (override the dir with `VEREL_TRUSTED_KEYS`). An untrusted `key_id` never verifies — there is no
 self-certification path.
 
+#### Two receipt levels — the per-grader `RunReceipt` vs. the gate-level `GateReceipt`
+
+Everything above is the **per-grader `RunReceipt`** — one signed receipt per grader, binding *that
+grader's* outcome to *its* inputs. A whole stage produces several of them. The headline wedge a
+**second party** verifies isn't a `RunReceipt` but the envelope that wraps them all: the gate-level
+**`GateReceipt`** (`verel.verdict.attest`). `build_gate_receipt(verdict, reports)` assembles one
+`GraderAttestation` per report (`kind` / `verdict` / `precise` / its `RunReceipt`), records whether the
+clamp held an opinion back (`ceiling_clamped`), optionally binds extra attested context in `subject`
+(e.g. a sight percept's `image_ref` + `matches_intent`), and **signs the aggregate** — so neither a
+flipped headline verdict nor a swapped grader line survives. This is exactly what `verel_gate` /
+`verel_sight` hand an MCP host back.
+
+```python
+import json
+from verel.verdict import GateReceipt, verify_gate_receipt
+
+gr = GateReceipt.model_validate(json.load(open("gate_receipt.json")))
+res = verify_gate_receipt(gr, allowed_algs={"ed25519"})   # require public verifiability
+print(res.valid, res.verdict, res.graders_checked, res.public_verifiable, res.subject)
+```
+
+`verify_gate_receipt` fails closed in layers: (1) the **envelope** signature must verify (binds the
+aggregate verdict + fingerprint + identity), (2) the fingerprint must recompute from the grader lines,
+(3) every **precise** grader — precision decided by `kind ∈ PRECISE_GRADERS`, never the receipt's
+self-declared `precise` flag (an attacker could relabel a grader advisory to skip its check) — must
+carry a `RunReceipt` whose signature verifies. `public_verifiable` is `True` only when the envelope
+*and* all precise receipts verified as ed25519.
+
+The same envelope underpins **portable fact attestation** for the brain: `attest_fact(...)` mints a
+`GateReceipt` whose `subject` commits to a specific claim, and `verify_fact_attestation(receipt,
+subject, predicate, text)` accepts it only if it verifies, is a `PASS`, and is bound to *that* exact
+fact — so trust travels via a trusted grader's signature over the claim, never the caller's say-so.
+See **[Memory backends](memory-backends.md)** for how the brain uses it.
+
+> **Where `Report` and `Handoff` live.** Verel's `Report` extends AgentVision's `Report` through the
+> sight adapter (`verel.senses.sight`) — that's why a percept and a test verdict share one schema.
+> The organism-wide `Handoff` is defined in **`agentsensory`**, not `verel`; don't hunt for a `Handoff`
+> symbol in this package.
+
 ---
 
 ## Agent-run CI/CD (`verel.ci`)
@@ -199,6 +243,32 @@ from verel.ci import inner_loop_stage, premerge_stage, run_stage
 res = run_stage(inner_loop_stage(".", language="python", with_lint=True, with_types=True))
 print(res.verdict, [r.grader.value for r in res.reports])
 ```
+
+### The four stages — a ladder, each rung adds a stronger guard
+
+The stages aren't variants; they compose, tightening as a change moves toward `main`. Each is a
+`Stage` you hand to `run_stage`:
+
+| Stage | Builder | Composes | Adds over the rung below |
+|---|---|---|---|
+| **inner_loop** | `inner_loop_stage` | tests (required) + lint; `with_types=True` adds types | the fast author-loop gate |
+| **pre_commit** | `precommit_stage` | tests (required) + lint | **regression memory** — `run_stage(ledger=…)` fails a change that reintroduces a previously-fixed failure, *from memory alone* |
+| **pre_merge** | `premerge_stage` | tests + lint (+types) | **types, security, perf, mutation** — the full sandbox-CI gate before merge |
+| **post_merge** | `postmerge_stage` | a smoke/E2E canary on the merged code | **canary → rollback** — a failing canary on *precise* evidence drives `git revert` |
+
+```python
+from verel.ci import precommit_stage, postmerge_stage, run_stage
+from verel.memory.failure_ledger import FailureLedger
+
+# pre_commit: pass a ledger and a reintroduced past failure gates from memory (§7.5),
+# while transient/flaky failures are recorded VOLATILE so they self-clean unless they recur.
+res = run_stage(precommit_stage("."), ledger=FailureLedger("."))
+print(res.verdict, res.regressions)
+```
+
+The regression-memory check (`pre_commit`) and the canary→rollback engine (`post_merge`) are what make
+the ladder more than "run the tools four times": failure-memory stops the fleet repeating a fix, and
+the rollback policy below authorizes the one destructive action in the whole pipeline.
 
 Pick a language; add precise senses:
 
@@ -232,6 +302,18 @@ from verel.ci.mutation import run_mutation
 res = run_mutation(".", ["billing.py"], cap_per_file=25)
 print(res.baseline_pass, res.survivors)   # survivors → the tests don't constrain that code
 ```
+
+### Security grader — what actually gates (`bandit_spec` / `npm_audit_spec`)
+
+`security=True` on `premerge_stage` adds a `GraderKind.SECURITY` grader (`PRECISE`, so it gates). For
+**Python** it runs `bandit -r -q -f json` with a deliberate floor: `--severity-level medium
+--confidence-level medium` — only findings at **MEDIUM+ severity AND MEDIUM+ confidence** (real SQLi,
+weak crypto, command injection) cause the non-zero exit that gates; `LOW` stays advisory. The scan
+**excludes** `tests/ test/ tools/ scripts/ examples/ .venv venv env build dist .git node_modules .tox`
+— otherwise every test-only `assert` (B101) and all vendored code would drown the gate. Verified false
+positives are pinned in-code with `# nosec Bxxx`. For **JS/TS** the grader is `npm audit --json`. Both
+map tool severity onto the bus the same way: `critical→CRITICAL`, `high→ERROR` (gates),
+`moderate/medium→WARNING`, `low/info→INFO` (advisory).
 
 ### Spec / intent conformance — "the ticket says A, the code does B"
 
@@ -406,6 +488,63 @@ Every tool returns the same shape:
 }
 ```
 
+#### `verel_sight` — give the agent eyes (needs `verel[sight]`)
+
+`verel_sight` renders a URL and returns an **attested percept**: grounded observations with pixel
+bboxes, an `image_ref`, intent conformance, and a verifiable `GateReceipt` whose `subject` binds the
+`image_ref` + `matches_intent` (so a relayed percept can't swap the image or flip the verdict).
+
+| Arg | Req? | Meaning |
+|---|---|---|
+| `url` | **yes** | the `http(s)` URL to render and grade (other schemes are refused — SSRF/LFI guard) |
+| `intent` | no | what the UI *should* be; drives intent-conformance grading |
+| `viewport` | no | `WxH`, e.g. `"1280x800"` |
+| `backend` | no | vision backend; `"local"` (default) = no-LLM structural checks |
+| `allow_local` | no | only literal JSON `true` opts in to rendering localhost/LAN (the SSRF guard is off); any truthy non-bool fails closed |
+| `attest` | no | `auto` (ed25519 if available, else hmac) · `ed25519` (fails closed if PyNaCl absent) · `hmac` |
+
+```json
+{
+  "name": "verel_sight",
+  "arguments": {
+    "url": "https://app.local/checkout",
+    "intent": "a checkout form with a visible Pay button above the fold",
+    "viewport": "1280x800",
+    "attest": "ed25519"
+  }
+}
+```
+
+The precise visual failures gate; the advisory vision-LLM opinion is clamped to `warn` (the same
+advisory ceiling as everywhere else). The response carries `verdict`, `observations[]` (each with a
+`bbox`, `confidence`, `precise`), `matches_intent`, `ceiling_clamped`, and the full `receipt`.
+
+#### `verel_build_tool` — let the agent build its own tool (needs an LLM key)
+
+`detect → scaffold → test → register`. The MCP path **requires the container isolation tier** (bwrap
+netns + read-only fs + seccomp) and fails closed without it — it runs LLM-authored code, so it never
+falls back to the weaker subprocess tier.
+
+| Arg | Req? | Meaning |
+|---|---|---|
+| `name` | **yes** | tool name |
+| `capability` | **yes** | one-line description of what it does |
+| `signature_hint` | no | a hint for the generated signature |
+| `side_effect` | no | `read_only` (default) · `idempotent` · `destructive` |
+| `cases` | no | list of `{args, expected}` eval cases — the attested eval the tool must pass to be admitted |
+
+```json
+{
+  "name": "verel_build_tool",
+  "arguments": {
+    "name": "slugify",
+    "capability": "convert a title to a url slug",
+    "side_effect": "read_only",
+    "cases": [{"args": ["Hello World"], "expected": "hello-world"}]
+  }
+}
+```
+
 ### Self-healing
 
 ```python
@@ -419,10 +558,33 @@ On a failure the **ci-medic** classifies each issue (retry / regen-lockfile / qu
 fix-branch) and, for genuine regressions, invokes the code-fixer — re-gating each round until the
 graders pass or it escalates.
 
+#### ci-medic — the decision engine that makes self-heal safe (`verel.ci.medic`)
+
+Self-heal is only safe because it never *guesses* what to do with a red grader. `triage(report)`
+runs a **deterministic** keyword/signature classifier (so an LLM can't game it) that maps each failing
+issue to one `Action`:
+
+| `Action` | When | What it does |
+|---|---|---|
+| `RETRY` | infra/transient signal (`connection reset`, `timed out`, `429/502/503`, `ECONNRESET`…) | re-run; never "fix" a network blip |
+| `REGEN_LOCKFILE` | dependency drift (`ModuleNotFoundError`, `ResolutionImpossible`, `incompatible`…) | regenerate the lockfile |
+| `QUARANTINE_FLAKY` | a fingerprint already seen flipping pass/fail | downgrade `ERROR→WARNING` — **visible, ticketed, never silently dropped** |
+| `FIX_BRANCH` | anything else — a genuine regression | spin a code-fixer loop (an LLM may *enrich* the diagnosis with a one-line root cause; it never changes the `Action`) |
+
+The decision drives **how a failure is remembered**. In `run_stage(ledger=…)`, transient (`RETRY`) and
+flaky (`QUARANTINE_FLAKY`) fingerprints are written **volatile** — they self-clean from failure-memory
+unless they recur — while a genuine regression is recorded **persistent**, so the next change that
+reintroduces it is gated from memory alone. Volatile-vs-persistent is exactly what keeps the
+regression guard from petrifying every one-off CI hiccup into a permanent gate.
+
 ### Verdict-driven rollback
 
 The agent *proposes*; a deterministic engine *authorizes* — and only on **precise** gating evidence
-(never an advisory opinion), performing a safe `git revert` (never a history rewrite).
+(never an advisory opinion), performing a safe `git revert` (never a history rewrite). This is the
+**one subsystem where per-issue `Issue.source` decides trust**: the policy walks each cited gating
+issue and keys off `i.source ∈ ADVISORY_GRADERS` *per issue* (not the report's grader, not
+`Report.backend`). A rollback backed only by advisory sources is **denied**; at least one precise
+gating source must justify the destructive revert.
 
 ```python
 from verel.ci import RollbackExecutor, RollbackProposal

@@ -1,16 +1,75 @@
 # Configuration
 
-Verel is configured by a few environment variables — there is no config file.
+Verel is configured by environment variables — there is no config file.
 
-| Env var | Default | Purpose |
+## Environment variable reference
+
+Every variable Verel reads, on one line each, grouped by area. Each name links down to the section
+that explains it in full. Nothing here is required for the zero-config local path; the defaults run
+out of the box.
+
+**LLM & embeddings** — see [LLM keys](#llm-keys) · [Embeddings](#embeddings-semantic-recall)
+
+| Variable | Controls | Default |
 |---|---|---|
-| `VEREL_LLM_PROVIDER` | `ollama` | LLM provider for agents — `ollama` or `openai`. |
-| `VEREL_CODER_MODEL` | provider default | Override the code-fixer model. |
-| `OPENAI_API_KEY` | — | Required when `VEREL_LLM_PROVIDER=openai`. |
-| `VEREL_REGISTRY_SECRET` | *dev value* | Signing secret for the skill registry — **set a real one in production**. |
-| `VEREL_RUNNER_SECRET` | *dev value* | Grader-runner signing identity — **set a real one in production**. |
-| `VEREL_GITHUB_TOKEN` | — | Token the REST webhook / spec grader use to read a PR's diff + linked-issue criteria and post commit status. |
-| `VEREL_GATE_TOKEN` / `VEREL_GATE_WEBHOOK_SECRET` | — | Bearer token + GitHub webhook HMAC secret for `verel serve` (the REST gate). |
+| [`VEREL_LLM_PROVIDER`](#llm-keys) | Agent LLM provider — `ollama` or `openai`. | `ollama` |
+| [`VEREL_CODER_MODEL`](#llm-keys) | Override the code-fixer model. | provider default |
+| [`OLLAMA_API_KEY`](#llm-keys) | Ollama Cloud key (env alternative to `~/.config/ollama/key`). | — |
+| [`OPENAI_API_KEY`](#llm-keys) | OpenAI key — provider and `openai` embedder (env alt to `~/.config/OpenAI/key`). | — |
+| [`VEREL_EMBEDDER`](#embeddings-semantic-recall) | Recall relevance signal — `none`/`lexical`, `hash`, or `openai`. | `lexical` |
+| [`VEREL_EMBED_MODEL`](#embeddings-semantic-recall) | OpenAI embedding model id. | `text-embedding-3-small` |
+| [`VEREL_EMBED_DIM`](#embeddings-semantic-recall) | Override the embedding vector dimension. | model-derived |
+
+**Memory / brain** — see [Memory backend](#memory-backend)
+
+| Variable | Controls | Default |
+|---|---|---|
+| [`VEREL_MEMORY_BACKEND`](#memory-backend) | Backend — `local`, `remote`, `postgres`, `lancedb`, `redis`, or any registered name. | `local` |
+| [`VEREL_MEMORY_STORE`](#memory-backend) | SQLite path for the `local` backend. | `~/.config/verel/brain.db` |
+| [`VEREL_BRAIN_URL`](#memory-backend) | `remote` backend: URL of a `MemoryServer`. | — |
+| [`VEREL_BRAIN_TOKEN`](#memory-backend) | Bearer token for the remote brain. | — |
+| [`VEREL_CLUSTER_TOKEN`](#memory-backend) | Replication-channel credential for the remote brain. | — |
+| [`VEREL_BRAIN_CACERT`](#memory-backend) | CA bundle that signed the remote brain's TLS cert. | — |
+| [`VEREL_BRAIN_CLIENT_CERT`](#memory-backend) / [`VEREL_BRAIN_CLIENT_KEY`](#memory-backend) | Client cert/key for mTLS to the remote brain. | — |
+| [`VEREL_BRAIN_PIN`](#memory-backend) | Pin the remote brain's cert SHA-256 (comma-separated set). | — |
+| [`VEREL_BRAIN_INSECURE`](#memory-backend) | Let a token ride a cleartext hop (behind a TLS proxy only). | `0` |
+| [`VEREL_PRINCIPAL_SEED`](#memory-backend) | 64-hex identity that authors signed beliefs on a remote brain. | — |
+| [`VEREL_POSTGRES_URL`](#postgres-pgvector-postgres) / [`VEREL_POSTGRES_DSN`](#postgres-pgvector-postgres) | Postgres connection string (URL or keyword DSN). | — |
+| [`VEREL_PG_SSLMODE`](#postgres-pgvector-postgres) | Postgres TLS mode (`verify-full`/`verify-ca` for routable hosts). | from DSN |
+| [`VEREL_PG_CACERT`](#postgres-pgvector-postgres) | CA bundle for the Postgres server cert (`sslrootcert`). | — |
+| [`PGSSLMODE`](#postgres-pgvector-postgres) | libpq's own TLS mode — read only when `VEREL_PG_SSLMODE` and the DSN omit one. | — |
+| [`VEREL_LANCEDB_PATH`](#lancedb-lancedb) | LanceDB dataset directory. | `~/.config/verel/lance` |
+| [`VEREL_LANCEDB_TABLE`](#lancedb-lancedb) | Table name within the LanceDB dataset. | `memory` |
+| [`VEREL_REDIS_URL`](#redis-redis) | Redis connection URL (`rediss://` + AUTH for routable hosts). | — |
+| [`VEREL_REDIS_PREFIX`](#redis-redis) | Redis key namespace. | `verel` |
+| [`VEREL_REDIS_CACERT`](#redis-redis) | CA bundle for the Redis server's TLS cert. | — |
+
+**Gate server (`verel serve`)** — see [Gate server](#gate-server-verel-serve)
+
+| Variable | Controls | Default |
+|---|---|---|
+| [`VEREL_GATE_TOKEN`](#gate-server-verel-serve) | Bearer token for `POST /gate` — required for a routable bind. | — |
+| [`VEREL_GATE_WEBHOOK_SECRET`](#gate-server-verel-serve) | HMAC secret verifying GitHub's `X-Hub-Signature-256`. | — |
+| [`VEREL_GATE_INSECURE`](#gate-server-verel-serve) | Waive in-process TLS for a routable bind (behind a TLS ingress only). | `0` |
+| [`VEREL_GITHUB_TOKEN`](#gate-server-verel-serve) | Read a PR's diff + linked-issue criteria, post commit status. | — |
+
+**Operator (Kubernetes)** — see [Operator](#operator-kubernetes)
+
+| Variable | Controls | Default |
+|---|---|---|
+| [`VEREL_GATERUN_IMAGE`](#operator-kubernetes) | Gate image the operator runs for every GateRun. | `ghcr.io/amitpatole/verel:<release>` |
+| [`VEREL_GATERUN_GIT_IMAGE`](#operator-kubernetes) | Clone-initContainer image (pinned Chainguard git by digest). | pinned `cgr.dev/chainguard/git@sha256:…` |
+
+**Attestation, signing & secrets** — see [Receipts](#receipts-signing-trusted-keys) · [Secrets & key files](#secrets-key-files)
+
+| Variable | Controls | Default |
+|---|---|---|
+| [`VEREL_RUNNER_SECRET`](#receipts-signing-trusted-keys) | Shared HMAC secret for run-receipts within one trust domain. | persisted per-install key |
+| [`VEREL_RUNNER_ED25519_SEED`](#receipts-signing-trusted-keys) | 64-hex ed25519 seed for publicly-verifiable receipts. | persisted per-install key |
+| [`VEREL_TRUSTED_KEYS`](#receipts-signing-trusted-keys) | Directory of trusted `<key_id>.pub` files `verel verify` accepts. | `~/.config/verel/trusted_keys` |
+| [`VEREL_REGISTRY_SECRET`](#secrets-key-files) | Signing secret for skill-registry artifacts. | persisted per-install key |
+| [`VEREL_TOOL_SECRET`](#secrets-key-files) | Signs tool-smith skill-registry artifacts (own trust domain). | persisted per-install key |
+| [`XDG_CONFIG_HOME`](#secrets-key-files) | Relocates the whole config dir (keys, brain.db, lance). | `~/.config` |
 
 ## Memory backend
 
@@ -60,6 +119,13 @@ export VEREL_EMBEDDER=hash                          # optional: ANN recall (offl
 | `VEREL_POSTGRES_URL` / `VEREL_POSTGRES_DSN` | — | Connection string (URL or keyword DSN). Required for `postgres`. |
 | `VEREL_PG_SSLMODE` | from DSN | TLS mode. A **routable host is refused** unless this is `verify-full` or `verify-ca` (fail closed); loopback is exempt. |
 | `VEREL_PG_CACERT` | — | CA bundle that signed the server cert (`sslrootcert`), required for `verify-full`. |
+
+!!! note "`PGSSLMODE` fallback"
+    When neither `VEREL_PG_SSLMODE` nor an explicit `sslmode=` in the DSN is set, Verel falls back to
+    libpq's own **`PGSSLMODE`** environment variable to determine the effective TLS mode. The same
+    fail-closed rule applies to whatever value wins: a routable host is refused unless the effective
+    mode is `verify-full` or `verify-ca`. (The live connection is also re-checked against the mode
+    libpq actually used, so a `service` file or other `PG*` env can't quietly downgrade it.)
 
 The credential is **never logged or echoed in an error**, all queries are parameterized, and a
 statement timeout bounds each query. For *embedded* single-process use, `local` (SQLite) remains the
@@ -122,16 +188,22 @@ injection-safe by design. For *embedded* single-process use prefer `local`/`lanc
 
 ## LLM keys
 
-- **Ollama Cloud** (default): key at `~/.config/ollama/key`, model `qwen3-coder:480b`.
-- **OpenAI**: set `VEREL_LLM_PROVIDER=openai` and `OPENAI_API_KEY`.
+Each provider resolves its key from its **environment variable first, then a `~/.config` key file** —
+so either form works, the env var wins.
+
+- **Ollama Cloud** (default): `OLLAMA_API_KEY` or key file `~/.config/ollama/key`; model
+  `qwen3-coder:480b`.
+- **OpenAI**: set `VEREL_LLM_PROVIDER=openai` and `OPENAI_API_KEY` (or `~/.config/OpenAI/key`).
 
 The **eyes** (AgentVision) read their own provider keys — see the
 [AgentVision configuration](https://amitpatole.github.io/agent-vision/configuration/).
 
 !!! warning "Production secrets"
-    `VEREL_REGISTRY_SECRET` and `VEREL_RUNNER_SECRET` ship with **development defaults** so the
-    examples run out of the box. Set real, secret values in any shared or production
-    environment — they sign skill-registry artifacts and grader run-receipts.
+    `VEREL_REGISTRY_SECRET` and `VEREL_RUNNER_SECRET` sign skill-registry artifacts and grader
+    run-receipts. There is **no public default secret** — unset, each falls back to a per-installation
+    random key (see [Secrets & key files](#secrets-key-files)). That keeps single-machine sign→verify
+    working, but **set explicit values in any shared or production environment** so several machines
+    share one trust domain.
 
 ## Embeddings (semantic recall)
 
@@ -153,9 +225,36 @@ embeddings endpoint, so `lexical` is the zero-key option and `openai` the semant
 |---|---|---|
 | `VEREL_GATE_TOKEN` | — | Bearer token for `POST /gate`. **Required** for any routable (non-loopback) bind. |
 | `VEREL_GATE_WEBHOOK_SECRET` | — | HMAC secret verifying GitHub's `X-Hub-Signature-256` on `POST /github`. |
+| `VEREL_GATE_INSECURE` | `0` | `=1`/`true`/`yes`/`on` waives in-process TLS for a routable bind — **behind a TLS-terminating ingress/proxy only**. Auth is still required. |
 
 A routable `verel serve` bind **fails closed** unless it has BOTH a token and TLS (`--certfile`/
 `--keyfile`); loopback is zero-config.
+
+`VEREL_GATE_INSECURE` is the gate-server mirror of [`VEREL_BRAIN_INSECURE`](#memory-backend): it lets
+the bearer token ride a cleartext (non-TLS) hop **only** when something else terminates TLS in front
+of the pod. The token is still mandatory — this waives the in-process cert requirement, not auth. The
+[operator](#operator-kubernetes) injects it on the behind-ingress path; never set it on a bind that is
+directly reachable without a TLS proxy.
+
+## Operator (Kubernetes)
+
+The Verel [Kubernetes operator](kubernetes.md) runs every managed workload from an
+**operator-controlled** image — never one named in a custom-resource spec (this closes the
+confused-deputy: a CR author can't make the operator pull an attacker image). Two env vars on the
+**operator Deployment** select those images.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `VEREL_GATERUN_IMAGE` | `ghcr.io/amitpatole/verel:<release>` | The gate image the operator runs for every `GateRun`. The default tracks this package's `__version__` (the image is built per release), so it auto-follows the operator version. |
+| `VEREL_GATERUN_GIT_IMAGE` | pinned `cgr.dev/chainguard/git@sha256:…` | The clone `initContainer` image — a Chainguard `git`, pinned **by digest** (immutable, minimal-CVE). |
+
+!!! warning "Set `VEREL_GATERUN_GIT_IMAGE` for long-lived clusters"
+    The default clone image is pinned to a digest on the **free `cgr.dev` tier, which can garbage-collect
+    an old digest within weeks of a rebuild**. When that happens the clone `initContainer` fails with
+    `ImagePullBackOff` and **every `GateRun` stops**. For any cluster expected to outlive a few weeks,
+    mirror the git image into a registry you control and point `VEREL_GATERUN_GIT_IMAGE` at your own
+    (renovate-bumped) digest pin. `VEREL_GATERUN_IMAGE` is similarly overridable if you mirror the gate
+    image.
 
 ## Receipts, signing & trusted keys
 
@@ -168,6 +267,45 @@ checks it (see the [CLI reference](cli.md)).
 | `VEREL_RUNNER_ED25519_SEED` | persisted per-install key | 64-hex ed25519 seed for **publicly-verifiable** receipts (a stranger verifies with only the public key). |
 | `VEREL_TRUSTED_KEYS` | `~/.config/verel/trusted_keys` | directory of trusted `<key_id>.pub` files `verel verify` accepts for ed25519 receipts. |
 | `VEREL_TOOL_SECRET` | persisted per-install key | signs tool-smith skill-registry artifacts. |
+
+## Secrets & key files
+
+Everything Verel persists lives under one config directory — `$XDG_CONFIG_HOME/verel` if
+`XDG_CONFIG_HOME` is set, otherwise `~/.config/verel`. Setting **`XDG_CONFIG_HOME`** relocates the
+whole tree (signing keys, `brain.db`, the LanceDB dataset) in one move.
+
+**Provider key files** — the LLM clients read each provider's env var first, then a key file:
+
+| Path | Used by |
+|---|---|
+| `~/.config/ollama/key` | Ollama Cloud (env alternative: `OLLAMA_API_KEY`). |
+| `~/.config/OpenAI/key` | OpenAI provider **and** the `openai` embedder (env alternative: `OPENAI_API_KEY`). |
+
+**Per-installation signing keys** — every HMAC/ed25519 secret resolves as **env var > persisted
+per-install key file > ephemeral**. When the env var is unset, Verel reads (or atomically creates) a
+random key at `~/.config/verel/<name>.key`, mode `0600`, owner-only (a foreign-owned or
+group/other-readable file is **refused**, falling back to an ephemeral key that fails *closed*). This
+makes single-machine sign→verify zero-config and secret — no public default exists.
+
+| Key file | Env override | Signs |
+|---|---|---|
+| `runner_secret.key` | `VEREL_RUNNER_SECRET` | grader run-receipts (shared-secret HMAC). |
+| `ed25519_seed.key` | `VEREL_RUNNER_ED25519_SEED` | publicly-verifiable run-receipts (ed25519). |
+| `registry_secret.key` | `VEREL_REGISTRY_SECRET` | skill-registry artifacts. |
+| `tool_secret.key` | `VEREL_TOOL_SECRET` | tool-smith skill-registry artifacts (separate trust domain). |
+
+!!! warning "Share a trust domain → set the env var explicitly"
+    The per-install key file is **machine-local**. For several machines (or a CI fleet) to verify each
+    other's receipts/artifacts, you **must** set the matching `VEREL_*_SECRET` /
+    `VEREL_RUNNER_ED25519_SEED` to the same value on every machine. Relying on the auto-generated files
+    gives each machine a *different* key, so cross-machine verification fails closed.
+
+**Trusted public keys** — `verel verify` accepts ed25519 receipts whose `<key_id>.pub` lives in
+`~/.config/verel/trusted_keys/` (override the directory with `VEREL_TRUSTED_KEYS`).
+
+**Data stores** — the `local` brain is `~/.config/verel/brain.db` (`VEREL_MEMORY_STORE`) and the
+LanceDB dataset defaults to `~/.config/verel/lance` (`VEREL_LANCEDB_PATH`); both move with
+`XDG_CONFIG_HOME`.
 
 ## Verified-Review grader knobs
 

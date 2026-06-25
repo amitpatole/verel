@@ -48,6 +48,8 @@ into memory; then the eyes look again.
   real bug, fix it, watch Verel remember it so it can't come back.
 - **[Get started](getting-started.md)** — install, the gate, CI/agents adoption.
 - **[5-minute tutorial](tutorial.md)** — gate a repo, heal failing tests, watch a bug get remembered.
+- **[Use cases](use-cases.md)** — where Verel fits: agent loops, CI/CD, fleets, shared memory.
+- **[Real-world scenarios](examples.md)** — runnable demos with real captured output for each.
 - **[Architecture](ARCHITECTURE.md)** — the six organs and the eval-driven loop.
 
 Install: `pip install verel` · Source: [GitHub](https://github.com/amitpatole/verel) ·

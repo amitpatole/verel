@@ -1,7 +1,16 @@
 # CLI reference
 
-Verel ships two console scripts: **`verel`** (interactive / agent commands) and **`verel-ci`**
-(the gated CI entry point). Both support `-h`.
+Verel ships **four** console scripts:
+
+| Script | Purpose |
+|---|---|
+| `verel` | The interactive / agent command line (`doctor`, `loop`, `fleet`, `heal`, `verify`, `serve`, `mcp`, `rules`, `ci`). |
+| `verel-ci` | The gated CI entry point — runs the verdict bus and exits non-zero on a `fail` (CI / git-hook). |
+| `verel-mcp` | The stdio MCP server a host launches to expose the graders as MCP tools (see [below](#verel-mcp-the-stdio-mcp-server)). |
+| `verel-operator` | The Kubernetes (Kopf) operator that reconciles the Verel CRDs (see [below](#verel-operator-the-kubernetes-operator)). |
+
+`verel` and `verel-ci` both support `-h`. `verel-mcp` is normally launched by an agent host, and
+`verel-operator` runs inside a cluster — both are documented in their own sections at the end.
 
 ## `verel`
 
@@ -27,6 +36,49 @@ verel serve --repo PATH [--host H] [--port P] [--certfile C --keyfile K] [--no-l
 verel doctor
 ```
 
+### Runnable examples (copy-paste)
+
+```bash
+# Check the environment — keys, tools, and which memory backend will be used.
+verel doctor
+```
+
+`doctor` prints a checklist (`OK` = present, `--` = missing) and the resolved memory backend.
+A representative run:
+
+```text
+verel 1.0.0
+  OK python 3.11.9
+  OK git
+  -- ollama cloud key (~/.config/ollama/key)
+  -- openai key (fallback)
+  OK agentvision (eyes) — `pip install verel[sight]`
+  OK ruff (lint grader)
+  OK mypy (typecheck grader)
+  -- mem0 (rented memory backend) — `pip install verel[mem0]`
+  -> memory backend: local  (available: local, remote, postgres, lancedb, redis)
+```
+
+> Representative output — the exact `OK`/`--` marks and version reflect your machine.
+
+```bash
+# Visual loop (the eyes): an agent fixes an artifact until AgentVision passes.
+verel loop ./mockups/login.png --backend local --max-iter 5
+
+# Manager fan-out: one goal → workers fix each artifact in parallel.
+verel fleet "ship the checkout flow" --artifacts cart.png checkout.png receipt.png
+
+# Self-healing CI: failing tests → an agent fixes → green (exit 0 iff healed).
+verel heal --repo . --max-rounds 3
+
+# Delegate to verel-ci: everything after `ci` is passed straight through (argparse REMAINDER).
+verel ci check --repo .          # identical to:  verel-ci check --repo .
+verel ci check --repo . --no-lint
+```
+
+`verel ci …` forwards its remainder verbatim to `verel-ci`, so any `verel-ci` subcommand/flag
+(`check`, `precommit`, `install`) works behind `verel ci`. See [`verel-ci`](#verel-ci-the-ci-gate).
+
 ### Verify a receipt (`verel verify`) — publicly verifiable "done"
 
 A gate can emit a **run-receipt**: a signed attestation that a required grader actually ran the frozen
@@ -48,7 +100,7 @@ OK  ed25519  runner=ed25519:Ab3kQ1z9_xYwTuVe  [public-verifiable]
   fails closed on anything that isn't `ed25519`.
 - Publish a verifier's trust by dropping `<key_id>.pub` into `~/.config/verel/trusted_keys/`
   (`VEREL_TRUSTED_KEYS` overrides the dir). An untrusted `key_id` can't verify itself into trust. The
-  same check is the **`verel_verify`** MCP tool. See [Configuration](configuration.md#receipts-signing--trusted-keys).
+  same check is the **`verel_verify`** MCP tool. See [Configuration](configuration.md#receipts-signing-trusted-keys).
 
 ### Plug Verel into your agent (one line)
 
@@ -87,6 +139,12 @@ VEREL_GATE_TOKEN=… verel serve --repo . --host 0.0.0.0 \
   helper from a custom `on_event` handler.
 - Secrets come from the environment, never the command line. Bind policy, TLS, body-size cap,
   slowloris timeout, and connection caps are inherited from the hardened `verel.transport`.
+- **`VEREL_GATE_INSECURE`** (`1`/`true`/`yes`/`on`) waives the in-process TLS requirement for a
+  non-loopback bind — use it **only** when a TLS-terminating ingress or proxy sits in front (the
+  Helm chart's behind-ingress path). Auth is **still** required: `VEREL_GATE_TOKEN` must be set, or
+  the server still fails closed. Without this flag a routable bind needs `--certfile`/`--keyfile`.
+  See [Configuration](configuration.md#receipts-signing-trusted-keys) and
+  [Deploy on Kubernetes](kubernetes.md#quickstart-a-the-gate-server-helm).
 
 ## `verel-ci` — the CI gate
 
@@ -157,3 +215,44 @@ call any of these (each returns a structured verdict; an unknown tool or a tool 
 
 The spec, invariants, and build-tool tools execute generated code under real OS isolation (bwrap
 `--unshare-all` + seccomp + rlimits) and **fail closed** when no isolation is available.
+
+## `verel-mcp` — the stdio MCP server
+
+`verel-mcp` is the stdio MCP server that exposes the tools above (`verel_gate`, `verel_sight`,
+`verel_verify`, …) to any MCP host. It needs the MCP extra:
+
+```bash
+pip install "verel[mcp]"
+```
+
+You normally **don't run it by hand** — `verel mcp install` prints the config that wires it into a
+host (Claude Code/Desktop, Cursor, Cline, Continue, Windsurf…), which then launches it over stdio as
+needed. The equivalent invocation a host runs is:
+
+```bash
+python -m verel.mcp_server     # == the verel-mcp console script; speaks MCP over stdio
+```
+
+It takes no flags and communicates only on stdin/stdout, so running it in a terminal just blocks
+waiting for an MCP client. See [Integrations & MCP install](usage.md#mcp-tools-the-verified-review-graders)
+and the [MCP tools](#mcp-tools-what-the-agent-can-call) table above.
+
+## `verel-operator` — the Kubernetes operator
+
+`verel-operator` is the [Kopf](https://kopf.readthedocs.io/) operator that reconciles the Verel CRDs
+(`GateRun`, `Brain`, `GatewayService`, `VerelFleet`) inside a cluster. It needs the operator extra:
+
+```bash
+pip install "verel[operator]"     # kopf + the kubernetes client
+```
+
+It **takes no flags** and runs as the entrypoint of the operator Deployment. The equivalent form:
+
+```bash
+python -m verel.operator     # == the verel-operator console script
+```
+
+On start it configures Kopf and serves Kopf's liveness probe at
+**`http://0.0.0.0:8080/healthz`**, so the operator Deployment has a real health signal for its
+Kubernetes liveness probe. You deploy it via the chart/manifests rather than invoking it directly —
+see [Deploy on Kubernetes](kubernetes.md#quickstart-b-the-operator-crds).
