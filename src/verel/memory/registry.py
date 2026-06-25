@@ -36,6 +36,7 @@ _BUILTINS: dict[str, str] = {
     "remote": "verel.memory.hosted:RemoteMemory",
     "postgres": "verel.memory.pg_backend:PostgresMemory",
     "lancedb": "verel.memory.lance_backend:LanceMemory",
+    "redis": "verel.memory.redis_backend:RedisMemory",
 }
 
 

@@ -15,13 +15,13 @@ Verel is configured by a few environment variables — there is no config file.
 ## Memory backend
 
 The shared **brain** (verified memory) is pluggable. Pick a backend by name; each reads its own
-connection env. Built-in names are `local` (default), `remote`, `postgres`, and `lancedb`; more
-external-DB backends ship behind extras in later releases (`pip install verel[<db>]`) and register
-under the same selector.
+connection env. Built-in names are `local` (default), `remote`, `postgres`, `lancedb`, and `redis`;
+third-party packages can register more under the `verel.memory_backends` entry-point and select them
+the same way.
 
 | Env var | Default | Purpose |
 |---|---|---|
-| `VEREL_MEMORY_BACKEND` | `local` | Backend to use — `local`, `remote`, `postgres`, `lancedb`, or any registered name. If unset but `VEREL_BRAIN_URL` is set, defaults to `remote` (back-compat). |
+| `VEREL_MEMORY_BACKEND` | `local` | Backend to use — `local`, `remote`, `postgres`, `lancedb`, `redis`, or any registered name. If unset but `VEREL_BRAIN_URL` is set, defaults to `remote` (back-compat). |
 | `VEREL_MEMORY_STORE` | `~/.config/verel/brain.db` | SQLite path for the `local` backend (`:memory:` for ephemeral). |
 | `VEREL_EMBEDDER` | `lexical` | Recall relevance signal — `none`/`lexical` (token overlap, zero-config), `hash` (offline vectors), or `openai` (semantic; needs an OpenAI key). Shared by every backend. |
 | `VEREL_BRAIN_URL` | — | `remote` backend: URL of a `MemoryServer` to share one brain across machines. |
@@ -95,6 +95,30 @@ are escaped.
     the embedding model) **must stay the same** for a given `VEREL_LANCEDB_PATH`. Reopening a dataset
     with a different embedder (a dim change, or adding/removing one) **fails closed with a clear
     error** — point a fresh `VEREL_LANCEDB_PATH`/`VEREL_LANCEDB_TABLE` at the new configuration.
+
+### Redis (`redis`)
+
+A **networked, shared** brain on plain Redis — many agents/machines write to one Redis and the trust
+layer stays correct under concurrent writers (each mutation is atomic via `WATCH`/`MULTI` optimistic
+concurrency with retry). Recall scans the index and ranks in Python (cosine with an embedder, lexical
+otherwise). Works on any Redis (no modules required).
+
+```bash
+pip install "verel[redis]"
+export VEREL_MEMORY_BACKEND=redis
+export VEREL_REDIS_URL="rediss://default:PASSWORD@redis.internal:6379/0"   # rediss:// + AUTH for routable hosts
+export VEREL_REDIS_CACERT=/etc/ssl/certs/redis-ca.pem                       # CA that signed the server cert
+```
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `VEREL_REDIS_URL` | — | Connection URL. Required for `redis`. A **routable host must be `rediss://` (validated TLS) with a password** (fail closed); loopback is exempt. |
+| `VEREL_REDIS_PREFIX` | `verel` | Key namespace (`{prefix}:mem:*` + `{prefix}:ids`) — lets several brains share one Redis. |
+| `VEREL_REDIS_CACERT` | — | CA bundle that signed the server's TLS cert (for `rediss://`). |
+
+The URL/password is **never logged or echoed in an error**, and Redis's RESP protocol is
+injection-safe by design. For *embedded* single-process use prefer `local`/`lancedb`; use `redis` (or
+`postgres`) when several machines share one verified brain.
 
 ## LLM keys
 
