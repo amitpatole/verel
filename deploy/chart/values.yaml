@@ -1,0 +1,95 @@
+# Verel GatewayService — values. Secure-by-default: the gate server binds a routable address, so it
+# REQUIRES TLS + a bearer token (it fails closed otherwise — the same transport hardening the image
+# enforces). Configure tls.* and auth.* below, or set tls.insecure=true ONLY behind a TLS-terminating
+# ingress/mesh on a locked-down NetworkPolicy.
+
+image:
+  repository: ghcr.io/amitpatole/verel
+  tag: ""              # defaults to .Chart.appVersion
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+replicaCount: 1
+
+# The repository this gate server gates. `verel serve` gates exactly ONE repo (no path param — an
+# authenticated caller cannot redirect execution elsewhere). Provide it via a volume (see `repo.*`).
+repo:
+  mountPath: /workspace
+  # How the repo gets into the pod. "emptyDir" = ephemeral (wire your own git-sync sidecar / initJob);
+  # "pvc" = mount an existing PersistentVolumeClaim; "hostPath" = dev only.
+  source: emptyDir       # emptyDir | pvc | hostPath
+  pvcName: ""
+  hostPath: ""
+
+# TLS for the gate's routable bind. Provide a Secret with tls.crt + tls.key (e.g. a cert-manager
+# Certificate). The server runs HTTPS on `service.port`.
+tls:
+  enabled: true
+  secretName: ""         # a kubernetes.io/tls Secret (tls.crt, tls.key). REQUIRED unless insecure=true.
+  insecure: false        # opt out of in-pod TLS ONLY behind a TLS-terminating ingress + tight NetworkPolicy
+
+# Bearer token for POST /gate, and the GitHub webhook HMAC secret for POST /github. Reference an
+# existing Secret (recommended) or let the chart create one from `value` (dev).
+auth:
+  existingSecret: ""     # a Secret with keys: token, webhookSecret
+  token: ""              # if existingSecret is empty and this is set, the chart creates the Secret
+  webhookSecret: ""
+
+# Optional: brain connection for any in-pod recall (the gate server itself is stateless; set these
+# only if you wire memory). Rendered as env from a Secret you reference.
+brain:
+  existingSecret: ""     # a Secret with e.g. VEREL_POSTGRES_URL / VEREL_REDIS_URL / VEREL_BRAIN_TOKEN
+  env: {}                # extra plain env (non-secret), e.g. {VEREL_MEMORY_BACKEND: postgres}
+
+service:
+  type: ClusterIP
+  port: 8443
+
+ingress:
+  enabled: false
+  className: ""          # "traefik" on k3s, "nginx"/cloud on k8s — left empty = cluster default
+  annotations: {}
+  hosts:
+    - host: verel.local
+      paths: [{ path: /, pathType: Prefix }]
+  tls: []
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+
+resources:
+  requests: { cpu: 100m, memory: 256Mi }
+  limits: { cpu: "1", memory: 512Mi }
+
+# Pod/container hardening — locked down by default (overridable). The image is already nonroot +
+# distroless; these make the Pod spec match.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile: { type: RuntimeDefault }
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: { drop: ["ALL"] }
+
+# NetworkPolicy: default-deny ingress except the named sources; egress allowed (DNS + the brain).
+networkPolicy:
+  enabled: true
+  ingressFrom: []        # e.g. [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: ingress-nginx}}}]
+
+serviceAccount:
+  create: true
+  name: ""
+  # the gate server needs NO Kubernetes API access — do not mount a token.
+  automountToken: false
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAnnotations: {}
+extraArgs: []            # appended to `verel serve` (e.g. ["--no-lint"])

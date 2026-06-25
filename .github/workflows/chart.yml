@@ -1,0 +1,62 @@
+name: chart
+# Validate the Helm chart on every change: lint + template + schema-validate (fast, no cluster), then
+# a real install on k3s (k3d) AND vanilla k8s (kind) with a self-signed TLS Secret + `helm test`.
+# NOTE: SHA-pin every third-party `uses:` before enabling (repo convention, see ci.yml).
+on:
+  push:
+    branches: [main]
+    paths: ["deploy/chart/**", ".github/workflows/chart.yml"]
+  pull_request:
+    paths: ["deploy/chart/**", ".github/workflows/chart.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint-template:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: azure/setup-helm@v4
+      - name: helm lint (all value paths)
+        run: |
+          helm lint deploy/chart --set tls.secretName=verel-tls --set auth.token=t
+          helm lint deploy/chart --set tls.insecure=true --set auth.token=t
+      - name: helm template + kubeconform (schema validation, no cluster)
+        run: |
+          curl -sL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz | tar xz
+          helm template v deploy/chart --set tls.secretName=verel-tls --set auth.token=t \
+            --set autoscaling.enabled=true --set ingress.enabled=true \
+            | ./kubeconform -strict -summary -kubernetes-version 1.31.0
+
+  e2e:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        cluster: [k3d, kind]      # k3s (k3d) AND vanilla k8s (kind) — design-once-run-on-both
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: azure/setup-helm@v4
+      - name: Build + load the image
+        run: docker build -f deploy/Dockerfile -t verel:e2e .
+      - name: Create cluster (${{ matrix.cluster }})
+        run: |
+          if [ "${{ matrix.cluster }}" = "k3d" ]; then
+            curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+            k3d cluster create verel --wait
+            k3d image import verel:e2e -c verel
+          else
+            curl -sLo kind https://kind.sigs.k8s.io/dl/latest/kind-linux-amd64 && chmod +x kind && sudo mv kind /usr/local/bin/
+            kind create cluster --name verel
+            kind load docker-image verel:e2e --name verel
+          fi
+      - name: Self-signed TLS Secret + install + helm test
+        run: |
+          openssl req -x509 -newkey rsa:2048 -keyout k.pem -out c.pem -days 1 -nodes -subj "/CN=v-verel"
+          kubectl create secret tls verel-tls --cert=c.pem --key=k.pem
+          helm install v deploy/chart \
+            --set image.repository=verel --set image.tag=e2e --set image.pullPolicy=Never \
+            --set tls.secretName=verel-tls --set auth.token=ci-token --wait --timeout 180s
+          kubectl rollout status deploy/v-verel --timeout 120s
+          helm test v --timeout 120s

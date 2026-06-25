@@ -120,11 +120,14 @@ def _serve(args) -> int:
     from .integrations import GateServer
     # Secrets from env (never argv — argv leaks in the process list): a bearer token and the GitHub
     # webhook secret. A routable bind with no token + TLS fails closed inside GateServer.
+    # VEREL_GATE_INSECURE=1 waives in-process TLS for a routable bind — ONLY for a TLS-terminating
+    # ingress/proxy in front (auth is STILL required). Used by the Helm chart's behind-ingress path.
+    insecure = os.environ.get("VEREL_GATE_INSECURE", "").strip().lower() in ("1", "true", "yes", "on")
     srv = GateServer(
         args.repo, host=args.host, port=args.port,
         auth_token=os.environ.get("VEREL_GATE_TOKEN"),
         webhook_secret=os.environ.get("VEREL_GATE_WEBHOOK_SECRET"),
-        certfile=args.certfile, keyfile=args.keyfile, lint=not args.no_lint,
+        certfile=args.certfile, keyfile=args.keyfile, lint=not args.no_lint, insecure=insecure,
     ).start()
     print(f"verel gate server on {srv.url}  (repo={srv.repo})", flush=True)
     print("  POST /gate  ·  POST /github  ·  GET /health  ·  GET /ready", flush=True)

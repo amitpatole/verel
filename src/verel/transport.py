@@ -65,9 +65,15 @@ def build_server_context(certfile: str | Path | None, keyfile: str | Path | None
     return ctx
 
 
-def enforce_bind_policy(host: str, *, auth_token: str | None, tls: bool, service: str) -> None:
+def enforce_bind_policy(host: str, *, auth_token: str | None, tls: bool, service: str,
+                        insecure: bool = False) -> None:
     """Fail closed on a routable bind: it must be BOTH authenticated AND encrypted. Loopback is exempt
-    (never leaves the box). `service` names the surface in the error (e.g. 'memory service')."""
+    (never leaves the box). `service` names the surface in the error (e.g. 'memory service').
+
+    `insecure=True` is the EXPLICIT opt-out of the in-process TLS requirement — for a deployment where a
+    TLS-terminating proxy/ingress/mesh already encrypts the hop (e.g. a Kubernetes Ingress in front of
+    the pod). It waives ONLY the TLS check; **auth is still required** (a routable bind is never left
+    unauthenticated), so this can't fully fail open."""
     if is_loopback(host):
         return
     # An EMPTY/whitespace token is "no auth", not "auth" — else a blank `VEREL_*_TOKEN=` misconfig
@@ -75,10 +81,11 @@ def enforce_bind_policy(host: str, *, auth_token: str | None, tls: bool, service
     if not (auth_token and auth_token.strip()):
         raise ValueError(f"refusing to bind routable host {host!r} without auth_token — that exposes "
                          f"an unauthenticated {service}; pass auth_token=... or bind 127.0.0.1")
-    if not tls:
+    if not tls and not insecure:
         raise ValueError(f"refusing to bind routable host {host!r} without TLS — the bearer token and "
                          f"payloads would cross the network in cleartext; pass certfile=/keyfile= "
-                         "(or ssl_context=) or bind 127.0.0.1")
+                         "(or ssl_context=), set insecure=True ONLY behind a TLS-terminating proxy, or "
+                         "bind 127.0.0.1")
 
 
 def scheme(tls: bool) -> str:
