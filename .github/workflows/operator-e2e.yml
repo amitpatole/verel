@@ -1,0 +1,95 @@
+name: operator-e2e
+# Verify-live the Kopf operator on a real k3s cluster (k3d): the operator must start (RBAC sufficient),
+# reconcile a GatewayService into a Ready Deployment + Service + NetworkPolicy, and reconcile a GateRun
+# into the hardened Job + deny-egress NetworkPolicy with its server-assigned jobUID recorded in .status
+# (the verdict-forgery guard). This is the cluster-dependent reconcile glue the unit tests can't cover.
+on:
+  push:
+    paths: ["src/verel/operator/**", "deploy/operator/**", "deploy/crds/**", "deploy/Dockerfile",
+            ".github/workflows/operator-e2e.yml"]
+  pull_request:
+    paths: ["src/verel/operator/**", "deploy/operator/**", "deploy/crds/**", "deploy/Dockerfile",
+            ".github/workflows/operator-e2e.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - name: Build the image
+        run: docker build -f deploy/Dockerfile -t verel:e2e .
+      - name: Create k3d cluster + import image
+        run: |
+          set -euo pipefail
+          curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | TAG=v5.7.4 bash
+          k3d cluster create op --wait --timeout 120s
+          k3d image import verel:e2e -c op
+          # k3d import can race — wait until the image is actually in the node's containerd
+          for i in $(seq 1 20); do
+            docker exec k3d-op-server-0 crictl images 2>/dev/null | grep -q "library/verel" && break
+            k3d image import verel:e2e -c op; sleep 3
+          done
+
+      - name: Deploy CRDs + operator
+        run: |
+          set -euo pipefail
+          kubectl apply -f deploy/crds/
+          kubectl create namespace verel-system
+          kubectl apply -f deploy/operator/rbac.yaml
+          sed 's#ghcr.io/amitpatole/verel:1.0.0#verel:e2e#g' deploy/operator/operator.yaml \
+            | kubectl apply -f -
+          kubectl -n verel-system patch deployment verel-operator --type=json \
+            -p='[{"op":"add","path":"/spec/template/spec/containers/0/imagePullPolicy","value":"IfNotPresent"}]'
+          kubectl -n verel-system rollout status deploy/verel-operator --timeout 120s
+          # the operator must be actually watching — no RBAC 403s in the log
+          sleep 5
+          ! kubectl -n verel-system logs deploy/verel-operator | grep -q "is forbidden"
+
+      - name: Reconcile a GatewayService (→ Deployment + Service + NetworkPolicy)
+        run: |
+          set -euo pipefail
+          kubectl create secret generic gw1-auth --from-literal=token=ci-token
+          kubectl apply -f - <<'EOF'
+          apiVersion: verel.dev/v1alpha1
+          kind: GatewayService
+          metadata: { name: gw1, namespace: default }
+          spec: { replicas: 1, insecure: true }
+          EOF
+          kubectl -n default rollout status deploy/gw1 --timeout 120s
+          kubectl -n default get svc gw1
+          kubectl -n default get netpol gw1-ingress
+
+      - name: Reconcile a GateRun (→ hardened Job + deny-egress NP + recorded jobUID)
+        run: |
+          set -euo pipefail
+          kubectl apply -f - <<'EOF'
+          apiVersion: verel.dev/v1alpha1
+          kind: GateRun
+          metadata: { name: gr1, namespace: default }
+          spec: { repo: "https://github.com/octocat/Hello-World", ref: master, stage: inner_loop, timeoutSeconds: 120 }
+          EOF
+          # poll for the operator to create the Job + NP + record the server-assigned jobUID
+          for i in $(seq 1 20); do
+            UID=$(kubectl -n default get gaterun gr1 -o jsonpath='{.status.jobUID}' 2>/dev/null || true)
+            [ -n "$UID" ] && break; sleep 3
+          done
+          test -n "$UID" || { echo "jobUID never recorded — forgery guard not wired"; exit 1; }
+          echo "recorded jobUID=$UID"
+          kubectl -n default get job gr1
+          kubectl -n default get netpol gr1-deny
+          # the recorded uid must equal the actual Job's server-assigned uid (the guard's invariant)
+          JOBUID=$(kubectl -n default get job gr1 -o jsonpath='{.metadata.uid}')
+          test "$UID" = "$JOBUID" || { echo "jobUID mismatch ($UID != $JOBUID)"; exit 1; }
+          echo "jobUID matches the real Job — verdict-forgery guard verified live"
+
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          kubectl get pods -A -o wide || true
+          kubectl -n verel-system logs deploy/verel-operator --tail=60 || true
+          kubectl -n default describe gaterun gr1 || true
+          kubectl -n default describe gatewayservice gw1 || true
