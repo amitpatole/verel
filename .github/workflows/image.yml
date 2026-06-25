@@ -63,11 +63,14 @@ jobs:
           exit-code: "1"
           severity: HIGH,CRITICAL
           ignore-unfixed: true
+      # Gate on FIXABLE HIGH/CRITICAL only (matches trivy's ignore-unfixed). An unfixed upstream CVE
+      # isn't actionable at release; the daily Wolfi rebuild + renovate pick up fixes when they land.
       - name: Grype scan (defense in depth)
         uses: anchore/scan-action@64a33b277ea7a1215a3c142735a1091341939ff5 # v4
         with:
           image: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
           severity-cutoff: high
+          only-fixed: true
           fail-build: true
       - name: Cosign keyless sign (OIDC)
         uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
