@@ -6,8 +6,8 @@ description: |
 type: application
 # Chart version is bumped per chart change (independent of appVersion, which tracks the image tag).
 # 1.0.1: add the artifacthub.io/images annotation so Artifact Hub runs the security scan.
-version: 1.0.1
-appVersion: "1.0.0"
+version: 1.0.2
+appVersion: "1.0.1"
 home: https://amitpatole.github.io/verel/
 sources:
   - https://github.com/amitpatole/verel
@@ -21,7 +21,7 @@ annotations:
   # The tag tracks appVersion (bumped per release).
   artifacthub.io/images: |
     - name: gateway
-      image: ghcr.io/amitpatole/verel:1.0.0
+      image: ghcr.io/amitpatole/verel:1.0.1
   artifacthub.io/license: MIT
   artifacthub.io/signKey: |
     fingerprint: cosign keyless (Sigstore) — verify with the GitHub OIDC identity

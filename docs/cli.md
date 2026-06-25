@@ -47,7 +47,7 @@ verel doctor
 A representative run:
 
 ```text
-verel 1.0.0
+verel 1.0.1
   OK python 3.11.9
   OK git
   -- ollama cloud key (~/.config/ollama/key)

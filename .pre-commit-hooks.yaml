@@ -1,7 +1,7 @@
 # Use Verel's verdict gate as a pre-commit check. In your .pre-commit-config.yaml:
 #
 #   - repo: https://github.com/amitpatole/verel
-#     rev: v1.0.0
+#     rev: v1.0.1
 #     hooks:
 #       - id: verel-precommit
 #

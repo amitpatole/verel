@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.0.1 — operator RBAC fix + release-pipeline & Artifact Hub hardening
+
+A patch release. The headline is a **Kubernetes operator RBAC fix** verified by running the operator on a
+real k3s cluster:
+
+- **Operator RBAC** — kopf must `list`/`watch` `customresourcedefinitions` cluster-wide to discover the CRDs
+  it watches; without that grant the operator failed to start (`APIForbiddenError`, never reconciled). Added
+  the grant to `deploy/operator/rbac.yaml`. Caught by a live k3d run (the verb-by-verb audit missed it) and
+  locked in by a new `operator-e2e` CI job: operator → GatewayService (Ready Deployment+Service+NetworkPolicy)
+  → GateRun (hardened Job + deny-egress NetworkPolicy with the server-assigned `jobUID` recorded in `.status`).
+- **Release pipeline** — `chart-release` now authenticates cosign to ghcr (the chart signature push was
+  `UNAUTHORIZED`); the image `grype` step gates on **fixable** HIGH/CRITICAL only (matching trivy) and uses a
+  current scanner (the pinned one shipped a 15-week-stale vuln DB). `renovate.json` auto-bumps the SHA-pinned
+  actions + the Chainguard git digest.
+- **Artifact Hub** — added the `artifacthub.io/images` annotation so the chart's **security scan** runs (it
+  came back **clean**, 0 across all severities); the chart is a **verified publisher**.
+- **Docs & site polish** — comprehensive audit-driven docs pass (new *Graders* + *Integrations* reference
+  pages; corrected the precise/advisory clamp rule); the HF Space + docs *Adoption* page swapped a slow, dark
+  jsvectormap choropleth for a fast, dependency-free country bar-table.
+
+**754 tests.**
+
 ## 1.0.0 — Verel on Kubernetes / k3s: a deployable, signed, multi-tenant platform
 
 The major release: Verel goes from a pip-installable library to a **deployable, signed, multi-tenant
