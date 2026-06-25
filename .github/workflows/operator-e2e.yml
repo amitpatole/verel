@@ -73,17 +73,19 @@ jobs:
           spec: { repo: "https://github.com/octocat/Hello-World", ref: master, stage: inner_loop, timeoutSeconds: 120 }
           EOF
           # poll for the operator to create the Job + NP + record the server-assigned jobUID
+          # (GRUID, not UID — UID is a bash readonly builtin)
+          GRUID=""
           for i in $(seq 1 20); do
-            UID=$(kubectl -n default get gaterun gr1 -o jsonpath='{.status.jobUID}' 2>/dev/null || true)
-            [ -n "$UID" ] && break; sleep 3
+            GRUID=$(kubectl -n default get gaterun gr1 -o jsonpath='{.status.jobUID}' 2>/dev/null || true)
+            [ -n "$GRUID" ] && break; sleep 3
           done
-          test -n "$UID" || { echo "jobUID never recorded — forgery guard not wired"; exit 1; }
-          echo "recorded jobUID=$UID"
+          test -n "$GRUID" || { echo "jobUID never recorded — forgery guard not wired"; exit 1; }
+          echo "recorded jobUID=$GRUID"
           kubectl -n default get job gr1
           kubectl -n default get netpol gr1-deny
           # the recorded uid must equal the actual Job's server-assigned uid (the guard's invariant)
           JOBUID=$(kubectl -n default get job gr1 -o jsonpath='{.metadata.uid}')
-          test "$UID" = "$JOBUID" || { echo "jobUID mismatch ($UID != $JOBUID)"; exit 1; }
+          test "$GRUID" = "$JOBUID" || { echo "jobUID mismatch ($GRUID != $JOBUID)"; exit 1; }
           echo "jobUID matches the real Job — verdict-forgery guard verified live"
 
       - name: Diagnostics on failure
