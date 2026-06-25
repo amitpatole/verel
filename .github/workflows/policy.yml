@@ -57,7 +57,7 @@ jobs:
                   build_fleet_deployment("fl","verel",{"brain":"main"},owner=o)]
           open("render/operator-workloads.yaml","w").write(yaml.safe_dump_all(docs))
           PY
-          cat deploy/operator/operator.yaml deploy/operator/rbac.yaml > render/operator-all.yaml
+          { cat deploy/operator/operator.yaml; echo '---'; cat deploy/operator/rbac.yaml; } > render/operator-all.yaml
 
       - name: kube-linter (zero findings)
         run: for f in render/*.yaml; do echo "== $f =="; kube-linter lint "$f"; done

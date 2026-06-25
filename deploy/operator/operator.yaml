@@ -34,14 +34,12 @@ spec:
             - { name: VEREL_GATERUN_IMAGE, value: ghcr.io/amitpatole/verel:0.51.1 }
           ports:
             - { name: healthz, containerPort: 8080 }
+          # liveness only — the operator is a singleton controller behind NO Service, so a readiness
+          # probe is meaningless (and reusing one probe for both is a kube-score anti-pattern).
           livenessProbe:
             httpGet: { path: /healthz, port: healthz }
             initialDelaySeconds: 10
             periodSeconds: 30
-          readinessProbe:
-            httpGet: { path: /healthz, port: healthz }
-            initialDelaySeconds: 5
-            periodSeconds: 15
           resources:
             requests: { cpu: 50m, memory: 128Mi, ephemeral-storage: 64Mi }
             limits: { cpu: 500m, memory: 256Mi, ephemeral-storage: 256Mi }
