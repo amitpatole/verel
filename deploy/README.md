@@ -66,6 +66,15 @@ Validated by `.github/workflows/chart.yml`: `helm lint` + `helm template` + kube
   Deployment (`deploy/operator/`). The security-critical **GateRun Job builder** runs untrusted repo
   code under defense-in-depth isolation (nonroot · RO-rootfs · drop-ALL caps · seccomp · **no SA
   token** · resource+deadline caps · `backoffLimit 0` · optional gVisor/Kata RuntimeClass · in-container
-  bwrap+seccomp) — every control unit-pinned (`tests/test_operator_*.py`). Full security red-team run.
-- [ ] **Phase 4 — publish + docs + verify-live** — OIDC publish, Artifact Hub, k3s/k8s install docs, live GateRun demo.
+  bwrap+seccomp) — every control unit-pinned (`tests/test_operator_*.py`). **Operator security cadence
+  closed: rounds R4–R7** (multi-agent red-team) — fixed a HIGH verdict-forgery (now bound to the Job's
+  server-assigned uid), node-disk DoS, a CGNAT egress gap, trimmed RBAC to least-privilege, and added
+  per-workload NetworkPolicies; R6+R7 holistic rounds came back clean.
+- [x] **Config-scanner gate** — every workload (chart + operator + CRD-generated) comes up **green on
+  Polaris + kube-linter + kube-score**. Policy + rationale in `deploy/policy/`; local `scan.sh`; CI
+  `.github/workflows/policy.yml`. All images pinned (no `:latest`), ephemeral-storage bounded,
+  anti-affinity, PDB, NetworkPolicies everywhere.
+- [ ] **Phase 4 (remaining) — publish + docs + verify-live** — OIDC OCI publish (image live; chart push
+  + Artifact Hub listing pending), the k3s/k8s install docs page + CRD reference + live GateRun demo,
+  version bump → 1.0.0.
 - [ ] **v1.0.0** — the complete, signed, hosted deployment story.
