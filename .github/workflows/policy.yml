@@ -25,10 +25,10 @@ jobs:
       # node drains — see deploy/policy/README.md). NetworkPolicy IS emitted now (no ignore).
       OP_IGNORE: "container-image-pull-policy,deployment-has-poddisruptionbudget"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with: { python-version: "3.12" }
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
 
       - name: Install scanners (kube-linter, kube-score, polaris)
         run: |

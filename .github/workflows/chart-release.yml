@@ -3,8 +3,8 @@ name: chart-release
 # repository-metadata artifact so the chart is discoverable + verified on Artifact Hub. Validation
 # (lint/template/k3d+kind install) runs separately in chart.yml on every change.
 #
-# NOTE: third-party actions are version-tagged for this DRAFT; SHA-PIN every `uses:` (repo convention,
-# see ci.yml) before this workflow is enabled. Fires only on a tag push — nothing publishes until then.
+# Third-party actions are SHA-pinned (repo convention, see ci.yml). Fires only on a tag push — nothing
+# publishes until then.
 on:
   push:
     tags: ["v*"]
@@ -24,9 +24,9 @@ jobs:
       packages: write        # push the OCI chart + repo-metadata to ghcr
       id-token: write        # cosign keyless (OIDC)
     steps:
-      - uses: actions/checkout@v4
-      - uses: azure/setup-helm@v4
-      - uses: sigstore/cosign-installer@v3
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
       - name: Log in to ghcr (helm + oras)
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
