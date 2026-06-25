@@ -16,6 +16,11 @@ maintainers:
     url: https://github.com/amitpatole
 annotations:
   # Artifact Hub metadata (https://artifacthub.io/docs/topics/annotations/helm/)
+  # Images to scan: AH doesn't render templates, so it only security-scans images listed here.
+  # The tag tracks appVersion (bumped per release).
+  artifacthub.io/images: |
+    - name: gateway
+      image: ghcr.io/amitpatole/verel:1.0.0
   artifacthub.io/license: MIT
   artifacthub.io/signKey: |
     fingerprint: cosign keyless (Sigstore) — verify with the GitHub OIDC identity
