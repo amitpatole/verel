@@ -172,8 +172,15 @@ def build_gaterun_job(name: str, namespace: str, spec: dict, *, owner: dict | No
 def build_gaterun_netpol(name: str, namespace: str, *, owner: dict | None = None) -> dict:
     """A default-deny-egress NetworkPolicy for the GateRun pod (untrusted code). Allows ONLY DNS and
     public HTTPS (the clone) — and **blocks the cloud metadata endpoint + all in-cluster ranges**
-    (RFC1918), so the gate can't steal node IAM creds or pivot to the API server / other pods. (NP
-    enforcement depends on the CNI; it layers under the in-container bwrap and the no-SA-token Job.)"""
+    (RFC1918 + CGNAT), so the gate can't steal node IAM creds or pivot to the API server / other pods.
+
+    Cluster prerequisites this control assumes (documented; not enforceable from the operator):
+      - a **policy-enforcing CNI** (Calico/Cilium/etc.) — NetworkPolicy is a no-op on a CNI that ignores
+        it, and it is ADDITIVE-allow, so tenants must NOT hold `networkpolicies`/`pods` create either;
+      - kubelet **`--pod-max-pids`** set — k8s has no pod-spec PID cap, so this is the fork-bomb backstop
+        (the 2Gi memory cgroup + the in-container bwrap PID namespace also bound it). See R-003.
+    DNS (:53) egress is unrestricted (exfil-only — nothing of value listens on :53; see R-002).
+    This NP layers under the in-container bwrap and the no-SA-token Job (defense in depth)."""
     meta: dict = {"name": f"{name}-deny", "namespace": namespace,
                   "labels": {"app.kubernetes.io/managed-by": "verel-operator"}}
     if owner:

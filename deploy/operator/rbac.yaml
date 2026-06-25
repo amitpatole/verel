@@ -18,22 +18,22 @@ rules:
     resources: [gateruns, brains, gatewayservices, verelfleets,
                 gateruns/status, brains/status, gatewayservices/status, verelfleets/status]
     verbs: [get, list, watch, patch, update]
-  # GateRun → hardened Jobs
+  # GateRun → hardened Jobs (get = read-back for the verdict mirror; list/watch = the Job event handler)
   - apiGroups: ["batch"]
     resources: [jobs]
-    verbs: [create, get, list, watch, delete]
-  # GateRun → a deny-egress NetworkPolicy fencing the untrusted pod
+    verbs: [create, get, list, watch]
+  # GateRun → a deny-egress NetworkPolicy fencing the untrusted pod (create only; conflict fails closed)
   - apiGroups: ["networking.k8s.io"]
     resources: [networkpolicies]
-    verbs: [create, get, patch]
-  # GatewayService / VerelFleet → Deployments
+    verbs: [create]
+  # GatewayService / VerelFleet → Deployments (create, or patch on conflict — no read/watch)
   - apiGroups: ["apps"]
     resources: [deployments]
-    verbs: [create, get, list, watch, patch, update]
-  # Services for the gateway
+    verbs: [create, patch]
+  # Services for the gateway (create, or patch on conflict)
   - apiGroups: [""]
     resources: [services]
-    verbs: [create, get, list, watch, patch]
+    verbs: [create, patch]
   # READ-ONLY, single-object GET only: validate a Brain's connection Secret EXISTS (the operator never
   # reads its values; list/watch is intentionally NOT granted).
   - apiGroups: [""]
