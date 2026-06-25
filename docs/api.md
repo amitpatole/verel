@@ -16,6 +16,14 @@ print(result.verdict)          # pass / warn / fail
 
 ::: verel.verdict.gate
 
+## Issue fingerprints
+
+Stable, content-addressed identity for an issue — so the same defect dedupes across runs and a fixed
+issue can be recognised as gone. `assign` stamps fingerprints onto a report; `issue_signature`
+reduces a report to its set of `(kind, fingerprint)` pairs; `canonicalize` normalises a message.
+
+::: verel.verdict.fingerprint
+
 ## Senses (the eyes)
 
 ::: verel.senses.sight
@@ -59,6 +67,52 @@ resolution that makes a verdict publicly re-checkable.
 
 ::: verel.verdict.keys
 
+## Fleet — agents managing agents
+
+Fan a goal out into independent subtasks, run workers in isolated git worktrees under a single-writer
+scheduler, fence stale leaders with leases, and commit cross-repo work as an atomic saga.
+
+::: verel.fleet
+
+## Tool-smith — agents build their own tools
+
+Detect → scaffold → test → register a tool, admitted only on a passing held-out eval and then run
+sandboxed under a learned capability jail.
+
+::: verel.toolsmith
+
+## Integrations & SDK
+
+One `gate()` callable plus function-calling schemas in OpenAI and Anthropic shape (and a lazy
+LangChain adapter) — the universal hook that lets any agent grade its own work before "done".
+
+::: verel.integrations.sdk
+
+### GitHub PR context
+
+Fetch the acceptance text and changed files for a pull request, to feed the spec/intent graders.
+
+::: verel.integrations.github
+
 ## Memory
 
+The `MemoryView` Protocol and the lattice recall/graduation that compounds only verified work.
+
 ::: verel.memory.view
+
+### Backends — local & hosted
+
+The default zero-dependency SQLite store, plus the hosted brain: a `MemoryServer` over HTTP and a
+`RemoteMemory` client that implements the **same** `MemoryView` Protocol (see
+[Memory backends](memory-backends.md)).
+
+::: verel.memory.local
+
+::: verel.memory.hosted
+
+### Failure ledger & regression report
+
+Records gating failures so the fleet stops repeating mistakes; `regression_report` rolls the open
+failures into a single verdict.
+
+::: verel.memory.failure_ledger

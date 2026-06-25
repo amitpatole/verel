@@ -52,8 +52,10 @@ back to the last good HEAD — and, crucially, it **refuses** to do anything des
 evidence is advisory (a vision or LLM hunch).
 
 ```python
-from verel.ci import canary_stage, rollback_engine
-# canary fails on HEAD → engine reverts to HEAD~1; then an advisory-only failure is offered
+from verel.ci import postmerge_stage, canary_rollback, RollbackExecutor
+res = canary_rollback(".", postmerge_stage("."))   # canary fails on HEAD → reverts to HEAD~1
+print(res.verdict.value, res.rolled_back)
+# a later advisory-only failure offered to RollbackExecutor().maybe_rollback(...) is refused
 ```
 
 ```text
@@ -256,9 +258,49 @@ python examples/demo_smell_grader.py      # 11 · over-engineering → complexit
 python examples/demo_gateway.py           # 12 · gate the action boundary: write blocked, deploy dry-run
 ```
 
-More feature-level demos (consolidation into structured rules, the tool-smith lifecycle, semantic
-recall, **pluggable memory backends** — `demo_backend_registry.py`, the H2 cross-tenant transfer
-experiment) live in [`examples/`](https://github.com/amitpatole/verel/tree/main/examples).
+## More feature-level demos
+
+The scenarios above are the headline loops; these zoom in on a single organ or mechanism. Every one
+is a runnable, real-output script in [`examples/`](https://github.com/amitpatole/verel/tree/main/examples):
+
+- **[`demo_agent_loop.py`](https://github.com/amitpatole/verel/blob/main/examples/demo_agent_loop.py)**
+  — the headline loop: a broken page in, a real LLM agent authors the fix, Verel's own eyes perceive
+  it, and the loop terminates only when Verel itself computes `pass`.
+- **[`demo_overflow_loop.py`](https://github.com/amitpatole/verel/blob/main/examples/demo_overflow_loop.py)**
+  — the walking-skeleton: Verel fixes a real UI overflow and stops on a `pass` it computed itself.
+- **[`demo_cicd.py`](https://github.com/amitpatole/verel/blob/main/examples/demo_cicd.py)**
+  — agent-run CI/CD with the **real** pytest grader (no LLM): fail → fix → re-gate to pass, plus the
+  rollback policy refusing to act on advisory evidence.
+- **[`demo_fleet_loop.py`](https://github.com/amitpatole/verel/blob/main/examples/demo_fleet_loop.py)**
+  — agents managing agents: a manager fans out one worker per page, run concurrently under a budget by
+  the single-writer scheduler.
+- **[`demo_fleet_worktrees.py`](https://github.com/amitpatole/verel/blob/main/examples/demo_fleet_worktrees.py)**
+  — the full picture: an LLM manager decomposes the goal and each worker runs in its **own isolated git
+  worktree**, concurrently.
+- **[`demo_toolsmith.py`](https://github.com/amitpatole/verel/blob/main/examples/demo_toolsmith.py)**
+  — the tool-smith lifecycle (scenario 5 up close): an agent scaffolds a tool, tests it against held-out
+  cases, and registers it to procedural memory **only on a passing, attested eval**.
+- **[`demo_memory_loop.py`](https://github.com/amitpatole/verel/blob/main/examples/demo_memory_loop.py)**
+  — the fleet stops repeating mistakes: a real fix is recorded, marked `fixed` on pass, and consolidated
+  into a candidate semantic rule.
+- **[`demo_promotion.py`](https://github.com/amitpatole/verel/blob/main/examples/demo_promotion.py)**
+  — only verified work compounds: a candidate rule earns `verified` through a held-out, attested,
+  agent-inaccessible eval (with the leakage canary blocking a contaminated promotion).
+- **[`demo_consolidation.py`](https://github.com/amitpatole/verel/blob/main/examples/demo_consolidation.py)**
+  — episodic failures cluster into structured `DesignRule`s, which in turn induce a 2nd-order schema —
+  offline, no API key.
+- **[`demo_semantic_recall.py`](https://github.com/amitpatole/verel/blob/main/examples/demo_semantic_recall.py)**
+  — the brain recalls by **meaning**: a query sharing no vocabulary with a stored rule still retrieves it.
+- **[`demo_sdk_shims.py`](https://github.com/amitpatole/verel/blob/main/examples/demo_sdk_shims.py)**
+  — one `gate()` hook into any agent framework: the same callable + function-calling schema for OpenAI,
+  Anthropic, the Claude Agent SDK, LangGraph, CrewAI, and AutoGen.
+- **[`demo_h2_moat.py`](https://github.com/amitpatole/verel/blob/main/examples/demo_h2_moat.py)**
+  — the corpus-transfer experiment that decides the moat: do verified skills **re-verify across tenants**?
+  Measured, not assumed.
+
+Also see **[`demo_backend_registry.py`](https://github.com/amitpatole/verel/blob/main/examples/demo_backend_registry.py)**
+and **[`demo_hosted_registry.py`](https://github.com/amitpatole/verel/blob/main/examples/demo_hosted_registry.py)**
+for the **pluggable memory backends** (local SQLite, a shared hosted brain, or an external DB).
 
 New here? The fastest hands-on path is **[Try it yourself](try-it.md)** — a from-scratch,
 copy-paste walkthrough (no API key) where you catch a real bug, fix it, and watch Verel remember it.

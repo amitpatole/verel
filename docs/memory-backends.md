@@ -36,6 +36,22 @@ The trust layer is the same on all of them. The axis that matters is **single-wr
 multi-writer** (can several machines write the same brain concurrently and keep the interference
 rule correct?) and **embedded vs. networked** (is there a server to run?).
 
+## Per-backend env matrix
+
+Every backend is selected the same way — `VEREL_MEMORY_BACKEND=<name>` — and shares `VEREL_EMBEDDER`
+(see [Embeddings](#embeddings)). This is the at-a-glance grid; the full per-var reference lives in
+[Configuration → Memory backend](configuration.md#memory-backend) (not duplicated here).
+
+| Backend | Extra | Required env | Optional env | Concurrency model |
+|---|---|---|---|---|
+| `local` | *(core)* | — | `VEREL_MEMORY_STORE`, `VEREL_EMBEDDER` | single process — **single-writer** (one SQLite file). |
+| `lancedb` | `verel[lancedb]` | — | `VEREL_LANCEDB_PATH`, `VEREL_LANCEDB_TABLE`, `VEREL_EMBEDDER` | single process — **single-writer** (one on-disk dataset). |
+| `postgres` | `verel[postgres]` | `VEREL_POSTGRES_URL` *(or `…_DSN`)* | `VEREL_PG_SSLMODE`, `VEREL_PG_CACERT`, `VEREL_EMBEDDER` | **multi-machine** — every mutation serializes per `(subject, predicate, scope)` behind a Postgres advisory lock. |
+| `redis` | `verel[redis]` | `VEREL_REDIS_URL` | `VEREL_REDIS_PREFIX`, `VEREL_REDIS_CACERT`, `VEREL_EMBEDDER` | **multi-machine** — each mutation atomic via `WATCH`/`MULTI` optimistic concurrency with bounded retry. |
+| `remote` | *(core)* | `VEREL_BRAIN_URL` | `VEREL_BRAIN_TOKEN`, `…_CACERT`, `…_CLIENT_CERT`/`…_CLIENT_KEY`, `…_PIN`, `…_INSECURE`, `VEREL_PRINCIPAL_SEED`, `VEREL_CLUSTER_TOKEN` | many clients, **server is the single writer** (every access lock-serialized). |
+
+mem0 is **not** in this grid — it has no registry name and is constructed in code (see below).
+
 ---
 
 ## `local` — zero-dependency SQLite (default)
@@ -342,7 +358,7 @@ OpenAI dependency, `lancedb` with `VEREL_EMBEDDER=hash` is usually the simpler c
 
 ---
 
-## Embeddings (`VEREL_EMBEDDER`)
+## Embeddings (`VEREL_EMBEDDER`) {#embeddings}
 
 The recall relevance signal is configured **once**, the same way for every backend. Without an
 embedder, recall is lexical token-overlap (zero-config, and the only option that works with Ollama,
@@ -423,6 +439,47 @@ report = librarian_pass(mem, scope="repo:app", children=["repo:a", "repo:b"])
 print(report.summary())   # "librarian[repo:app]: +N rules, +N schemas, +N graduated, -N pruned"
 ```
 
+### Revising a wrong generalization (the contraction half)
+
+Consolidation can over-claim — and a memory that only *grows* is a memory that lies. When a new
+failure lands squarely in a rule's domain (a counterexample the rule was supposed to prevent),
+`revise_with_counterexample` records it, `contradict`s the rule, and — once `split_after`
+counterexamples accumulate — splits it into a **narrowed** rule (which *supersedes* the original via
+the interference key) plus a specific **exception** rule. Revision only ever lowers trust or narrows
+scope; it never auto-verifies.
+
+```python
+from verel.memory import revise_with_counterexample, propagate_revision
+
+rev = revise_with_counterexample(mem, rule, counterexample, split_after=2)
+print(rev.action)          # "weakened" → "split" (rev.narrowed + rev.exception) → or "rejected"
+
+# a split also re-derives any SCHEMA that subsumed the rule so the hierarchy above stops
+# over-claiming (revise calls this internally; you can also run it after a manual revision):
+propagate_revision(mem, rev.rule_id)   # climbs the hierarchy, superseding stale principles
+```
+
+### The failure ledger & regression guard — the fleet stops repeating mistakes
+
+Every gating failure is written to long-term memory keyed by its scrubbed fingerprint; when the loop
+reaches `PASS` those fingerprints are marked `fixed` (promoted **and pinned**, so they never decay).
+If a *previously fixed* fingerprint ever reappears, memory alone re-fails the gate — no one had to
+remember to re-add a test.
+
+```python
+from verel.memory import FailureLedger, regression_report
+
+ledger = FailureLedger(mem, scope="repo:app")
+ledger.record(fail_report)                  # persist every gating failure by fingerprint
+# … later, once the loop reaches PASS:
+ledger.mark_fixed(["<fingerprint>"])        # → verified + pinned (decay-proof, permanent)
+
+# on a fresh run, recall any reintroduced-and-previously-fixed failures and gate on them:
+hits = ledger.check_regressions(new_report)
+gate = regression_report(hits)              # a CONTRACT-grader Report: FAIL if any reintroduced
+print(gate.verdict, gate.summary)
+```
+
 ### The scope lattice — `self → team → org → global` shared brain
 
 A memory's `scope` places it in a hierarchy. **Resolve down:** `lattice_recall` surfaces what self,
@@ -461,7 +518,146 @@ On a shared (`remote`) brain, a peer's belief enters as a **candidate** and **re
 trusted** (`import_belief`), and **author reputation** (`AuthorTrust`, stored in the brain itself)
 means a noisy agent's claims need more corroboration — one bad actor can't poison the swarm. On a
 multi-principal `MemoryServer`, authored writes are **signed** (`remember_signed`); a bare bearer
-token can't forge authorship or trust.
+token can't forge authorship or trust. The next three sections are that security layer in full.
+
+### Multi-principal & signed writes
+
+A bearer token answers *"can you connect?"* — not *"who wrote this?"*. The moment a brain is shared,
+a free-string `author` is forgeable (and `AuthorTrust`, the thing meant to stop a bad actor, could
+itself be forged). So a **principal is an ed25519 keypair whose `key_id` IS its identity**: a write is
+signed, and the server derives `author` from the *verified* key, never from a caller-supplied string.
+
+```python
+import secrets, tempfile
+from verel.memory import MemoryServer, RemoteMemory, Principal
+
+# 1) the client's identity. Persist this seed as VEREL_PRINCIPAL_SEED (64 hex chars).
+seed  = secrets.token_bytes(32)              # → seed.hex() is the 64-hex VEREL_PRINCIPAL_SEED
+alice = Principal(seed)                       # or Principal.generate()
+key_id, pub = alice.enroll()                  # (key_id, public_key_b64) — what the operator trusts
+
+with tempfile.TemporaryDirectory() as d:
+    # 2) the operator ENROLLS alice's public key. Enrolling ANY principal flips signed-writes ON.
+    srv = MemoryServer(f"{d}/brain.db", auth_token="team-key",
+                       trusted_principals={key_id: pub}).start()   # or srv.enroll(key_id, pub) later
+    try:
+        client = RemoteMemory(srv.url, auth_token="team-key")
+        res = client.remember_signed(alice, subject="auth", predicate="uses",
+                                     scope="team:platform",
+                                     text="sessions are JWT, 15-min expiry")
+        print(res["authenticated"], res["written"], res["author"], res["reason"])
+        # → True True <key_id> 'written as candidate (authenticated)'
+    finally:
+        srv.stop()
+```
+
+Generate the seed for the env-driven path the same way:
+
+```bash
+export VEREL_PRINCIPAL_SEED="$(python -c 'import secrets; print(secrets.token_bytes(32).hex())')"
+```
+
+!!! warning "Enrolling any principal turns ON signed-writes enforcement"
+    With one or more `trusted_principals` (or a later `srv.enroll(...)`), the server refuses the
+    anonymous bearer write paths: only `/write_signed`, `/recall`, and `/all` (scoped) are open to a
+    bearer holder. A bare-token `/write`, `/promote`, and the corroborate/contradict/flag mutators are
+    **403** — a mere bearer holder can't forge authorship or mint trust. Set
+    `require_signed_writes=False` to opt out (legacy single-operator mode).
+
+A signed write also **can't overwrite another principal's verified belief**: `authenticated_remember`
+returns `conflict=True` (it neither overwrites nor corroborate-and-reattributes another author's
+`verified` record). And a client signed write may **only author `kind=FACT` with a non-reserved
+predicate/scope** — these collide with server-managed control state and are refused
+(`is_reserved_key`):
+
+- **Reserved predicates:** `author_trust`, `fails`, `design_rule`, `schema`, `tool` (the reputation
+  ledger, the failure ledger, induced rules/schemas, the skill registry — all earned/induced, never
+  client-authored).
+- **Reserved scopes:** `meta:authors`.
+
+  (Comparison is on the same `strip().lower()` normalization `make_key` applies, so a case/whitespace
+  variant can't dodge it.)
+
+### Earning the cross-principal `verified` tier — fact-bound attestation
+
+An authenticated write still enters as a **candidate** — authorship is proven, but *trust does not
+travel by say-so*. It earns the cross-principal `verified` tier **only** when `evidence` is a
+**fact-bound attestation**: a publicly-verifiable (ed25519) `GateReceipt` that attests a `PASS` *and*
+whose signed `subject` commits to *this exact claim* (`subject|predicate|text`, via `fact_commitment`).
+An *unbound* receipt is grounding-only — it never promotes.
+
+```python
+from verel.verdict import Verdict, attest_fact, verify_fact_attestation
+
+# a trusted grader mints a PORTABLE attestation bound to THIS claim (attest="ed25519" by default).
+# `reports` are the eval/grader Reports the PASS rests on (each carrying its signed RunReceipt).
+receipt = attest_fact(Verdict.PASS, reports, subject="auth", predicate="uses",
+                      text="sessions are JWT, 15-min expiry")
+
+# bind it to the signed write → the server re-verifies and promotes to `verified`:
+res = client.remember_signed(alice, subject="auth", predicate="uses", scope="team:platform",
+                             text="sessions are JWT, 15-min expiry", evidence=receipt.model_dump())
+assert res["reverified"]      # reason: 'verified by a fact-bound attestation'
+
+# anyone can re-check with NO trust in the producer (ed25519 required for cross-principal use):
+verify_fact_attestation(receipt, "auth", "uses", "sessions are JWT, 15-min expiry",
+                        allowed_algs={"ed25519"})   # True iff PASS + bound to this exact fact
+```
+
+The attestation binds `subject`/`predicate`/`text` (not `scope`, which is only *where* the claim is
+filed), so the values you attest must match the values you write verbatim. `verify_fact_attestation`
+fails closed on a bad envelope signature, a non-`PASS` verdict, or a `subject` that doesn't recompute
+to this fact's commitment.
+
+### Securing the remote brain transport — mTLS, pinning, DoS
+
+A routable `MemoryServer` already refuses to start without **both** a token and TLS. Layer transport
+authentication and anti-DoS on top:
+
+```bash
+# --- a minimal internal CA + server cert (+ a client cert for mTLS), all ed25519 ---
+openssl req -x509 -newkey ed25519 -nodes -keyout ca.key -out ca.pem -days 3650 -subj "/CN=verel-ca"
+
+openssl req -newkey ed25519 -nodes -keyout server.key -out server.csr -subj "/CN=brain.internal"
+openssl x509 -req -in server.csr -CA ca.pem -CAkey ca.key -CAcreateserial -days 825 \
+  -out server.crt -extfile <(printf "subjectAltName=DNS:brain.internal")   # SAN must match the dialed host
+
+openssl req -newkey ed25519 -nodes -keyout client.key -out client.csr -subj "/CN=agent-1"
+openssl x509 -req -in client.csr -CA ca.pem -CAkey ca.key -CAcreateserial -days 825 -out client.crt
+```
+
+**mTLS** — `client_ca=` makes the server *require* a client cert signed by that CA (transport-layer
+client auth, on top of the bearer + signature layers; it also needs the server's own cert):
+
+```python
+srv = MemoryServer("/var/lib/verel/brain.db", host="0.0.0.0", port=8800, auth_token="…",
+                   certfile="server.crt", keyfile="server.key",
+                   client_ca="ca.pem",        # mTLS: every client must present a CA-signed cert
+                   max_connections=128,        # cap concurrent connections (slow-loris / flood guard)
+                   max_per_ip=16).start()      # per-source fairness on a routable bind (default: off)
+```
+
+**Cert pinning** — compute the server's pin and ship it to clients; pin a *set* (comma-separated)
+across a rotation so the new cert is trusted before the old one is retired:
+
+```python
+from verel.transport import cert_sha256
+print(cert_sha256("server.crt"))      # → the VEREL_BRAIN_PIN value (sha256 of the DER leaf)
+```
+
+Client env (mTLS + CA + pin):
+
+```bash
+export VEREL_BRAIN_URL=https://brain.internal:8800
+export VEREL_BRAIN_TOKEN=…
+export VEREL_BRAIN_CACERT=ca.pem                                   # verify the server cert
+export VEREL_BRAIN_CLIENT_CERT=client.crt VEREL_BRAIN_CLIENT_KEY=client.key   # mTLS
+export VEREL_BRAIN_PIN="$(python -c 'from verel.transport import cert_sha256; print(cert_sha256("server.crt"))')"
+# during a rotation, pin both: export VEREL_BRAIN_PIN="$OLD_PIN,$NEW_PIN"
+```
+
+`RemoteMemory.env_kwargs()` reads exactly these (the comma-separated `VEREL_BRAIN_PIN` becomes a set
+of allowed fingerprints), so the client picks them up with no code change.
 
 ### Replication / HA — no single point of failure
 
@@ -501,4 +697,4 @@ trust is ignored) until it earns `verified` via a fact-bound attestation or the 
 ---
 
 See also [Configuration → Memory backend](configuration.md#memory-backend) for the full env-var
-reference and [Architecture → The Brain](ARCHITECTURE.md#the-brain) for the design rationale.
+reference and [Architecture → The Brain](ARCHITECTURE.md#the-brain-memory-that-compounds-verelmemory) for the design rationale.
