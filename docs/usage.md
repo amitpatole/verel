@@ -139,6 +139,53 @@ Load-bearing rules `gate()` enforces:
 - **Stuck vs. progress** — `progressed(curr, prev)` is strict shrinkage of the gating-failure set;
   pure churn or growth is not progress.
 
+### Receipts & attestation — a verdict a stranger can re-check
+
+When a *required* grader passes, it doesn't just say `pass` — it attaches a signed **run-receipt** that
+binds the verdict to the exact inputs it graded. `gate()` rejects a required grader whose receipt is
+missing, forged, stale, or doesn't match the code in front of it. Four bindings are enforced (see
+`verel.verdict.gate`):
+
+- **suite_sha** — the receipt must name the *frozen* suite that ran (a swapped suite fails).
+- **inputs_digest** — the receipt must match the bytes graded *now*, so a green receipt can't be
+  replayed onto different code with the same filenames.
+- **result_digest** — the receipt commits to the graded outcome (verdict + issues), so an attacker
+  can't pair a valid receipt with a tampered `Report` (issues stripped → fake PASS).
+- **coverage** — the grader must prove it scanned at least one changed file.
+
+Two signing tiers (`alg`):
+
+| `alg` | Trust model | Who can verify |
+|---|---|---|
+| `hmac-sha256` (default) | shared secret within one trust domain (`VEREL_RUNNER_SECRET`) | anyone holding the secret |
+| `ed25519` | public-key, cross-domain | **anyone with the public key** — no secret |
+
+Verify a receipt with no trust in its producer:
+
+```python
+import json
+from verel.verdict import RunReceipt, verify_receipt
+
+receipt = RunReceipt.model_validate(json.load(open("receipt.json")))
+res = verify_receipt(receipt, allowed_algs={"ed25519"})   # require public verifiability
+print(res.valid, res.public_verifiable, res.runner_identity, res.reason)
+```
+
+or from the shell / an MCP host:
+
+```bash
+verel verify receipt.json --require-public   # exit 0 iff a trusted ed25519 key validates it
+```
+
+To make `gate()` itself **demand** public verifiability for required graders, pass
+`gate(reports, required={...}, allowed_algs={"ed25519"})` — an HMAC (shared-secret) receipt then fails
+closed.
+
+**Keys (ed25519):** the runner signs with `VEREL_RUNNER_ED25519_SEED` (64 hex chars), else a persisted
+per-install key. A verifier trusts a runner by placing `<key_id>.pub` in `~/.config/verel/trusted_keys/`
+(override the dir with `VEREL_TRUSTED_KEYS`). An untrusted `key_id` never verifies — there is no
+self-certification path.
+
 ---
 
 ## Agent-run CI/CD (`verel.ci`)
@@ -250,6 +297,38 @@ gw.handle("deploy_prod", {...})   # IRREVERSIBLE  → DRY-RUN by default; applie
 - Built behind a clean **verdict / enforce / adapters** seam, so it lifts into the boundary organ
   (`immel`) and act-then-verify organ (`actel`) later unchanged.
 
+#### How the gateway classifies a tool call
+
+`Policy.classify(tool)` tokenizes the tool name (snake/kebab/camelCase → word tokens) and matches the
+tokens against verb sets — **irreversible wins over consequential wins over safe**:
+
+| Class | Sample verbs (token match) | Enforcement |
+|---|---|---|
+| **IRREVERSIBLE** | `delete` `destroy` `drop` `deploy` `release` `publish` `push` `rm` `remove` `revoke` `terminate` `merge` `purge` `wipe` `truncate` `reset` `kill` `rollback` … | dry-run by default; applied only on explicit human `approve` |
+| **CONSEQUENTIAL** | `write` `create` `update` `edit` `commit` `set` `put` `patch` `apply` `insert` `rename` `move` `save` `add` `modify` | forwarded **only on a gate PASS**, else blocked |
+| **SAFE** | `read` `list` `get` `search` `fetch` `view` `show` `query` `status` `describe` `inspect` `diff` `find` `count` `head` | forwarded immediately (read-only heuristic) |
+
+A tool whose name matches **no** verb set is treated as **CONSEQUENTIAL**, not SAFE — the gateway
+fails closed and refuses to assume an unknown action is read-only. Force a class with
+`Policy(overrides={"my_tool": ActionClass.IRREVERSIBLE})`, and constrain the tool set with
+`Policy(allow={...})` (an allowlist) / `Policy(deny={...})` (`deny` always wins).
+
+```python
+from verel.gateway import Gateway, Policy, ActionClass, repo_gate
+
+policy = Policy(
+    dry_run=True,
+    deny={"force_push"},                          # never run, regardless of class
+    overrides={"sync_index": ActionClass.CONSEQUENTIAL},  # name looks SAFE; force a gate
+)
+gw = Gateway(invoke=my_tool_runner, policy=policy, gate=repo_gate("."), approve=ask_human)
+```
+
+> **`repo_gate(repo)` is a pre-condition gate**, not an artifact check: it runs the Verel CI gate and
+> forwards a consequential action only if the repo is **currently green** *before* the action. It does
+> **not** verify what the action produces — confirming the post-action world changed is `actel`'s
+> act-then-verify job (this seam lifts into `immel`/`actel` later).
+
 ### Over-engineering smell — "abstractions nobody needed"
 
 `verel.smell` turns over-engineering into a measurable signal — **deterministic AST analysis, no code
@@ -261,6 +340,70 @@ is the `olfel` organ; today it's a self-contained module + the `verel_smell` MCP
 from verel.smell import grade_smell
 
 rep = grade_smell(".", ["billing.py"], complexity_budget=12)   # over-complex functions gate
+```
+
+### MCP tools — the Verified-Review graders
+
+Three of the five Verified-Review graders are exposed as MCP tools by `verel-mcp` (alongside
+`verel_gate` / `verel_ci_check` / `verel_verify` / `verel_recall` / `verel_remember` /
+`verel_build_tool`). The **mutation** grader and the **action gateway** have no MCP tool — invoke them
+from Python (see above).
+
+| MCP tool | Required args | Optional args | Gates on |
+|---|---|---|---|
+| `verel_spec` | `repo`, `criteria` | `files[]`, `checks_per_criterion` | a violated acceptance criterion (`intent_mismatch`) |
+| `verel_invariants` | `repo` | `invariants[]`, `files[]` | a falsified declared business rule |
+| `verel_smell` | `repo`, `files[]` | `complexity_budget` | a function over the cyclomatic-complexity budget |
+
+Example tool-call payloads (the shape an MCP host sends):
+
+```json
+{
+  "name": "verel_spec",
+  "arguments": {
+    "repo": "/abs/path/to/repo",
+    "criteria": "total_with_tax([60,40], 0.10) must equal 110.0",
+    "files": ["billing.py"],
+    "checks_per_criterion": 2
+  }
+}
+```
+
+```json
+{
+  "name": "verel_invariants",
+  "arguments": {
+    "repo": "/abs/path/to/repo",
+    "invariants": ["a refund never exceeds the original charge"],
+    "files": ["refunds.py"]
+  }
+}
+```
+
+When `invariants` is omitted, `verel_invariants` loads the declared rules from
+`verel_invariants.{yaml,yml,txt}` in the repo; with neither present it returns an error.
+
+```json
+{
+  "name": "verel_smell",
+  "arguments": {
+    "repo": "/abs/path/to/repo",
+    "files": ["billing.py"],
+    "complexity_budget": 12
+  }
+}
+```
+
+Every tool returns the same shape:
+
+```json
+{
+  "verdict": "pass" | "warn" | "fail",
+  "issues": [
+    {"grader": "smell", "severity": "error", "locator": "billing.py:total",
+     "message": "total() has cyclomatic complexity 14 > budget 12 — likely over-complex; split it"}
+  ]
+}
 ```
 
 ### Self-healing
