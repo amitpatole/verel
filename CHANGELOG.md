@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.51.0 — Redis brain backend (networked, shared)
+
+A **networked, multi-writer** brain store on plain Redis: many agents on different machines point at
+one Redis and the trust layer stays correct under concurrent writers. `pip install verel[redis]`, set
+`VEREL_MEMORY_BACKEND=redis` + `VEREL_REDIS_URL`, no code. Completes the external-DB backend set
+(Postgres · LanceDB · Redis).
+
+- **`verel.memory.redis_backend.RedisMemory`.** Each record is a Redis HASH at `{prefix}:mem:{id}`,
+  enumerated via a SET index; proven by the shared `tests/memory_contract.py` harness (lexical **and**
+  ANN). Recall scans the index and ranks in Python (cosine with an embedder, lexical otherwise).
+- **Atomic under concurrent writers** via **optimistic concurrency** — `WATCH` the key, read, merge in
+  Python, `MULTI`/`EXEC`, retry-with-backoff on a concurrent change (no global lock). Every mutator,
+  and the per-key `decay` prune, is atomic. Pinned by concurrency proofs: 8×5 identical writes →
+  `support_count==40`/one row; 8 distinct → one row + an N−1 correction chain; decay-vs-corroborate
+  races lose nothing.
+- **Security (full cadence):** Redis's RESP protocol is injection-safe (length-prefixed args — no
+  string-interpolated query language), so there's no command-injection surface. A **routable host
+  requires TLS *and* AUTH** — a non-loopback `VEREL_REDIS_URL` must be `rediss://` (validated cert)
+  with a password, else refused (fail closed); loopback is zero-config. The URL/password is **scrubbed
+  from every error**; the connection pool is bounded with timeouts. Multi-round adversarial red-team.
+- Registered as the built-in `redis` backend + `verel.memory_backends` entry-point;
+  `redis = ["redis>=5"]` extra. Env: `VEREL_REDIS_URL`, `VEREL_REDIS_PREFIX`, `VEREL_REDIS_CACERT`,
+  `VEREL_EMBEDDER`. The full contract + concurrency proofs run in CI against a Redis service.
+
+**727 tests.**
+
 ## 0.50.0 — LanceDB brain backend (embedded, vector-native)
 
 A **zero-infrastructure** vector store for the brain: LanceDB is embedded (a directory on disk, no
