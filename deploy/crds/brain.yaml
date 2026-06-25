@@ -27,12 +27,10 @@ spec:
                 backend: { type: string, enum: [postgres, redis, lancedb], description: "External brain store." }
                 connectionSecret:
                   type: string
+                  maxLength: 253
+                  pattern: '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$'
                   description: "Secret with the connection env (VEREL_POSTGRES_URL / VEREL_REDIS_URL / …)."
                 embedder: { type: string, enum: [none, lexical, hash, openai], default: lexical }
-                bootstrap:
-                  type: boolean
-                  default: true
-                  description: "Run a one-shot Job to create the pgvector extension / verify connectivity."
             status:
               type: object
               properties:

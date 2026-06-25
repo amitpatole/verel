@@ -36,6 +36,18 @@ def test_job_is_bounded_and_non_retrying():
     assert gate["resources"]["limits"]["memory"]     # resource-capped
 
 
+def test_disk_is_bounded_no_node_exhaustion():
+    # readOnlyRootFilesystem forces untrusted writes into the emptyDirs — they MUST be size-capped, and
+    # the gate container MUST have an ephemeral-storage limit, or a repo can `dd` the node disk full.
+    pod = _job()["spec"]["template"]["spec"]
+    vols = {v["name"]: v for v in pod["volumes"]}
+    assert vols["workspace"]["emptyDir"]["sizeLimit"] == "1Gi"
+    assert vols["tmp"]["emptyDir"]["sizeLimit"] == "256Mi"
+    for c in pod["containers"] + pod["initContainers"]:
+        assert c["resources"]["limits"]["ephemeral-storage"]
+        assert c["resources"]["requests"]["ephemeral-storage"]
+
+
 def test_repo_must_be_validated_https():
     with pytest.raises(ValueError, match="repo"):
         build_gaterun_job("x", "verel", {})
@@ -85,7 +97,9 @@ def test_netpol_fences_untrusted_egress():
     assert np["kind"] == "NetworkPolicy"
     assert spec["podSelector"]["matchLabels"] == {"verel.dev/gaterun": "pr-1"}   # matches the Job pod
     assert spec["policyTypes"] == ["Egress"]
-    # the 443 egress rule blocks cloud metadata + all RFC1918 (cluster API/pods/metadata)
+    # the 443 egress rule blocks cloud metadata + all private ranges (cluster API/pods/metadata),
+    # including RFC6598 CGNAT (100.64/10) used for ClusterIP/Pod CIDRs on GKE/EKS
     https = next(r for r in spec["egress"] if any(p["port"] == 443 for p in r.get("ports", [])))
     blocked = https["to"][0]["ipBlock"]["except"]
-    assert "169.254.0.0/16" in blocked and "10.0.0.0/8" in blocked
+    for cidr in ("169.254.0.0/16", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10"):
+        assert cidr in blocked

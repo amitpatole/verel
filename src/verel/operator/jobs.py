@@ -31,9 +31,18 @@ _UID = 65532
 # repo must be an https:// git URL — NOT ext::/file:///ssh:// (git transports that run commands /
 # read local files), and NOT a `-`-prefixed string (git option injection).
 _REPO_RE = re.compile(r"\Ahttps://[A-Za-z0-9._~:/?#@!$&'()*+,;=%-]{3,512}\Z")
-# RFC1918 + link-local: the untrusted gate must not reach the cloud metadata endpoint
-# (169.254.169.254) or in-cluster API/pods/services. Public https (the clone) + DNS stay allowed.
-_BLOCKED_EGRESS = ["169.254.0.0/16", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+# The untrusted gate must not reach the cloud metadata endpoint (169.254.169.254) or in-cluster
+# API/pods/services. We deny link-local + ALL private ranges and keep public https (the clone) + DNS:
+#   169.254.0.0/16  link-local (incl. the cloud metadata IP)
+#   10/8, 172.16/12, 192.168/16  RFC1918 (typical pod/service/node CIDRs)
+#   100.64.0.0/10   RFC6598 CGNAT — GKE VPC-native + some EKS put Pod/Service/ClusterIP ranges here,
+#                   so omitting it let the gate reach the API server / other pods (red-team R4 finding)
+#   198.18.0.0/15   RFC2544 benchmark range (occasionally used internally)
+# NOTE: NetworkPolicy is ADDITIVE-allow and CNI-dependent — this control assumes (a) a policy-enforcing
+# CNI and (b) that GateRun authors are NOT granted `networkpolicies`/`pods` create (else they could add
+# a permissive policy or skip the CRD entirely). Both are documented cluster prerequisites.
+_BLOCKED_EGRESS = ["169.254.0.0/16", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
+                   "100.64.0.0/10", "198.18.0.0/15"]
 
 
 def _safe_repo(repo: object) -> str:
@@ -79,8 +88,11 @@ def build_gaterun_job(name: str, namespace: str, spec: dict, *, owner: dict | No
     gimg = git_image or _DEFAULT_GIT_IMAGE
     timeout = int(spec.get("timeoutSeconds", 600))
     resources = {  # fixed operator limits — author cannot remove/inflate them (bounded by the cluster)
-        "requests": {"cpu": "250m", "memory": "512Mi"},
-        "limits": {"cpu": "2", "memory": "2Gi"},
+        # ephemeral-storage is bounded too: readOnlyRootFilesystem forces all untrusted writes into the
+        # workspace/tmp emptyDirs, so without a cap a repo could `dd` the NODE's disk full → DiskPressure
+        # evicts other pods (red-team R4 finding). Capped here AND by the emptyDir sizeLimits below.
+        "requests": {"cpu": "250m", "memory": "512Mi", "ephemeral-storage": "256Mi"},
+        "limits": {"cpu": "2", "memory": "2Gi", "ephemeral-storage": "2Gi"},
     }
 
     # Clone: disable the command-executing/local-file git transports; `--` ends options so a hostile
@@ -102,8 +114,8 @@ def build_gaterun_job(name: str, namespace: str, spec: dict, *, owner: dict | No
             "securityContext": dict(_CONTAINER_SECURITY),
             "volumeMounts": [{"name": "workspace", "mountPath": "/workspace"},
                              {"name": "tmp", "mountPath": "/tmp"}],  # nosec B108 — emptyDir mount path
-            "resources": {"requests": {"cpu": "100m", "memory": "128Mi"},
-                          "limits": {"cpu": "500m", "memory": "256Mi"}},
+            "resources": {"requests": {"cpu": "100m", "memory": "128Mi", "ephemeral-storage": "128Mi"},
+                          "limits": {"cpu": "500m", "memory": "256Mi", "ephemeral-storage": "1Gi"}},
         }],
         "containers": [{
             "name": "gate",
@@ -116,9 +128,9 @@ def build_gaterun_job(name: str, namespace: str, spec: dict, *, owner: dict | No
                              {"name": "tmp", "mountPath": "/tmp"}],  # nosec B108 — emptyDir mount path
             "resources": resources,
         }],
-        "volumes": [
-            {"name": "workspace", "emptyDir": {}},
-            {"name": "tmp", "emptyDir": {}},
+        "volumes": [  # sizeLimit caps each emptyDir so untrusted writes can't exhaust node disk
+            {"name": "workspace", "emptyDir": {"sizeLimit": "1Gi"}},
+            {"name": "tmp", "emptyDir": {"sizeLimit": "256Mi"}},
         ],
     }
     # Stronger, kernel-level isolation when the cluster provides a sandbox RuntimeClass.

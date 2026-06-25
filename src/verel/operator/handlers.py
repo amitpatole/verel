@@ -46,9 +46,22 @@ def _conflict(exc) -> bool:
     return getattr(exc, "status", None) == 409 or "already exists" in str(exc)
 
 
+def _job_authenticated(job_meta: dict, gaterun_status: dict) -> bool:
+    """True iff the firing Job IS the one the operator created for this GateRun.
+
+    The ONLY unforgeable handle is the Job's server-assigned ``metadata.uid`` (an author cannot set a
+    Job's uid), which ``gaterun_create`` records into ``GateRun.status.jobUID`` — and status is
+    operator-write-only via RBAC. The Job's label and ownerReferences are author-settable (a tenant
+    with ``jobs: create`` can stamp any ``kind``/``name``/``uid``/``controller``), so they are NOT
+    trusted here: a forged/labelled ``exit 0`` Job must never mirror a ``pass`` onto someone's GateRun.
+    """
+    job_uid = (gaterun_status or {}).get("jobUID")
+    return bool(job_uid) and job_meta.get("uid") == job_uid
+
+
 # ---- GateRun: one-shot grade → hardened Job + deny-egress NetworkPolicy → verdict in .status ----
 @kopf.on.create(*_GV, "gateruns")
-def gaterun_create(spec, name, namespace, body, patch, logger, **_):
+def gaterun_create(spec, name, namespace, body, patch, status, logger, **_):
     owner = _owner(body)
     netpol = build_gaterun_netpol(name, namespace, owner=owner)
     job = build_gaterun_job(name, namespace, dict(spec), owner=owner, image=_trusted_image())
@@ -59,11 +72,25 @@ def gaterun_create(spec, name, namespace, body, patch, logger, **_):
     except Exception as e:
         if not _conflict(e):
             raise
+    # Create the gate Job and record ITS server-assigned uid — the only trusted handle on the result.
+    # gaterun_job_event mirrors a verdict ONLY for the Job whose uid matches status.jobUID, so an
+    # attacker can't pre-plant or label a Job to forge a verdict (uid is API-server-assigned).
     try:
-        batch.create_namespaced_job(namespace, job)
+        created = batch.create_namespaced_job(namespace, job)
+        patch.status["jobUID"] = created.metadata.uid
     except Exception as e:
         if not _conflict(e):
             raise
+        # The Job name (== GateRun name) is already taken. Adopt it ONLY if it is the operator's OWN
+        # Job from a prior reconcile attempt (its uid matches the uid we already recorded); otherwise a
+        # pre-planted same-named Job could shadow ours and forge a verdict → FAIL CLOSED.
+        prior = (status or {}).get("jobUID")
+        existing = batch.read_namespaced_job(name, namespace)
+        if not prior or existing.metadata.uid != prior:
+            patch.status["phase"] = "Error"
+            patch.status["message"] = "a Job with this name already exists and is not operator-created"
+            raise kopf.PermanentError(
+                f"refusing to adopt pre-existing Job {name!r} (possible verdict forgery)") from e
     logger.info("GateRun %s: created deny-egress NetworkPolicy + hardened Job", name)
     patch.status["phase"] = "Running"
     patch.status["jobName"] = name
@@ -71,14 +98,19 @@ def gaterun_create(spec, name, namespace, body, patch, logger, **_):
 
 @kopf.on.event("batch", "v1", "jobs", labels={"verel.dev/gaterun": kopf.PRESENT})
 def gaterun_job_event(meta, status, namespace, logger, **_):
-    """Mirror the owning GateRun's status from ITS Job. Verdict forgery guard: only act on a Job that
-    is actually OWNED by the GateRun (ownerReference uid), never merely carrying the label — else a
-    user could create a labelled Job to forge another GateRun's verdict."""
+    """Mirror the owning GateRun's status from ITS Job. Verdict-forgery guard: trust the Job ONLY if
+    its server-assigned uid matches the uid the operator recorded in ``GateRun.status.jobUID`` — never
+    the (author-settable) label or ownerReference. See ``_job_authenticated``."""
     gr = meta.get("labels", {}).get("verel.dev/gaterun")
-    owned = any(o.get("kind") == "GateRun" and o.get("name") == gr and o.get("controller")
-                for o in meta.get("ownerReferences", []))
-    if not gr or not owned:
-        return  # unowned/forged Job carrying the label → ignore
+    if not gr:
+        return
+    try:
+        gr_obj = _k8s().CustomObjectsApi().get_namespaced_custom_object(
+            API_GROUP, API_VERSION, namespace, "gateruns", gr)
+    except Exception:
+        return  # GateRun gone / unreadable → nothing to mirror
+    if not _job_authenticated(meta, gr_obj.get("status") or {}):
+        return  # not the operator's Job for this GateRun (forged/labelled) → ignore
     succeeded = (status or {}).get("succeeded", 0)
     failed = (status or {}).get("failed", 0)
     if not succeeded and not failed:

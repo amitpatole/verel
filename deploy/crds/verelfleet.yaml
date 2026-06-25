@@ -27,7 +27,7 @@ spec:
               type: object
               required: [brain]
               properties:
-                workers: { type: integer, default: 2, minimum: 0 }
+                workers: { type: integer, default: 2, minimum: 0, maximum: 100 }
                 brain:
                   type: string
                   pattern: '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
