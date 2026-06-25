@@ -17,6 +17,15 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      redis:   # a throwaway Redis so the redis-backend FULL contract + concurrency proofs RUN in CI
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 5
+    env:
+      VEREL_REDIS_URL: redis://127.0.0.1:6379/15
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
@@ -25,7 +34,7 @@ jobs:
       - name: Create venv + install (core + dev + attest)
         run: |
           uv venv --python 3.11
-          uv pip install -e ".[dev,attest,postgres,lancedb]"   # attest=pynacl (receipt tests); postgres=psycopg/pgvector (pg-backend security UNIT tests RUN; live-DB tests skip without VEREL_PG_SMOKE); lancedb=embedded, so its FULL contract RUNS in CI
+          uv pip install -e ".[dev,attest,postgres,lancedb,redis]"   # attest=pynacl (receipt tests); postgres=psycopg/pgvector (pg-backend security UNIT tests RUN; live-DB tests skip without VEREL_PG_SMOKE); lancedb=embedded (full contract RUNS); redis=client + a redis service (full contract + concurrency RUN)
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
       - name: Lint (ruff)
         run: ruff check src tests examples
