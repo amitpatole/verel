@@ -2,10 +2,10 @@
 # oci://ghcr.io/amitpatole/charts/verel by .github/workflows/chart-release.yml so Artifact Hub can
 # verify ownership of the listed repository.
 #
-# repositoryID is issued by Artifact Hub when the repository is first registered (Control Panel →
-# Repositories → Add). Paste it here, then the next chart-release run re-pushes this file to claim
-# ownership. Until then the listing works but is unverified.
-repositoryID: ""        # TODO: fill from Artifact Hub after registering oci://ghcr.io/amitpatole/charts/verel
+# repositoryID is issued by Artifact Hub when the repository is registered (Control Panel →
+# Repositories → Add). The `owners[].email` MUST match the email on your Artifact Hub account, or the
+# ownership-claim check fails. Pushed to oci://ghcr.io/amitpatole/charts/verel:artifacthub.io.
+repositoryID: 7300597b-4fd6-483e-b3f1-023bc18069f2
 owners:
   - name: amitpatole
     email: amit.patole@gmail.com
