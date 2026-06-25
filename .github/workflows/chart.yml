@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
       - name: helm lint (all value paths)
         run: |
           helm lint deploy/chart --set tls.secretName=verel-tls --set auth.token=t
@@ -37,7 +37,7 @@ jobs:
         cluster: [k3d, kind]      # k3s (k3d) AND vanilla k8s (kind) — design-once-run-on-both
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
       - name: Build + load the image
         run: docker build -f deploy/Dockerfile -t verel:e2e .
       - name: Create cluster (${{ matrix.cluster }})
