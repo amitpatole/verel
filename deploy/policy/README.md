@@ -10,7 +10,7 @@ is gated, in CI, by three independent Kubernetes config scanners. The deployed w
 | **kube-linter** (StackRox) | security + correctness lint | `kube-linter lint` → **zero findings** |
 | **kube-score** | opinionated security + reliability scoring | `kube-score score` (ignore-list below) → **zero CRITICALs** |
 
-Run locally: `make policy-scan` (or see `.github/workflows/policy.yml`).
+Run locally: `bash deploy/policy/scan.sh` (mirrors `.github/workflows/policy.yml`).
 
 ## What makes them green (the substantive controls)
 
