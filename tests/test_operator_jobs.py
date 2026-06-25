@@ -79,6 +79,15 @@ def test_resources_are_fixed_not_author_controlled():
     assert c["resources"]["limits"]["memory"] == "2Gi"   # operator ceiling, author value ignored
 
 
+def test_images_are_pinned_never_latest():
+    # config scanners (kube-linter/kube-score/polaris) reject :latest — pins must be version/digest.
+    job = _job()["spec"]["template"]["spec"]
+    gate = job["containers"][0]["image"]
+    clone = job["initContainers"][0]["image"]
+    assert gate.startswith("ghcr.io/amitpatole/verel:") and not gate.endswith(":latest")
+    assert "@sha256:" in clone and ":latest" not in clone   # git clone image digest-pinned
+
+
 def test_runtimeclass_opt_in_for_stronger_isolation():
     assert "runtimeClassName" not in _job()["spec"]["template"]["spec"]
     assert _job({"runtimeClassName": "gvisor"})["spec"]["template"]["spec"]["runtimeClassName"] == "gvisor"

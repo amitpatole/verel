@@ -15,13 +15,30 @@ def _labels(name: str, component: str) -> dict:
             "app.kubernetes.io/component": component, "verel.dev/owner": name}
 
 
-def _hardened_pod(containers: list, volumes: list | None = None) -> dict:
-    return {
+def _soft_anti_affinity(name: str) -> dict:
+    """Prefer (not require) scheduling replicas onto distinct nodes — best-practice HA spread that the
+    config scanners (kube-linter no-anti-affinity) expect on multi-replica Deployments."""
+    return {"podAntiAffinity": {"preferredDuringSchedulingIgnoredDuringExecution": [
+        {"weight": 100, "podAffinityTerm": {
+            "labelSelector": {"matchLabels": {"verel.dev/owner": name}},
+            "topologyKey": "kubernetes.io/hostname"}}]}}
+
+
+_GW_RESOURCES = {"requests": {"cpu": "100m", "memory": "256Mi", "ephemeral-storage": "128Mi"},
+                 "limits": {"cpu": "1", "memory": "512Mi", "ephemeral-storage": "1Gi"}}
+
+
+def _hardened_pod(containers: list, volumes: list | None = None, *,
+                  anti_affinity_for: str | None = None) -> dict:
+    pod: dict = {
         "automountServiceAccountToken": False,
         "securityContext": dict(_POD_SECURITY),
         "containers": containers,
         "volumes": volumes or [{"name": "tmp", "emptyDir": {}}],
     }
+    if anti_affinity_for:
+        pod["affinity"] = _soft_anti_affinity(anti_affinity_for)
+    return pod
 
 
 def build_gateway_deployment(name: str, namespace: str, spec: dict, *, owner: dict | None = None,
@@ -58,11 +75,11 @@ def build_gateway_deployment(name: str, namespace: str, spec: dict, *, owner: di
         "ports": [{"name": "https", "containerPort": 8443}],
         "livenessProbe": {"httpGet": {"path": "/health", "port": "https", "scheme": scheme}},
         "readinessProbe": {"httpGet": {"path": "/ready", "port": "https", "scheme": scheme}},
-        "resources": {"requests": {"cpu": "100m", "memory": "256Mi"},
-                      "limits": {"cpu": "1", "memory": "512Mi"}},
+        "resources": dict(_GW_RESOURCES),
         "volumeMounts": vmounts,
     }
-    return _deployment(name, namespace, "gateway", replicas, _hardened_pod([container], volumes), owner)
+    pod = _hardened_pod([container], volumes, anti_affinity_for=name)
+    return _deployment(name, namespace, "gateway", replicas, pod, owner)
 
 
 def build_service(name: str, namespace: str, *, owner: dict | None = None, port: int = 8443) -> dict:
@@ -98,12 +115,13 @@ def build_fleet_deployment(name: str, namespace: str, spec: dict, *, owner: dict
         # the shared brain: the Brain CR's connection Secret (VEREL_MEMORY_BACKEND + URL) as envFrom.
         "envFrom": [{"secretRef": {"name": f"{brain}-conn", "optional": True}}],
         "ports": [{"name": "https", "containerPort": 8443}],
+        "livenessProbe": {"httpGet": {"path": "/health", "port": "https", "scheme": "HTTP"}},
         "readinessProbe": {"httpGet": {"path": "/ready", "port": "https", "scheme": "HTTP"}},
-        "resources": {"requests": {"cpu": "100m", "memory": "256Mi"},
-                      "limits": {"cpu": "1", "memory": "512Mi"}},
+        "resources": dict(_GW_RESOURCES),
         "volumeMounts": [{"name": "tmp", "mountPath": "/tmp"}, {"name": "repo", "mountPath": "/workspace"}],  # nosec B108 — emptyDir mount path
     }
-    pod = _hardened_pod([container], [{"name": "tmp", "emptyDir": {}}, {"name": "repo", "emptyDir": {}}])
+    pod = _hardened_pod([container], [{"name": "tmp", "emptyDir": {}}, {"name": "repo", "emptyDir": {}}],
+                        anti_affinity_for=name)
     return _deployment(name, namespace, "fleet-worker", workers, pod, owner)
 
 

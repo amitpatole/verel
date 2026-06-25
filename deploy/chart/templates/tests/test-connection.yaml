@@ -6,14 +6,27 @@ metadata:
   annotations:
     "helm.sh/hook": test
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    # one-shot test hook (restartPolicy: Never, runs once and exits) — probes don't apply.
+    "polaris.fairwinds.com/livenessProbeMissing-exempt": "true"
+    "polaris.fairwinds.com/readinessProbeMissing-exempt": "true"
+    "kube-score/ignore": "pod-probes"
 spec:
   restartPolicy: Never
   securityContext: {{- toYaml .Values.podSecurityContext | nindent 4 }}
   containers:
     - name: probe
-      image: cgr.dev/chainguard/curl:latest
+      # reuse the pinned, hardened gateway image (no extra :latest base) — it ships Python.
+      image: {{ include "verel.image" . | quote }}
+      imagePullPolicy: {{ .Values.image.pullPolicy }}
       securityContext: {{- toYaml .Values.securityContext | nindent 8 }}
-      command: ["curl"]
+      command: ["python"]
       args:
-        - "-fsSk"
-        - "{{ if and .Values.tls.enabled (not .Values.tls.insecure) }}https{{ else }}http{{ end }}://{{ include "verel.fullname" . }}:{{ .Values.service.port }}/health"
+        - "-c"
+        - |
+          import ssl, urllib.request
+          ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
+          url = "{{ if and .Values.tls.enabled (not .Values.tls.insecure) }}https{{ else }}http{{ end }}://{{ include "verel.fullname" . }}:{{ .Values.service.port }}/health"
+          urllib.request.urlopen(url, context=ctx, timeout=10).read()
+      resources:
+        requests: { cpu: 50m, memory: 64Mi, ephemeral-storage: 32Mi }
+        limits: { cpu: 250m, memory: 128Mi, ephemeral-storage: 128Mi }

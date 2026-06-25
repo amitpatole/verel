@@ -24,8 +24,18 @@ from __future__ import annotations
 
 import re
 
-_DEFAULT_IMAGE = "ghcr.io/amitpatole/verel:latest"
-_DEFAULT_GIT_IMAGE = "cgr.dev/chainguard/git:latest"
+from verel import __version__
+
+# Image defaults are PINNED (never :latest) so every generated manifest is reproducible and passes the
+# config scanners (Polaris/kube-linter/kube-score). The gate image is version-pinned to this package's
+# release (the image is built per release); the clone image is a Chainguard git pinned by digest
+# (immutable + minimal-CVE; bump via renovate). Both are overridable (operator env / builder arg).
+_IMAGE_REPO = "ghcr.io/amitpatole/verel"
+_DEFAULT_IMAGE = f"{_IMAGE_REPO}:{__version__}"
+_DEFAULT_GIT_IMAGE = (
+    "cgr.dev/chainguard/git@sha256:"
+    "647f282aca230959311b2baa2dff0d184a29d4495d605cf00cc1aaf0954bc417"
+)
 _UID = 65532
 
 # repo must be an https:// git URL — NOT ext::/file:///ssh:// (git transports that run commands /
