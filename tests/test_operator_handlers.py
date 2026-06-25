@@ -9,7 +9,15 @@ import pytest
 
 pytest.importorskip("kopf", reason="operator tests need verel[operator]")
 
-from verel.operator.handlers import _job_authenticated
+from verel.operator.handlers import _job_authenticated, _trusted_git_image
+
+
+def test_git_image_overridable_via_env(monkeypatch):
+    # default is the pinned Chainguard digest; operators can point at their own mirror (R6 L-1)
+    monkeypatch.delenv("VEREL_GATERUN_GIT_IMAGE", raising=False)
+    assert "@sha256:" in _trusted_git_image()
+    monkeypatch.setenv("VEREL_GATERUN_GIT_IMAGE", "ghcr.io/me/git@sha256:" + "a" * 64)
+    assert _trusted_git_image() == "ghcr.io/me/git@sha256:" + "a" * 64
 
 
 def test_authentic_job_uid_matches_recorded_jobuid():

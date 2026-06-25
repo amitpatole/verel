@@ -48,3 +48,19 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+---
+# Deny ALL pod-sourced ingress to the operator. The kopf liveness endpoint (:8080) is then reachable
+# only by the kubelet (node/host-sourced probes are not subject to NetworkPolicy), not by co-located
+# pods — closes the operator :8080 co-pod-reach residual. Egress is unconstrained (the operator needs
+# the API server). No ingress rules = default-deny.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: verel-operator
+  namespace: verel-system
+  labels: { app.kubernetes.io/name: verel-operator, app.kubernetes.io/component: operator }
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: verel-operator }
+  policyTypes: [Ingress]
+  ingress: []

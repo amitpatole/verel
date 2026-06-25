@@ -9,7 +9,7 @@ import os
 import kopf
 
 from . import API_GROUP, API_VERSION
-from .jobs import _DEFAULT_IMAGE, build_gaterun_job, build_gaterun_netpol
+from .jobs import _DEFAULT_GIT_IMAGE, _DEFAULT_IMAGE, build_gaterun_job, build_gaterun_netpol
 
 _GV = (API_GROUP, API_VERSION)
 
@@ -18,6 +18,13 @@ def _trusted_image() -> str:
     """The image the operator runs for ALL managed workloads — operator-controlled, never from a CR
     spec (closes the confused-deputy: an author can't make the operator run an attacker image)."""
     return os.environ.get("VEREL_GATERUN_IMAGE", _DEFAULT_IMAGE)
+
+
+def _trusted_git_image() -> str:
+    """The clone initContainer image — operator-controlled. Overridable so operators can point at a
+    mirror in a registry they control (the default Chainguard digest can be GC'd off the free tier; a
+    self-mirrored, renovate-bumped pin keeps GateRun working long-term — see the jobs.py note)."""
+    return os.environ.get("VEREL_GATERUN_GIT_IMAGE", _DEFAULT_GIT_IMAGE)
 
 
 @kopf.on.startup()
@@ -64,7 +71,8 @@ def _job_authenticated(job_meta: dict, gaterun_status: dict) -> bool:
 def gaterun_create(spec, name, namespace, body, patch, status, logger, **_):
     owner = _owner(body)
     netpol = build_gaterun_netpol(name, namespace, owner=owner)
-    job = build_gaterun_job(name, namespace, dict(spec), owner=owner, image=_trusted_image())
+    job = build_gaterun_job(name, namespace, dict(spec), owner=owner, image=_trusted_image(),
+                            git_image=_trusted_git_image())
     net, batch = _k8s().NetworkingV1Api(), _k8s().BatchV1Api()
     # NetworkPolicy FIRST, so the untrusted pod is fenced before it can run.
     try:
@@ -145,11 +153,13 @@ def brain_create(spec, name, namespace, patch, logger, **_):
 @kopf.on.create(*_GV, "gatewayservices")
 @kopf.on.update(*_GV, "gatewayservices")
 def gatewayservice_apply(spec, name, namespace, body, patch, logger, **_):
-    from .deployments import build_gateway_deployment, build_service
+    from .deployments import build_gateway_deployment, build_service, build_workload_netpol
     apps, core = _k8s().AppsV1Api(), _k8s().CoreV1Api()
     owner = _owner(body)
     dep = build_gateway_deployment(name, namespace, dict(spec), owner=owner, image=_trusted_image())
     svc = build_service(name, namespace, owner=owner)
+    netpol = build_workload_netpol(name, namespace, owner=owner)  # deny-all-ingress except :8443
+    _ensure_netpol(namespace, name, netpol)
     _apply(apps.create_namespaced_deployment, apps.patch_namespaced_deployment, namespace, name, dep)
     _apply(core.create_namespaced_service, core.patch_namespaced_service, namespace, name, svc)
     patch.status["replicas"] = spec.get("replicas", 1)
@@ -160,13 +170,28 @@ def gatewayservice_apply(spec, name, namespace, body, patch, logger, **_):
 @kopf.on.create(*_GV, "verelfleets")
 @kopf.on.update(*_GV, "verelfleets")
 def verelfleet_apply(spec, name, namespace, body, patch, logger, **_):
-    from .deployments import build_fleet_deployment
+    from .deployments import build_fleet_deployment, build_workload_netpol
     apps = _k8s().AppsV1Api()
-    dep = build_fleet_deployment(name, namespace, dict(spec), owner=_owner(body), image=_trusted_image())
+    owner = _owner(body)
+    dep = build_fleet_deployment(name, namespace, dict(spec), owner=owner, image=_trusted_image())
+    # the fleet is an internal pool (plaintext-in-cluster) — fence ingress to same-namespace only.
+    _ensure_netpol(namespace, name, build_workload_netpol(name, namespace, owner=owner,
+                                                          same_namespace_only=True))
     _apply(apps.create_namespaced_deployment, apps.patch_namespaced_deployment, namespace, name, dep)
     patch.status["workers"] = spec.get("workers", 2)
     logger.info("VerelFleet %s applied (workers=%s, brain=%s)", name, spec.get("workers", 2),
                 spec.get("brain"))
+
+
+def _ensure_netpol(namespace, name, netpol):
+    """Create the workload's deny-ingress NetworkPolicy; idempotent. Its content is name-derived and
+    fixed (no author input), so an existing one needs no update → create-or-ignore keeps RBAC at
+    networkpolicies:create only."""
+    try:
+        _k8s().NetworkingV1Api().create_namespaced_network_policy(namespace, netpol)
+    except Exception as e:
+        if not _conflict(e):
+            raise
 
 
 def _apply(create, replace, namespace, name, manifest):

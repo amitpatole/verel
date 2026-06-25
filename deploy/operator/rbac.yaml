@@ -17,7 +17,7 @@ rules:
   - apiGroups: ["verel.dev"]
     resources: [gateruns, brains, gatewayservices, verelfleets,
                 gateruns/status, brains/status, gatewayservices/status, verelfleets/status]
-    verbs: [get, list, watch, patch, update]
+    verbs: [get, list, watch, patch]   # kopf is patch-based (diff-base, finalizers, status) — no PUT
   # GateRun → hardened Jobs (get = read-back for the verdict mirror; list/watch = the Job event handler)
   - apiGroups: ["batch"]
     resources: [jobs]

@@ -15,6 +15,28 @@ def _labels(name: str, component: str) -> dict:
             "app.kubernetes.io/component": component, "verel.dev/owner": name}
 
 
+def build_workload_netpol(name: str, namespace: str, *, port: int = 8443,
+                          owner: dict | None = None, same_namespace_only: bool = False) -> dict:
+    """A default-deny-ingress NetworkPolicy for a managed gateway/fleet pod: deny ALL ingress except
+    the service port. `same_namespace_only=True` (fleets — an internal pool, no external ingress)
+    restricts that port to same-namespace sources, shrinking the blast radius of the fleet's
+    plaintext-in-cluster bind; gateways stay reachable cluster-wide (they're fronted by an ingress in
+    another namespace and are auth+TLS-gated). Egress is left unconstrained — these trusted services
+    legitimately reach the brain/DNS/LLM providers."""
+    ingress_rule: dict = {"ports": [{"protocol": "TCP", "port": port}]}
+    if same_namespace_only:
+        ingress_rule["from"] = [{"podSelector": {}}]
+    meta: dict = {"name": f"{name}-ingress", "namespace": namespace,
+                  "labels": {_LABELS: "verel-operator"}}
+    if owner:
+        meta["ownerReferences"] = [owner]
+    return {
+        "apiVersion": "networking.k8s.io/v1", "kind": "NetworkPolicy", "metadata": meta,
+        "spec": {"podSelector": {"matchLabels": {"verel.dev/owner": name}},
+                 "policyTypes": ["Ingress"], "ingress": [ingress_rule]},
+    }
+
+
 def _soft_anti_affinity(name: str) -> dict:
     """Prefer (not require) scheduling replicas onto distinct nodes — best-practice HA spread that the
     config scanners (kube-linter no-anti-affinity) expect on multi-replica Deployments."""
