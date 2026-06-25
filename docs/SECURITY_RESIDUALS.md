@@ -5,7 +5,11 @@ in the public mkdocs nav. Process: a residual is either (a) deferred-by-design t
 or (b) unfixable at Verel's layer (upstream dependency / OS) — in which case, if upstream is open
 source, we open an issue + PR and shepherd it to merge. Recheck on the date and close when fixed.
 
-_(none open)_
+| ID | Finding | Severity | Why open / mitigation | Recheck |
+|----|---------|----------|-----------------------|---------|
+| R-002 | **GateRun pod DNS egress is unrestricted** (`src/verel/operator/jobs.py` netpol: port 53 to any destination). Untrusted repo code could DNS-tunnel/exfiltrate through the cluster resolver. | Low | Inherent to plain NetworkPolicy (no egress-DNS firewall). **Bounded:** nothing of value (cloud metadata / API server) listens on :53, so it is exfil-only — no pivot. `:443` egress to the public internet is already permitted by necessity (the git clone), so DNS adds no capability an attacker doesn't already have. Closing needs an egress-DNS policy engine (Cilium FQDN policy / a DNS proxy) which is a cluster-level control, not the operator's. | When the chart documents a Cilium/FQDN-policy option. |
+| R-003 | **No per-pod PID cap on the GateRun Job** (Kubernetes has no pod-spec PID field). A fork bomb in untrusted code is bounded only by the memory cgroup + node `--pod-max-pids`. | Low | **Bounded:** the 2Gi memory cgroup OOM-kills before PID exhaustion, and untrusted repo code additionally runs under the in-container bwrap `--unshare-all` PID namespace. Documented as a cluster prerequisite (set kubelet `--pod-max-pids`) in the `jobs.py` netpol docstring + the k8s install docs. | If/when a Pod-level PID limit lands in core k8s. |
+| R-004 | **Operator liveness endpoint (`:8080/healthz`) is reachable by trusted co-located pods** (no ingress NetworkPolicy fronts it). | Info | **Bounded:** unreachable from the untrusted GateRun pod (the operator's pod IP is in an RFC1918/100.64 range, all in the GateRun deny-egress list). No Service exposes it; kopf `/healthz` is read-only (probe status, no secrets, no control). Only in-cluster *trusted* pods + the kubelet can GET it. Optional hardening: a default-deny-ingress NetworkPolicy on the operator allowing only the kubelet to `:8080`. | Optional; revisit if the operator namespace becomes multi-tenant. |
 
 ## Closed
 
