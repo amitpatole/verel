@@ -25,12 +25,16 @@ spec:
             spec:
               type: object
               properties:
-                replicas: { type: integer, default: 1, minimum: 0 }
+                replicas: { type: integer, default: 1, minimum: 0, maximum: 100 }
                 insecure:
                   type: boolean
                   default: false
                   description: "Waive in-pod TLS (behind a TLS-terminating ingress); auth still required."
-                repoMountPath: { type: string, default: /workspace }
+                repoMountPath:
+                  type: string
+                  default: /workspace
+                  maxLength: 256
+                  pattern: '^/[A-Za-z0-9._/-]{0,255}$'
                 # The image is the operator's trusted image; the token/TLS Secrets are operator-derived
                 # (`<name>-auth`, `<name>-tls`) — NOT author-supplied (confused-deputy defense). Create
                 # those Secrets out-of-band; the operator only references them by the derived name.
