@@ -72,18 +72,23 @@ def countries() -> dict | None:
 
 
 _HTML = """
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/jsvectormap@1.5.3/dist/css/jsvectormap.min.css">
 <style>
-.adopt{{--l:#262633;--m:#a6a6c4;--ac:#8b7cff;--ac2:#5ad1e6}}
-.adopt .box{{background:#0b0b12;border:1px solid var(--l);border-radius:14px;padding:16px;margin:14px 0}}
-.adopt h3{{margin:0 0 8px;font-size:16px}}
-.adopt .sub{{color:var(--m);font-size:13px;margin:-2px 0 10px}}
-.adopt #aTrend{{height:300px}}
-.adopt #aMap{{height:460px}}
-.adopt .tabs{{display:flex;gap:8px;justify-content:center;margin-bottom:10px}}
-.adopt .tab{{background:#15151f;border:1px solid var(--l);color:var(--m);border-radius:9px;padding:6px 16px;font-weight:600;font-size:13px;cursor:pointer}}
-.adopt .tab.on{{border-color:var(--ac);color:#fff}}
-.adopt .jvm-tooltip{{background:#14141f!important;border:1px solid var(--l)!important;color:#eceaf7!important;border-radius:8px!important;padding:6px 10px!important}}
+.adopt .box{{background:var(--md-default-bg-color);border:1px solid var(--md-default-fg-color--lightest);border-radius:12px;padding:18px 20px;margin:16px 0}}
+.adopt h3{{margin:0 0 2px;font-size:16px}}
+.adopt .sub{{color:var(--md-default-fg-color--light);font-size:13px;margin:0 0 12px}}
+.adopt .tabs{{display:flex;gap:8px;margin:0 0 12px}}
+.adopt .tab{{background:transparent;border:1px solid var(--md-default-fg-color--lighter);color:var(--md-default-fg-color--light);border-radius:8px;padding:5px 14px;font-weight:600;font-size:13px;cursor:pointer}}
+.adopt .tab.on{{border-color:#7a72b5;color:#564f8c;background:rgba(122,114,181,.08)}}
+.adopt .spark{{width:100%;height:118px;display:block}}
+.adopt table.ctab{{width:100%;border-collapse:collapse;font-size:14px}}
+.adopt .ctab td{{padding:6px 6px;border-bottom:1px solid var(--md-default-fg-color--lightest);vertical-align:middle}}
+.adopt .ctab tr:last-child td{{border-bottom:none}}
+.adopt .cflag{{width:24px;font-size:17px;line-height:1}}
+.adopt .cname{{white-space:nowrap;max-width:180px;overflow:hidden;text-overflow:ellipsis}}
+.adopt .cbar{{width:50%}}
+.adopt .cbar span{{display:block;height:9px;border-radius:5px;background:linear-gradient(90deg,#7a72b5,#564f8c);min-width:3px}}
+.adopt .cnum{{text-align:right;font-family:var(--md-code-font,monospace);color:var(--md-default-fg-color--light);width:62px;white-space:nowrap}}
+.adopt .more{{color:var(--md-default-fg-color--light);font-size:12.5px;margin:10px 2px 0}}
 </style>
 <div class="adopt">
   <div class="box"><h3>📈 Downloads over time</h3><div class="sub">Daily PyPI downloads (no mirrors){trendnote}</div>
@@ -91,30 +96,34 @@ _HTML = """
   <div class="box"><h3>🌍 Where it's installed</h3><div class="sub">{mapnote}</div>
     <div class="tabs">{tabs}</div><div id="aMap"></div></div>
 </div>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/jsvectormap@1.5.3/dist/js/jsvectormap.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/jsvectormap@1.5.3/dist/maps/world.js"></script>
 <script>window.ADOPT={data};</script>
 <script>
 (function(){{
-  var D=window.ADOPT; var col={{verel:'#8b7cff',agentvision:'#5ad1e6'}};
-  if(D.trend && window.Chart){{
-    var T=D.trend, ds=Object.keys(T.datasets).map(function(p){{return {{label:T.labelmap[p]||p,data:T.datasets[p],
-      borderColor:col[p]||'#8b7cff',backgroundColor:(col[p]||'#8b7cff')+'22',fill:true,tension:.3,pointRadius:2,borderWidth:2}};}});
-    var c=document.createElement('canvas'); document.getElementById('aTrend').appendChild(c);
-    new Chart(c,{{type:'line',data:{{labels:T.labels,datasets:ds}},options:{{responsive:true,maintainAspectRatio:false,animation:false,
-      interaction:{{mode:'index',intersect:false}},plugins:{{legend:{{labels:{{color:'#cfc8ff',usePointStyle:true}}}}}},
-      scales:{{x:{{ticks:{{color:'#8a8aa6'}},grid:{{color:'#1b1b28'}}}},y:{{beginAtZero:true,ticks:{{color:'#8a8aa6'}},grid:{{color:'#1b1b28'}}}}}}}}}});
+  var D=window.ADOPT; if(!D) return;
+  var rn=null; try{{rn=new Intl.DisplayNames(['en'],{{type:'region'}});}}catch(e){{}}
+  function nm(cc){{try{{return (rn&&rn.of(cc))||cc;}}catch(e){{return cc;}}}}
+  function flag(cc){{return cc.replace(/./g,function(c){{return String.fromCodePoint(127397+c.charCodeAt(0));}});}}
+  if(D.trend){{
+    var T=D.trend, el=document.getElementById('aTrend'), W=680,H=118,P=10;
+    var S=[['verel','#7a72b5'],['agentvision','#3a8a99']], all=[1];
+    S.forEach(function(s){{(T.datasets[s[0]]||[]).forEach(function(v){{all.push(v);}});}});
+    var mx=Math.max.apply(null,all);
+    function pth(a){{var n=a.length; return a.map(function(v,i){{var x=P+i*(W-2*P)/Math.max(1,n-1),y=H-P-(v/mx)*(H-2*P); return (i?'L':'M')+x.toFixed(1)+' '+y.toFixed(1);}}).join(' ');}}
+    var svg='<svg class="spark" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none">';
+    S.forEach(function(s){{var d=T.datasets[s[0]]||[]; if(d.length) svg+='<path d="'+pth(d)+'" fill="none" stroke="'+s[1]+'" stroke-width="2" stroke-linejoin="round"/>';}});
+    svg+='</svg>';
+    var leg=S.map(function(s){{return '<span style="color:'+s[1]+'">\\u25cf</span> '+((T.labelmap||{{}})[s[0]]||s[0]);}}).join(' &nbsp; ');
+    el.innerHTML=svg+'<div class="sub" style="margin:6px 0 0">'+leg+' &nbsp;\\u00b7&nbsp; '+T.labels[0]+' \\u2192 '+T.labels[T.labels.length-1]+'</div>';
   }}
-  if(D.countries && window.jsVectorMap){{
-    var C=D.countries, cur=Object.keys(C.projects)[0], map=null;
-    function vals(p){{return C.projects[p]||{{}};}}
-    function build(p){{cur=p; var h=document.getElementById('aMap'); if(map){{try{{map.destroy();}}catch(e){{}}}} h.innerHTML='';
-      map=new jsVectorMap({{selector:'#aMap',map:'world',zoomButtons:true,backgroundColor:'transparent',
-        regionStyle:{{initial:{{fill:'#1c1c2b',stroke:'#0a0a11',strokeWidth:0.4}},hover:{{fill:'#5ad1e6'}}}},
-        series:{{regions:[{{attribute:'fill',scale:['#241f45','#6a5acd','#8b7cff','#5ad1e6'],normalizeFunction:'polynomial',values:vals(p)}}]}},
-        onRegionTooltipShow:function(e,tt,code){{var v=vals(cur)[code]||vals(cur)[code&&code.toUpperCase()]||0;
-          tt.text('<b>'+tt.text()+'</b><br>'+v.toLocaleString()+' downloads',true);}}}});
+  if(D.countries){{
+    var C=D.countries, cur=Object.keys(C.projects)[0];
+    function rows(p){{var raw=C.projects[p]||{{}},seen={{}},out=[];Object.keys(raw).forEach(function(k){{var u=k.toUpperCase();if(/^[A-Z]{{2}}$/.test(u)&&!seen[u]){{seen[u]=1;out.push([u,raw[k]]);}}}});return out.sort(function(a,b){{return b[1]-a[1];}});}}
+    function build(p){{cur=p;var r=rows(p),mx=r.length?r[0][1]:1,top=r.slice(0,16),rest=r.slice(16),h=document.getElementById('aMap');
+      var html='<table class="ctab"><tbody>';
+      top.forEach(function(x){{var pct=Math.max(2,Math.round(x[1]/mx*100));
+        html+='<tr><td class="cflag">'+flag(x[0])+'</td><td class="cname">'+nm(x[0])+'</td><td class="cbar"><span style="width:'+pct+'%"></span></td><td class="cnum">'+x[1].toLocaleString()+'</td></tr>';}});
+      h.innerHTML=html+'</tbody></table>';
+      if(rest.length){{var s=rest.reduce(function(a,x){{return a+x[1];}},0);h.innerHTML+='<p class="more">+ '+rest.length+' more countries \\u00b7 '+s.toLocaleString()+' downloads</p>';}}
       document.querySelectorAll('.adopt .tab').forEach(function(b){{b.classList.toggle('on',b.dataset.p===cur);}});}}
     document.querySelectorAll('.adopt .tab').forEach(function(b){{b.addEventListener('click',function(){{build(b.dataset.p);}});}});
     build(cur);
@@ -131,8 +140,8 @@ def main() -> None:
     data = {"trend": tr, "countries": (co and {"projects": co["projects"], "labels": co["labels"]})}
     tabs = ("".join(f'<button class="tab{" on" if i == 0 else ""}" data-p="{p}">{LABELS[p]}</button>'
                     for i, p in enumerate(co["projects"])) if co else "")
-    mapnote = (f"Real PyPI downloads by country &mdash; last {co['window']} days via BigQuery "
-               f"(snapshot {co['generated']}). Hover a country for its count.") if co else "no data yet"
+    mapnote = (f"Top countries by PyPI downloads &mdash; last {co['window']} days via BigQuery "
+               f"(snapshot {co['generated']})") if co else "no data yet"
     trendnote = f" &middot; verel ~{(tr['datasets']['verel'] and sum(tr['datasets']['verel'])) or 0:,} in-window" if tr else ""
     body = _HTML.format(data=json.dumps(data), tabs=tabs, mapnote=mapnote, trendnote=trendnote)
     page = ("# Adoption\n\n"
