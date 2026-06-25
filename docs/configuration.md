@@ -168,3 +168,40 @@ checks it (see the [CLI reference](cli.md)).
 | `VEREL_RUNNER_ED25519_SEED` | persisted per-install key | 64-hex ed25519 seed for **publicly-verifiable** receipts (a stranger verifies with only the public key). |
 | `VEREL_TRUSTED_KEYS` | `~/.config/verel/trusted_keys` | directory of trusted `<key_id>.pub` files `verel verify` accepts for ed25519 receipts. |
 | `VEREL_TOOL_SECRET` | persisted per-install key | signs tool-smith skill-registry artifacts. |
+
+## Verified-Review grader knobs
+
+The Verified-Review graders (mutation, spec/intent, invariants, smell, gateway) take their knobs as
+function arguments / MCP tool fields rather than env vars. The defaults below are the code defaults.
+
+| Grader | Knob | Default | Meaning |
+|---|---|---|---|
+| mutation | `cap` / `cap_per_file` | `25` | max mutants generated per target file |
+| mutation | `timeout` | `120` (CLI / `mutation_spec`) | per-suite-run wall-clock seconds |
+| mutation | `total_budget_s` | `240.0` | whole-run budget; stays under the 300s outer grader timeout so files are always restored |
+| spec | `checks_per_criterion` (MCP) / `n` (API) | `2` | independent generated checks majority-voted per criterion |
+| spec / invariants | `timeout` | `30` | per generated-check wall-clock seconds |
+| spec / invariants | `isolation` | `"container"` | `"container"` = bwrap no-net + seccomp + rlimits, **fails closed** if bwrap is absent. `"subprocess"` is a documented opt-out for a **trusted-local** repo only — never for external-contributor PR text. |
+| smell | `complexity_budget` | `12` | cyclomatic-complexity ceiling; a function over it gates |
+| smell | `flag_speculative` | `True` | flag a public def/class referenced nowhere (advisory) |
+| gateway | `Policy.dry_run` | `True` | irreversible actions are planned, never applied without `approve` |
+
+The only related environment variable is **`VEREL_GITHUB_TOKEN`** (above), which the spec grader's
+`grade_pr` path and the REST webhook use to read a PR's diff + linked-issue criteria.
+
+### Declaring invariants — `verel_invariants.{yaml,yml,txt}`
+
+The invariant grader reads human-declared business rules from a `verel_invariants.yaml`,
+`verel_invariants.yml`, or `verel_invariants.txt` at the repo root — **one rule per line**, blank
+lines and `#` comments ignored, an optional leading `id:` prefix:
+
+```text
+# verel_invariants.txt — one business rule per line
+tax: an order total always includes tax
+refund: a refund never exceeds the original charge
+shipping cost is never negative
+```
+
+The parser is plain text (no `yaml.load`, fixed filenames) — there is no new deserialization surface.
+Each rule is compiled by the LLM into independent property checks, run under the same OS-isolation as
+the spec grader, and a falsified rule gates.
