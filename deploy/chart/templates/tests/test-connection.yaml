@@ -23,10 +23,18 @@ spec:
       args:
         - "-c"
         - |
-          import ssl, urllib.request
+          import ssl, time, urllib.request
           ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
           url = "{{ if and .Values.tls.enabled (not .Values.tls.insecure) }}https{{ else }}http{{ end }}://{{ include "verel.fullname" . }}:{{ .Values.service.port }}/health"
-          urllib.request.urlopen(url, context=ctx, timeout=10).read()
+          # retry: a just-installed Service's endpoints/kube-proxy routing can lag the Deployment's
+          # readiness (esp. on k3s) — poll for up to ~60s rather than fail on a one-shot race.
+          deadline = time.time() + 60
+          while True:
+              try:
+                  urllib.request.urlopen(url, context=ctx, timeout=5).read(); print("ok"); break
+              except Exception as e:
+                  if time.time() >= deadline: raise
+                  print("retrying:", e); time.sleep(3)
       resources:
         requests: { cpu: 50m, memory: 64Mi, ephemeral-storage: 32Mi }
         limits: { cpu: 250m, memory: 128Mi, ephemeral-storage: 128Mi }
