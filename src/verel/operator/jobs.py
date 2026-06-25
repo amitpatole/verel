@@ -33,12 +33,10 @@ from verel import __version__
 _IMAGE_REPO = "ghcr.io/amitpatole/verel"
 _DEFAULT_IMAGE = f"{_IMAGE_REPO}:{__version__}"
 # NOTE (availability): the free cgr.dev tier can GC an old digest within weeks of a rebuild → the clone
-# initContainer would ImagePullBackOff and every GateRun stops. For long-lived clusters, mirror this
-# image into a registry you control and set VEREL_GATERUN_GIT_IMAGE to your renovate-bumped pin.
-_DEFAULT_GIT_IMAGE = (
-    "cgr.dev/chainguard/git@sha256:"
-    "647f282aca230959311b2baa2dff0d184a29d4495d605cf00cc1aaf0954bc417"
-)
+# initContainer would ImagePullBackOff and every GateRun stops. Renovate keeps this digest fresh (see
+# renovate.json); for long-lived clusters, mirror the image into a registry you control and set
+# VEREL_GATERUN_GIT_IMAGE to your own pin. Kept on one line so renovate's regex manager can match it.
+_DEFAULT_GIT_IMAGE = "cgr.dev/chainguard/git@sha256:647f282aca230959311b2baa2dff0d184a29d4495d605cf00cc1aaf0954bc417"  # noqa: E501
 _UID = 65532
 
 # repo must be an https:// git URL — NOT ext::/file:///ssh:// (git transports that run commands /
