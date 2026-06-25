@@ -61,6 +61,11 @@ Validated by `.github/workflows/chart.yml`: `helm lint` + `helm template` + kube
 - [x] **Phase 1 — image** — hardened Wolfi Dockerfile (built + smoke-tested), supply-chain CI workflow.
 - [x] **Phase 2 — Helm chart** — GatewayService + probes + HPA + PodSecurity + NetworkPolicy + RBAC;
   secure-by-default, validated on k3d + kind. (OCI push → ghcr + Artifact Hub lands in phase 4.)
-- [ ] **Phase 3 — operator + CRDs** — Kopf operator; GateRun / Brain / GatewayService / VerelFleet (full security cadence — GateRun runs untrusted code in-cluster).
+- [x] **Phase 3 — operator + CRDs** — Kopf operator (`src/verel/operator`, `verel-operator`) + 4 CRDs
+  (GateRun · Brain · GatewayService · VerelFleet, `deploy/crds/`), least-privilege RBAC + operator
+  Deployment (`deploy/operator/`). The security-critical **GateRun Job builder** runs untrusted repo
+  code under defense-in-depth isolation (nonroot · RO-rootfs · drop-ALL caps · seccomp · **no SA
+  token** · resource+deadline caps · `backoffLimit 0` · optional gVisor/Kata RuntimeClass · in-container
+  bwrap+seccomp) — every control unit-pinned (`tests/test_operator_*.py`). Full security red-team run.
 - [ ] **Phase 4 — publish + docs + verify-live** — OIDC publish, Artifact Hub, k3s/k8s install docs, live GateRun demo.
 - [ ] **v1.0.0** — the complete, signed, hosted deployment story.

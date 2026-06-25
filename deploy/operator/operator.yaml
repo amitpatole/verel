@@ -1,0 +1,42 @@
+# The Verel operator Deployment — the hardened image in --operator mode (verel-operator). Nonroot,
+# read-only rootfs, drop-ALL caps, seccomp RuntimeDefault. Unlike the workloads it manages, the
+# operator DOES mount its ServiceAccount token (it needs the API) — but that SA is least-privilege
+# (deploy/operator/rbac.yaml).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: verel-operator
+  namespace: verel-system
+  labels: { app.kubernetes.io/name: verel-operator, app.kubernetes.io/component: operator }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: verel-operator }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: verel-operator }
+    spec:
+      serviceAccountName: verel-operator
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: operator
+          image: ghcr.io/amitpatole/verel:latest
+          command: [verel-operator]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          env:
+            - { name: VEREL_GATERUN_IMAGE, value: ghcr.io/amitpatole/verel:latest }
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 256Mi }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: {}

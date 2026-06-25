@@ -39,6 +39,7 @@ dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.6", "mypy>=1.10", "bandit>=
 verel = "verel.cli:main"
 verel-ci = "verel.ci.__main__:main"
 verel-mcp = "verel.mcp_server:main"
+verel-operator = "verel.operator.__main__:main"
 
 # Memory-backend registry (src/verel/memory/registry.py). Built-ins resolve from a static map
 # first; this group lets a third-party package register its own MemoryView backend by name. Each
