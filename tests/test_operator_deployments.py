@@ -42,6 +42,18 @@ def test_gateway_insecure_path_sets_env_and_http_probe():
     assert "--certfile" not in c["args"] and c["readinessProbe"]["httpGet"]["scheme"] == "HTTP"
 
 
+def test_multi_replica_workloads_have_anti_affinity_and_ephemeral_storage():
+    # kube-linter no-anti-affinity + kube-score ephemeral-storage: best-practice on managed workloads.
+    for dep in (build_gateway_deployment("gw", "verel", {}),
+                build_fleet_deployment("fl", "verel", {"brain": "main"})):
+        pod = _pod(dep)
+        term = pod["affinity"]["podAntiAffinity"]["preferredDuringSchedulingIgnoredDuringExecution"][0]
+        assert term["podAffinityTerm"]["topologyKey"] == "kubernetes.io/hostname"
+        res = pod["containers"][0]["resources"]
+        assert res["requests"]["ephemeral-storage"] and res["limits"]["ephemeral-storage"]
+        assert pod["containers"][0]["livenessProbe"]["httpGet"]["path"] == "/health"
+
+
 def test_fleet_validates_brain_name_and_is_hardened():
     with pytest.raises(ValueError, match="brain"):
         build_fleet_deployment("f", "verel", {})

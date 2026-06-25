@@ -61,8 +61,14 @@ autoscaling:
   targetCPUUtilizationPercentage: 80
 
 resources:
-  requests: { cpu: 100m, memory: 256Mi }
-  limits: { cpu: "1", memory: 512Mi }
+  requests: { cpu: 100m, memory: 256Mi, ephemeral-storage: 128Mi }
+  limits: { cpu: "1", memory: 512Mi, ephemeral-storage: 1Gi }
+
+# PodDisruptionBudget — keep at least this many gateway pods up during voluntary disruptions (node
+# drains). Rendered only when there's more than one replica (replicaCount>1 or autoscaling).
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
 
 # Pod/container hardening — locked down by default (overridable). The image is already nonroot +
 # distroless; these make the Pod spec match.

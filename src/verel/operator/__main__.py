@@ -10,7 +10,8 @@ def main() -> int:
     from . import handlers  # noqa: F401  — registers the @kopf.on.* handlers on the global registry
 
     kopf.configure(verbose=False)
-    kopf.run()  # blocks; watches the namespace(s) the ServiceAccount is scoped to
+    # Serve kopf's liveness probe so the operator Deployment has a real health signal (k8s probes).
+    kopf.run(liveness_endpoint="http://0.0.0.0:8080/healthz")  # nosec B104 — in-pod probe endpoint
     return 0
 
 

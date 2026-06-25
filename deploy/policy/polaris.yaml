@@ -1,0 +1,26 @@
+# Polaris policy for the Verel deploy artifacts (chart + operator manifests). The CI gate
+# (.github/workflows/policy.yml) renders every workload and audits it against this config; the build
+# fails on any Danger. Security checks are Danger; reliability checks are Warning (also gated).
+checks:
+  # --- security (Danger) ---
+  hostIPCSet: danger
+  hostPIDSet: danger
+  hostNetworkSet: danger
+  runAsRootAllowed: danger
+  runAsPrivileged: danger
+  privilegeEscalationAllowed: danger
+  dangerousCapabilities: danger
+  insecureCapabilities: warning
+  notReadOnlyRootFilesystem: warning
+  # --- reliability (Warning) ---
+  cpuRequestsMissing: warning
+  memoryRequestsMissing: warning
+  cpuLimitsMissing: warning
+  memoryLimitsMissing: warning
+  readinessProbeMissing: warning
+  livenessProbeMissing: warning
+  tagNotSpecified: danger          # no :latest — images are version/digest pinned
+  # pullPolicyNotAlways is intentionally ignored: every image is PINNED (version tag / digest), so
+  # imagePullPolicy IfNotPresent is correct — `Always` would add a needless registry round-trip and a
+  # runtime dependency on registry availability. (Mirror of the kube-score ignore in README.md.)
+  pullPolicyNotAlways: ignore
