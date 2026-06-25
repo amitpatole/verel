@@ -31,20 +31,24 @@ spec:
               type: object
               required: [repo]
               properties:
-                repo: { type: string, description: "Git URL of the repo to grade." }
-                ref: { type: string, description: "Git ref/branch to check out (optional)." }
+                repo:
+                  type: string
+                  pattern: '^https://[A-Za-z0-9._~:/?#@!$&()*+,;=%-]{3,512}$'
+                  description: "https:// git URL of the repo to grade (no ext::/file:///ssh://)."
+                ref:
+                  type: string
+                  pattern: '^[^-\s][^\s]{0,255}$'
+                  description: "Git ref/branch to check out (optional; no leading '-', no whitespace)."
                 stage:
                   type: string
                   enum: [inner_loop, pre_commit, pre_merge, post_merge]
                   default: pre_merge
-                image: { type: string, description: "Override the Verel image." }
                 runtimeClassName:
                   type: string
                   description: "Stronger kernel isolation (e.g. gvisor, kata) when the cluster offers it."
                 timeoutSeconds: { type: integer, default: 600, minimum: 30, maximum: 7200 }
-                resources:
-                  type: object
-                  x-kubernetes-preserve-unknown-fields: true
+                # NOTE: the gate image + resources are operator-controlled (the trusted image, fixed
+                # limits) — author overrides are intentionally NOT part of the schema (and are pruned).
             status:
               type: object
               properties:

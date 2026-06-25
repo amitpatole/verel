@@ -24,22 +24,22 @@ def _hardened_pod(containers: list, volumes: list | None = None) -> dict:
     }
 
 
-def build_gateway_deployment(name: str, namespace: str, spec: dict, *, owner: dict | None = None) -> dict:
+def build_gateway_deployment(name: str, namespace: str, spec: dict, *, owner: dict | None = None,
+                             image: str | None = None) -> dict:
     """A `verel serve` Deployment (the GatewayService). Fail-closed like the chart: a routable bind
-    needs auth + TLS (tlsSecret) or the explicit insecure opt-out behind an ingress."""
-    image = spec.get("image") or _DEFAULT_IMAGE
+    needs auth + TLS or the explicit insecure opt-out behind an ingress.
+
+    Confused-deputy defense: the image is the OPERATOR's trusted image (never spec.image), and the
+    Secrets it projects are DERIVED from the CR name (`<name>-auth`, `<name>-tls`) — a CR author can't
+    point the operator's privilege at an arbitrary in-namespace Secret to read into a chosen image."""
+    image = image or _DEFAULT_IMAGE
     replicas = int(spec.get("replicas", 1))
     insecure = bool(spec.get("insecure", False))
-    tls_secret = spec.get("tlsSecret")
-    auth_secret = spec.get("authSecret")
-    if not auth_secret:
-        raise ValueError("GatewayService.spec.authSecret is required (a Secret with key 'token')")
-    if not insecure and not tls_secret:
-        raise ValueError("GatewayService needs spec.tlsSecret (in-pod TLS) or spec.insecure=true "
-                         "(behind a TLS-terminating ingress)")
+    auth_secret = f"{name}-auth"   # operator-derived, NOT author-supplied
+    tls_secret = f"{name}-tls"
     mount = spec.get("repoMountPath", "/workspace")
-    args = ["serve", "--host", "0.0.0.0", "--port", "8443", "--repo", mount, "--no-lint"]
-    vmounts = [{"name": "tmp", "mountPath": "/tmp"}, {"name": "repo", "mountPath": mount}]
+    args = ["serve", "--host", "0.0.0.0", "--port", "8443", "--repo", mount, "--no-lint"]  # nosec B104 — k8s container arg; bind is TLS+auth+NetworkPolicy-gated
+    vmounts = [{"name": "tmp", "mountPath": "/tmp"}, {"name": "repo", "mountPath": mount}]  # nosec B108 — emptyDir mount path, not a temp file
     volumes = [{"name": "tmp", "emptyDir": {}}, {"name": "repo", "emptyDir": {}}]
     env = [{"name": "VEREL_GATE_TOKEN",
             "valueFrom": {"secretKeyRef": {"name": auth_secret, "key": "token"}}},
@@ -74,17 +74,23 @@ def build_service(name: str, namespace: str, *, owner: dict | None = None, port:
                      "ports": [{"name": "https", "port": port, "targetPort": "https"}]}}
 
 
-def build_fleet_deployment(name: str, namespace: str, spec: dict, *, owner: dict | None = None) -> dict:
+_DNS_LABEL = __import__("re").compile(r"\A[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\Z")
+
+
+def build_fleet_deployment(name: str, namespace: str, spec: dict, *, owner: dict | None = None,
+                           image: str | None = None) -> dict:
     """A pool of gate workers sharing one Brain (the Brain CR's connection Secret supplies the backend
-    env). Hardened like the gateway; horizontally scalable."""
-    image = spec.get("image") or _DEFAULT_IMAGE
+    env). Hardened like the gateway; horizontally scalable. Image is the operator's trusted image
+    (never spec.image); `brain` is validated as a DNS label so `<brain>-conn` can't be steered at an
+    arbitrary Secret."""
+    image = image or _DEFAULT_IMAGE
     workers = int(spec.get("workers", 2))
     brain = spec.get("brain")
-    if not brain:
-        raise ValueError("VerelFleet.spec.brain (a Brain CR name) is required")
+    if not brain or not _DNS_LABEL.match(str(brain)):
+        raise ValueError("VerelFleet.spec.brain must be a Brain CR name (a DNS label)")
     container = {
         "name": "worker", "image": image,
-        "args": ["serve", "--host", "0.0.0.0", "--port", "8443", "--repo", "/workspace", "--no-lint"],
+        "args": ["serve", "--host", "0.0.0.0", "--port", "8443", "--repo", "/workspace", "--no-lint"],  # nosec B104 — k8s container arg, gated
         "securityContext": dict(_CONTAINER_SECURITY),
         "env": [{"name": "VEREL_GATE_INSECURE", "value": "1"},   # in-cluster pool behind the fleet svc
                 {"name": "VEREL_GATE_TOKEN",
@@ -95,7 +101,7 @@ def build_fleet_deployment(name: str, namespace: str, spec: dict, *, owner: dict
         "readinessProbe": {"httpGet": {"path": "/ready", "port": "https", "scheme": "HTTP"}},
         "resources": {"requests": {"cpu": "100m", "memory": "256Mi"},
                       "limits": {"cpu": "1", "memory": "512Mi"}},
-        "volumeMounts": [{"name": "tmp", "mountPath": "/tmp"}, {"name": "repo", "mountPath": "/workspace"}],
+        "volumeMounts": [{"name": "tmp", "mountPath": "/tmp"}, {"name": "repo", "mountPath": "/workspace"}],  # nosec B108 — emptyDir mount path
     }
     pod = _hardened_pod([container], [{"name": "tmp", "emptyDir": {}}, {"name": "repo", "emptyDir": {}}])
     return _deployment(name, namespace, "fleet-worker", workers, pod, owner)

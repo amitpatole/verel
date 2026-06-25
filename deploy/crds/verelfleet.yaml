@@ -28,9 +28,12 @@ spec:
               required: [brain]
               properties:
                 workers: { type: integer, default: 2, minimum: 0 }
-                brain: { type: string, description: "Name of the Brain CR the fleet shares." }
-                image: { type: string }
+                brain:
+                  type: string
+                  pattern: '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
+                  description: "Name of the Brain CR the fleet shares (a DNS label)."
                 goal: { type: string, description: "The fleet's standing goal (passed to the workers)." }
+                # The worker image is the operator's trusted image — not author-supplied (pruned).
             status:
               type: object
               properties:

@@ -18,6 +18,6 @@ from __future__ import annotations
 API_GROUP = "verel.dev"
 API_VERSION = "v1alpha1"
 
-from .jobs import build_gaterun_job  # noqa: E402
+from .jobs import build_gaterun_job, build_gaterun_netpol  # noqa: E402
 
-__all__ = ["API_GROUP", "API_VERSION", "build_gaterun_job"]
+__all__ = ["API_GROUP", "API_VERSION", "build_gaterun_job", "build_gaterun_netpol"]
