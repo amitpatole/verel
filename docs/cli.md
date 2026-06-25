@@ -107,6 +107,35 @@ verel-ci install --repo .      # wire a native pre-commit hook
 For drop-in CI/pre-commit usage (GitHub Action, `.pre-commit-config.yaml`) see
 [Get started](getting-started.md).
 
+## Run a Verified-Review grader from the shell
+
+Most Verified-Review graders are exposed as a **Python API** and as **MCP tools** (`verel_spec`,
+`verel_invariants`, `verel_smell` — see the [Developer guide](usage.md)). The **mutation**
+(test-effectiveness) grader additionally ships a standalone module CLI:
+
+```bash
+# Mutate the changed source files and re-run YOUR suite; a surviving mutant prints in the JSON.
+python -m verel.ci.mutation --repo . --targets billing.py,orders.py
+
+# Tune the budget (defaults shown): up to 25 mutants/file, 120s per suite-run.
+python -m verel.ci.mutation --repo . --targets billing.py --cap 25 --timeout 120
+
+# Pass extra args through to pytest (e.g. restrict to the affected tests).
+python -m verel.ci.mutation --repo . --targets billing.py --test-args "tests/test_billing.py"
+```
+
+It prints one JSON line — `{"baseline_pass": true, "total": 3, "survivors": [...]}` — which the
+`mutation_spec` grader parses on the verdict bus. A **surviving mutant** (a fault no test catches) is
+a deterministic FAIL; a non-green baseline reports `baseline_pass: false` and assesses nothing
+(test-effectiveness is meaningless on a red suite).
+
+> There is **no** `verel`/`verel-ci` subcommand and **no** MCP tool for mutation, and `verel_gate`
+> does not run it — wire it into a gate with `premerge_stage(repo, mutation=["billing.py"])` or
+> `mutation_spec(...)` in Python (see the [Developer guide](usage.md#agent-run-cicd-verelci)).
+
+The spec, invariant, and smell graders have **no CLI**; invoke them via the Python API or their MCP
+tools (`verel_spec` / `verel_invariants` / `verel_smell`).
+
 ## MCP tools — what the agent can call
 
 `verel mcp install` wires the `verel-mcp` server into your agent host. Once installed, the agent can
