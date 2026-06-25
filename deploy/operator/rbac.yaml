@@ -22,6 +22,10 @@ rules:
   - apiGroups: ["batch"]
     resources: [jobs]
     verbs: [create, get, list, watch, delete]
+  # GateRun → a deny-egress NetworkPolicy fencing the untrusted pod
+  - apiGroups: ["networking.k8s.io"]
+    resources: [networkpolicies]
+    verbs: [create, get, patch]
   # GatewayService / VerelFleet → Deployments
   - apiGroups: ["apps"]
     resources: [deployments]
@@ -30,10 +34,11 @@ rules:
   - apiGroups: [""]
     resources: [services]
     verbs: [create, get, list, watch, patch]
-  # READ-ONLY: validate a Brain's connection Secret exists (never read its values into the operator)
+  # READ-ONLY, single-object GET only: validate a Brain's connection Secret EXISTS (the operator never
+  # reads its values; list/watch is intentionally NOT granted).
   - apiGroups: [""]
     resources: [secrets]
-    verbs: [get, list, watch]
+    verbs: [get]
   # kopf posts Events
   - apiGroups: [""]
     resources: [events]

@@ -1,24 +1,28 @@
 """Kopf reconcile handlers for the Verel CRDs. Thin glue over the Kubernetes API — the security-
-critical logic (the hardened GateRun Job) lives in `jobs.build_gaterun_job` and is unit-tested there.
-
-These handlers require a cluster; they're exercised by the operator e2e (k3d/kind) in CI, not unit
-tests. Import is lazy/guarded so `verel[operator]` is only needed to actually run the operator."""
+critical logic (the hardened GateRun Job + its NetworkPolicy) lives in `jobs` and is unit-tested
+there. These handlers require a cluster; they're exercised by the operator e2e (k3d/kind) in CI."""
 
 from __future__ import annotations
+
+import os
 
 import kopf
 
 from . import API_GROUP, API_VERSION
-from .jobs import build_gaterun_job
+from .jobs import _DEFAULT_IMAGE, build_gaterun_job, build_gaterun_netpol
 
 _GV = (API_GROUP, API_VERSION)
 
 
+def _trusted_image() -> str:
+    """The image the operator runs for ALL managed workloads — operator-controlled, never from a CR
+    spec (closes the confused-deputy: an author can't make the operator run an attacker image)."""
+    return os.environ.get("VEREL_GATERUN_IMAGE", _DEFAULT_IMAGE)
+
+
 @kopf.on.startup()
 def _configure(settings, **_):
-    # Standalone: no peering CRD / lease needed (single operator replica). Bound watch backoff so a
-    # transient API error doesn't hot-loop.
-    settings.peering.standalone = True
+    settings.peering.standalone = True          # single replica; no peering CRD/lease needed
     settings.watching.server_timeout = 600
 
 
@@ -32,54 +36,70 @@ def _k8s():
 
 
 def _owner(body) -> dict:
+    # controller:true wires garbage collection; we deliberately DON'T set blockOwnerDeletion (that
+    # needs an `update` on the owner's /finalizers, which the least-privilege RBAC omits).
     return {"apiVersion": f"{API_GROUP}/{API_VERSION}", "kind": body["kind"],
-            "name": body["metadata"]["name"], "uid": body["metadata"]["uid"],
-            "controller": True, "blockOwnerDeletion": True}
+            "name": body["metadata"]["name"], "uid": body["metadata"]["uid"], "controller": True}
 
 
-# ---- GateRun: one-shot grade → hardened Job → verdict in .status ----
+def _conflict(exc) -> bool:
+    return getattr(exc, "status", None) == 409 or "already exists" in str(exc)
+
+
+# ---- GateRun: one-shot grade → hardened Job + deny-egress NetworkPolicy → verdict in .status ----
 @kopf.on.create(*_GV, "gateruns")
 def gaterun_create(spec, name, namespace, body, patch, logger, **_):
-    job = build_gaterun_job(name, namespace, dict(spec), owner=_owner(body))
-    batch = _k8s().BatchV1Api()
+    owner = _owner(body)
+    netpol = build_gaterun_netpol(name, namespace, owner=owner)
+    job = build_gaterun_job(name, namespace, dict(spec), owner=owner, image=_trusted_image())
+    net, batch = _k8s().NetworkingV1Api(), _k8s().BatchV1Api()
+    # NetworkPolicy FIRST, so the untrusted pod is fenced before it can run.
+    try:
+        net.create_namespaced_network_policy(namespace, netpol)
+    except Exception as e:
+        if not _conflict(e):
+            raise
     try:
         batch.create_namespaced_job(namespace, job)
-    except Exception as e:  # already exists on a retry → idempotent
-        if "already exists" not in str(e):
+    except Exception as e:
+        if not _conflict(e):
             raise
-    logger.info("GateRun %s: created hardened Job %s", name, name)
+    logger.info("GateRun %s: created deny-egress NetworkPolicy + hardened Job", name)
     patch.status["phase"] = "Running"
     patch.status["jobName"] = name
 
 
-@kopf.on.event("batch", "v1", "jobs",
-               labels={"verel.dev/gaterun": kopf.PRESENT})
+@kopf.on.event("batch", "v1", "jobs", labels={"verel.dev/gaterun": kopf.PRESENT})
 def gaterun_job_event(meta, status, namespace, logger, **_):
-    """Mirror the owning GateRun's status from its Job's completion (exit code → verdict)."""
-    gr = meta["labels"]["verel.dev/gaterun"]
+    """Mirror the owning GateRun's status from ITS Job. Verdict forgery guard: only act on a Job that
+    is actually OWNED by the GateRun (ownerReference uid), never merely carrying the label — else a
+    user could create a labelled Job to forge another GateRun's verdict."""
+    gr = meta.get("labels", {}).get("verel.dev/gaterun")
+    owned = any(o.get("kind") == "GateRun" and o.get("name") == gr and o.get("controller")
+                for o in meta.get("ownerReferences", []))
+    if not gr or not owned:
+        return  # unowned/forged Job carrying the label → ignore
     succeeded = (status or {}).get("succeeded", 0)
     failed = (status or {}).get("failed", 0)
     if not succeeded and not failed:
         return
-    api = _k8s().CustomObjectsApi()
     phase, verdict = ("Passed", "pass") if succeeded else ("Failed", "fail")
     body = {"status": {"phase": phase, "verdict": verdict,
-                       "message": f"job {phase.lower()}"}}
+                       "message": f"job {phase.lower()} (verdict from exit status; warn not distinguished)"}}
     try:
-        api.patch_namespaced_custom_object_status(
+        _k8s().CustomObjectsApi().patch_namespaced_custom_object_status(
             API_GROUP, API_VERSION, namespace, "gateruns", gr, body)
         logger.info("GateRun %s -> %s (%s)", gr, phase, verdict)
     except Exception as e:
         logger.warning("GateRun %s status patch failed: %s", gr, e)
 
 
-# ---- Brain: validate the connection Secret exists; (optional) bootstrap; mark ready ----
+# ---- Brain: validate the connection Secret exists; mark ready ----
 @kopf.on.create(*_GV, "brains")
 def brain_create(spec, name, namespace, patch, logger, **_):
     secret = spec.get("connectionSecret")
-    core = _k8s().CoreV1Api()
     try:
-        core.read_namespaced_secret(secret, namespace)
+        _k8s().CoreV1Api().read_namespaced_secret(secret, namespace)
     except Exception as e:
         patch.status["ready"] = "False"
         patch.status["message"] = f"connectionSecret {secret!r} not found"
@@ -96,7 +116,7 @@ def gatewayservice_apply(spec, name, namespace, body, patch, logger, **_):
     from .deployments import build_gateway_deployment, build_service
     apps, core = _k8s().AppsV1Api(), _k8s().CoreV1Api()
     owner = _owner(body)
-    dep = build_gateway_deployment(name, namespace, dict(spec), owner=owner)
+    dep = build_gateway_deployment(name, namespace, dict(spec), owner=owner, image=_trusted_image())
     svc = build_service(name, namespace, owner=owner)
     _apply(apps.create_namespaced_deployment, apps.patch_namespaced_deployment, namespace, name, dep)
     _apply(core.create_namespaced_service, core.patch_namespaced_service, namespace, name, svc)
@@ -110,7 +130,7 @@ def gatewayservice_apply(spec, name, namespace, body, patch, logger, **_):
 def verelfleet_apply(spec, name, namespace, body, patch, logger, **_):
     from .deployments import build_fleet_deployment
     apps = _k8s().AppsV1Api()
-    dep = build_fleet_deployment(name, namespace, dict(spec), owner=_owner(body))
+    dep = build_fleet_deployment(name, namespace, dict(spec), owner=_owner(body), image=_trusted_image())
     _apply(apps.create_namespaced_deployment, apps.patch_namespaced_deployment, namespace, name, dep)
     patch.status["workers"] = spec.get("workers", 2)
     logger.info("VerelFleet %s applied (workers=%s, brain=%s)", name, spec.get("workers", 2),
@@ -118,11 +138,11 @@ def verelfleet_apply(spec, name, namespace, body, patch, logger, **_):
 
 
 def _apply(create, replace, namespace, name, manifest):
-    """Create the object, or patch it if it already exists (idempotent reconcile)."""
+    """Create the object, or patch it if it already exists (409) — idempotent reconcile."""
     try:
         create(namespace, manifest)
     except Exception as e:
-        if "already exists" in str(e):
+        if _conflict(e):
             replace(name, namespace, manifest)
         else:
             raise

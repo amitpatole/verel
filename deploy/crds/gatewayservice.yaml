@@ -26,14 +26,14 @@ spec:
               type: object
               properties:
                 replicas: { type: integer, default: 1, minimum: 0 }
-                image: { type: string }
-                tlsSecret: { type: string, description: "kubernetes.io/tls Secret for in-pod TLS." }
                 insecure:
                   type: boolean
                   default: false
                   description: "Waive in-pod TLS (behind a TLS-terminating ingress); auth still required."
-                authSecret: { type: string, description: "Secret with keys: token, webhookSecret." }
                 repoMountPath: { type: string, default: /workspace }
+                # The image is the operator's trusted image; the token/TLS Secrets are operator-derived
+                # (`<name>-auth`, `<name>-tls`) — NOT author-supplied (confused-deputy defense). Create
+                # those Secrets out-of-band; the operator only references them by the derived name.
             status:
               type: object
               properties:

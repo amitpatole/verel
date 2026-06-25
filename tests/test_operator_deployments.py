@@ -16,7 +16,7 @@ def _pod(dep):
 
 
 def test_gateway_is_hardened_and_tls_by_default():
-    dep = build_gateway_deployment("gw", "verel", {"tlsSecret": "tls", "authSecret": "auth"})
+    dep = build_gateway_deployment("gw", "verel", {})
     pod = _pod(dep)
     assert pod["automountServiceAccountToken"] is False
     assert pod["securityContext"]["runAsNonRoot"] is True
@@ -24,36 +24,34 @@ def test_gateway_is_hardened_and_tls_by_default():
     assert c["securityContext"]["readOnlyRootFilesystem"] is True
     assert c["securityContext"]["capabilities"]["drop"] == ["ALL"]
     assert "--certfile" in c["args"] and c["readinessProbe"]["httpGet"]["scheme"] == "HTTPS"
-    # the token comes from a Secret, never inline
-    assert any(e.get("valueFrom", {}).get("secretKeyRef", {}).get("name") == "auth" for e in c["env"])
+    # confused-deputy defense: the token/TLS Secrets are operator-DERIVED from the CR name, not
+    # author-supplied, so a CR author can't redirect the operator at an arbitrary in-namespace Secret.
+    assert any(e.get("valueFrom", {}).get("secretKeyRef", {}).get("name") == "gw-auth" for e in c["env"])
+    assert any(v.get("secret", {}).get("secretName") == "gw-tls" for v in pod["volumes"])
 
 
-def test_gateway_fails_closed_without_tls_or_insecure():
-    with pytest.raises(ValueError, match="tlsSecret"):
-        build_gateway_deployment("gw", "verel", {"authSecret": "auth"})
-
-
-def test_gateway_requires_auth_secret():
-    with pytest.raises(ValueError, match="authSecret"):
-        build_gateway_deployment("gw", "verel", {"tlsSecret": "tls"})
+def test_gateway_image_is_operator_controlled_not_from_spec():
+    dep = build_gateway_deployment("gw", "verel", {"image": "attacker/evil:latest"}, image="trusted:1")
+    assert _pod(dep)["containers"][0]["image"] == "trusted:1"
 
 
 def test_gateway_insecure_path_sets_env_and_http_probe():
-    dep = build_gateway_deployment("gw", "verel", {"insecure": True, "authSecret": "auth"})
+    dep = build_gateway_deployment("gw", "verel", {"insecure": True})
     c = _pod(dep)["containers"][0]
     assert {"name": "VEREL_GATE_INSECURE", "value": "1"} in c["env"]
     assert "--certfile" not in c["args"] and c["readinessProbe"]["httpGet"]["scheme"] == "HTTP"
 
 
-def test_fleet_requires_brain_and_is_hardened():
+def test_fleet_validates_brain_name_and_is_hardened():
     with pytest.raises(ValueError, match="brain"):
         build_fleet_deployment("f", "verel", {})
-    dep = build_fleet_deployment("f", "verel", {"workers": 3, "brain": "main"})
-    assert dep["spec"]["replicas"] == 3
+    with pytest.raises(ValueError, match="brain"):           # not a DNS label → can't steer the secretRef
+        build_fleet_deployment("f", "verel", {"brain": "../other-conn"})
+    dep = build_fleet_deployment("f", "verel", {"workers": 3, "brain": "main"}, image="trusted:1")
+    assert dep["spec"]["replicas"] == 3 and _pod(dep)["containers"][0]["image"] == "trusted:1"
     pod = _pod(dep)
     assert pod["automountServiceAccountToken"] is False
-    # shares the Brain's connection Secret
-    assert pod["containers"][0]["envFrom"][0]["secretRef"]["name"] == "main-conn"
+    assert pod["containers"][0]["envFrom"][0]["secretRef"]["name"] == "main-conn"  # derived from the validated name
 
 
 def test_service_selects_owner():
