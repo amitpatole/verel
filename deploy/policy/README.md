@@ -35,12 +35,13 @@ These are policy decisions, documented so the "green" is honest — not blanket 
 - **`pod-probes` (test pod only, via annotation).** The Helm `test-connection` Pod is a one-shot hook
   (`restartPolicy: Never`) that runs once and exits — liveness/readiness probes don't apply. Exempted
   narrowly on that single object (`kube-score/ignore` + `polaris.fairwinds.com/*-exempt` annotations).
-- **`pod-networkpolicy` / `deployment-has-poddisruptionbudget` (operator-managed GatewayService/VerelFleet
-  only).** The **chart** (the primary install path) ships both a NetworkPolicy and a PDB. For the
-  operator-managed long-running services, namespace-scoped NetworkPolicy is a cluster-admin concern, and a
-  PDB over the default single-replica gateway would *deadlock node drains* — so the operator does not emit
-  one by default. The GateRun Job (the security-critical, untrusted-code path) **does** get its
-  default-deny-egress NetworkPolicy unconditionally.
+- **`deployment-has-poddisruptionbudget` (operator-managed GatewayService/VerelFleet only).** A PDB over
+  the default single-replica gateway would *deadlock node drains*, so the operator does not emit one
+  (the **chart** — the primary path — does ship a PDB, rendered only at >1 replica). Every workload
+  **does** get a NetworkPolicy: the chart ships one for the gateway; the operator emits a deny-all-ingress
+  NP for each GatewayService (port-only) and VerelFleet (port + same-namespace, fencing the plaintext
+  in-cluster pool), a deny-egress NP for the untrusted GateRun Job, and a deny-ingress NP for itself — so
+  `pod-networkpolicy` is **enforced, not ignored**.
 
 The exact kube-score ignore-lists are encoded in `.github/workflows/policy.yml` (chart: only the
 pull-policy override; operator-managed: + the two above).

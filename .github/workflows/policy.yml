@@ -21,8 +21,9 @@ jobs:
       POLARIS_VERSION: "9.6.0"
       # chart (primary path): only the pinned-image pull-policy override
       CHART_IGNORE: "container-image-pull-policy"
-      # operator-managed services: + per-workload NetworkPolicy/PDB (see deploy/policy/README.md)
-      OP_IGNORE: "container-image-pull-policy,pod-networkpolicy,deployment-has-poddisruptionbudget"
+      # operator-managed services: + PDB (a PDB over the default single-replica gateway deadlocks
+      # node drains — see deploy/policy/README.md). NetworkPolicy IS emitted now (no ignore).
+      OP_IGNORE: "container-image-pull-policy,deployment-has-poddisruptionbudget"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -49,12 +50,15 @@ jobs:
           python - <<'PY'
           import yaml
           from verel.operator.jobs import build_gaterun_job, build_gaterun_netpol
-          from verel.operator.deployments import build_gateway_deployment, build_service, build_fleet_deployment
+          from verel.operator.deployments import (build_gateway_deployment, build_service,
+                                                  build_fleet_deployment, build_workload_netpol)
           o = {"apiVersion":"verel.dev/v1alpha1","kind":"GateRun","name":"gr1","uid":"u","controller":True}
           docs = [build_gaterun_job("gr1","verel",{"repo":"https://github.com/o/r"},owner=o),
                   build_gaterun_netpol("gr1","verel",owner=o),
                   build_gateway_deployment("gw","verel",{},owner=o), build_service("gw","verel",owner=o),
-                  build_fleet_deployment("fl","verel",{"brain":"main"},owner=o)]
+                  build_workload_netpol("gw","verel",owner=o),
+                  build_fleet_deployment("fl","verel",{"brain":"main"},owner=o),
+                  build_workload_netpol("fl","verel",owner=o,same_namespace_only=True)]
           open("render/operator-workloads.yaml","w").write(yaml.safe_dump_all(docs))
           PY
           { cat deploy/operator/operator.yaml; echo '---'; cat deploy/operator/rbac.yaml; } > render/operator-all.yaml

@@ -8,6 +8,7 @@ from verel.operator.deployments import (
     build_fleet_deployment,
     build_gateway_deployment,
     build_service,
+    build_workload_netpol,
 )
 
 
@@ -64,6 +65,19 @@ def test_fleet_validates_brain_name_and_is_hardened():
     pod = _pod(dep)
     assert pod["automountServiceAccountToken"] is False
     assert pod["containers"][0]["envFrom"][0]["secretRef"]["name"] == "main-conn"  # derived from the validated name
+
+
+def test_workload_netpol_denies_ingress_except_port():
+    # gateway: deny-all-ingress except :8443 from anywhere (fronted by an external ingress)
+    gw = build_workload_netpol("gw", "verel")
+    assert gw["kind"] == "NetworkPolicy" and gw["spec"]["policyTypes"] == ["Ingress"]
+    assert gw["spec"]["podSelector"]["matchLabels"] == {"verel.dev/owner": "gw"}
+    rule = gw["spec"]["ingress"][0]
+    assert rule["ports"] == [{"protocol": "TCP", "port": 8443}]
+    assert "from" not in rule                                   # gateway: any source on the port
+    # fleet: same restriction PLUS same-namespace-only (fences the plaintext in-cluster pool)
+    fl = build_workload_netpol("fl", "verel", same_namespace_only=True)
+    assert fl["spec"]["ingress"][0]["from"] == [{"podSelector": {}}]
 
 
 def test_service_selects_owner():

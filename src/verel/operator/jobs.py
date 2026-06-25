@@ -32,6 +32,9 @@ from verel import __version__
 # (immutable + minimal-CVE; bump via renovate). Both are overridable (operator env / builder arg).
 _IMAGE_REPO = "ghcr.io/amitpatole/verel"
 _DEFAULT_IMAGE = f"{_IMAGE_REPO}:{__version__}"
+# NOTE (availability): the free cgr.dev tier can GC an old digest within weeks of a rebuild → the clone
+# initContainer would ImagePullBackOff and every GateRun stops. For long-lived clusters, mirror this
+# image into a registry you control and set VEREL_GATERUN_GIT_IMAGE to your renovate-bumped pin.
 _DEFAULT_GIT_IMAGE = (
     "cgr.dev/chainguard/git@sha256:"
     "647f282aca230959311b2baa2dff0d184a29d4495d605cf00cc1aaf0954bc417"
