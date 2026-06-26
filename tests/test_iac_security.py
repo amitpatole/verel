@@ -373,6 +373,48 @@ def test_gcp_project_derived_from_appspot_email(tmp_path):
     assert resolve_gcp(config_home=tmp_path).project == "myproj"
 
 
+def test_gcp_firewall_world_ingress_flagged():
+    # Round-9 F1: cross-cloud parity — a GCP firewall open to 0.0.0.0/0 must gate like an AWS SG.
+    after = {"source_ranges": ["0.0.0.0/0"], "direction": "INGRESS",
+             "allow": [{"protocol": "tcp", "ports": ["22"]}]}
+    assert _rules(_rc("google_compute_firewall.x", "google_compute_firewall", after))["OPEN_INGRESS"] \
+        == Severity.ERROR
+
+
+def test_azure_nsg_world_inbound_flagged():
+    # Round-9 F2: an Azure NSG inbound Allow from */Internet/0.0.0.0/0 must gate.
+    for prefix in ("*", "Internet", "0.0.0.0/0"):
+        after = {"access": "Allow", "direction": "Inbound", "source_address_prefix": prefix,
+                 "destination_port_range": "22"}
+        assert "OPEN_INGRESS" in _rules(_rc("azurerm_network_security_rule.x",
+                                            "azurerm_network_security_rule", after)), prefix
+
+
+def test_s3_public_acl_flagged():
+    # Round-9 F3: the non-policy public-bucket path (canned ACL) must gate.
+    assert _rules(_rc("aws_s3_bucket_acl.b", "aws_s3_bucket_acl",
+                      {"acl": "public-read"}))["PUBLIC_ACL"] == Severity.ERROR
+    # a private ACL is clean
+    assert "PUBLIC_ACL" not in _rules(_rc("aws_s3_bucket_acl.b", "aws_s3_bucket_acl", {"acl": "private"}))
+
+
+def test_publicly_accessible_db_flagged():
+    # Round-9 F4: an RDS/Redshift instance with a public endpoint must gate.
+    assert _rules(_rc("aws_db_instance.d", "aws_db_instance",
+                      {"publicly_accessible": True, "engine": "postgres"}))["PUBLIC_DB_ENDPOINT"] \
+        == Severity.ERROR
+    assert "PUBLIC_DB_ENDPOINT" not in _rules(
+        _rc("aws_db_instance.d", "aws_db_instance", {"publicly_accessible": False}))
+
+
+def test_computed_publicly_accessible_fails_closed():
+    # Round-9: a computed publicly_accessible / acl / source_ranges must fail closed.
+    rc = {"address": "aws_db_instance.d", "type": "aws_db_instance",
+          "change": {"actions": ["create"], "after": {"engine": "postgres"},
+                     "after_unknown": {"publicly_accessible": True}}}
+    assert "UNKNOWN_IAM_CONTENT" in _rules(rc)
+
+
 def test_data_external_gated_as_unauditable():
     # Round-7 F5: a data.external source runs an arbitrary program at refresh — gate like a provisioner.
     from verel.ci import parse_terraform_plan
@@ -401,6 +443,39 @@ def test_resource_drift_persistent_admin_gates():
     drift = [i for i in issues if json.loads(i.detail_json).get("drift")]
     assert drift and any(i.severity == Severity.CRITICAL and json.loads(i.detail_json)["persists"]
                          for i in drift)
+
+
+def test_resource_drift_noop_shadow_still_gates():
+    # Round-9 F9-1 (CRITICAL): a no-op resource_changes entry for the drifted address must NOT
+    # downgrade the persistent admin grant — a no-op doesn't overwrite it, and the genuine persistent
+    # case is EXACTLY when terraform emits a no-op. (My round-8 F4 fix was inert/gameable without this.)
+    from verel.ci import parse_terraform_plan
+    d = dict(_DRIFT_ADMIN, change={"actions": ["update"],
+             "after": {"policy": _doc({"Effect": "Allow", "Action": "*", "Resource": "*"})}})
+    shadow = {"address": "aws_iam_role_policy.x", "type": "aws_iam_role_policy",
+              "change": {"actions": ["no-op"], "after": {}}}
+    issues = parse_terraform_plan(_drift_plan([shadow], [d]))
+    drift = [i for i in issues if json.loads(i.detail_json).get("drift")]
+    assert drift and any(i.severity == Severity.CRITICAL and json.loads(i.detail_json)["persists"]
+                         for i in drift)
+
+
+def test_no_iam_rule_emits_low_confidence():
+    # Round-9 (integration guard): grade_iac uses its own inline reducer that does NOT apply gate()'s
+    # LOW-confidence clamp. As long as no IAM/IAC rule emits Confidence.LOW the two agree. Pin it so a
+    # future rule can't silently introduce a grade_iac/gate() divergence.
+    from verel.ci import extract_rbac_risks, parse_terraform_plan
+    from verel.verdict import Confidence
+    plan = {"resource_changes": [
+        _rc("aws_iam_policy.x", "aws_iam_policy",
+            {"policy": _doc({"Effect": "Allow", "Action": "*", "Resource": "*", "Principal": "*"})}),
+        _rc("aws_s3_bucket_public_access_block.b", "aws_s3_bucket_public_access_block", {})],
+        "resource_drift": [dict(_DRIFT_ADMIN, change={"actions": ["update"],
+            "after": {"policy": _doc({"Effect": "Allow", "Action": "*", "Resource": "*"})}})]}
+    cr = {"kind": "ClusterRole", "metadata": {"name": "x"},
+          "rules": [{"resources": ["*"], "verbs": ["*"]}]}
+    issues = parse_terraform_plan(json.dumps(plan)) + extract_rbac_risks([cr])
+    assert issues and all(i.confidence != Confidence.LOW for i in issues)
 
 
 def test_resource_drift_revertable_is_advisory():

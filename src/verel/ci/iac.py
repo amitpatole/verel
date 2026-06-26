@@ -125,6 +125,10 @@ _IAM_TYPE_SUBSTRINGS = (
     "lambda_permission", "_grant", "kms_key", "glacier_vault", "secretsmanager",
     "public_access_block", "ram_resource_share", "ram_principal_association", "organizations_policy",
     "service_account_key",
+    # network-exposure parity (round-9 F1/F2): GCP firewall + Azure NSG rule, like aws_security_group.
+    "firewall", "security_rule", "network_security",
+    # non-policy public exposure (round-9 F3/F4): S3 ACL + publicly-accessible DBs.
+    "bucket_acl", "db_instance", "redshift_cluster", "rds_cluster",
 )
 
 
@@ -185,6 +189,7 @@ _UNKNOWN_IAM_KEYS = {
     "members", "member", "role", "policy_arn", "role_definition_id", "role_definition_name",
     "rule", "role_ref", "subject", "permissions", "ingress", "cidr_blocks", "cidr_ipv4", "cidr_ipv6",
     "block_public_acls", "block_public_policy", "ignore_public_acls", "restrict_public_buckets",
+    "acl", "publicly_accessible", "source_ranges", "source_address_prefix", "source_address_prefixes",
 }
 
 
@@ -469,10 +474,22 @@ def _evaluate(ch: IamChange) -> list[tuple[str, Severity, str]]:
             hits.append(("PUBLIC_ACCESS_BLOCK_DISABLED", Severity.ERROR,
                          f"S3 public-access-block not fully enabled (flag false/absent) at {ch.address}"))
 
-    # --- Network exposure: security-group open ingress ---
+    # --- AWS S3 public ACL (the non-policy public-bucket path — round-9 F3) ---
+    if "bucket_acl" in ch.rtype:
+        acl = str(after.get("acl", "")).lower()
+        if acl in ("public-read", "public-read-write", "authenticated-read"):
+            hits.append(("PUBLIC_ACL", Severity.ERROR,
+                         f"S3 canned ACL {acl!r} grants public/authenticated access at {ch.address}"))
+
+    # --- Publicly-routable DB endpoint (RDS / Redshift — round-9 F4) ---
+    if after.get("publicly_accessible") is True:
+        hits.append(("PUBLIC_DB_ENDPOINT", Severity.ERROR,
+                     f"database has a public endpoint (publicly_accessible=true) at {ch.address}"))
+
+    # --- Network exposure: open ingress (AWS SG / GCP firewall / Azure NSG — round-9 F1/F2 parity) ---
     if _open_ingress(after, ch.rtype):
         hits.append(("OPEN_INGRESS", Severity.ERROR,
-                     f"ingress open to the world (0.0.0.0/0) at {ch.address}"))
+                     f"ingress open to the world at {ch.address}"))
 
     # --- Kubernetes RBAC ---
     if ch.cloud == "k8s":
@@ -497,13 +514,35 @@ def _block_open(d: dict) -> bool:
     return bool(vals & _WORLD_CIDRS)
 
 
+_AZURE_WORLD_PREFIXES = {"*", "internet", "0.0.0.0/0", "::/0"}
+
+
+def _azure_rule_open(d: dict) -> bool:
+    """An Azure NSG rule allowing inbound from the whole internet (*/Internet/0.0.0.0/0)."""
+    if str(d.get("access", "")).lower() != "allow" or str(d.get("direction", "")).lower() != "inbound":
+        return False
+    prefixes = {str(d.get("source_address_prefix", "")).lower()}
+    prefixes |= {str(x).lower() for x in _as_list(d.get("source_address_prefixes"))}
+    return bool(prefixes & _AZURE_WORLD_PREFIXES)
+
+
 def _open_ingress(after: dict, rtype: str = "") -> bool:
     rt = rtype.lower()
     # aws_security_group_rule (type=ingress) OR aws_vpc_security_group_ingress_rule (no `type` field).
     if ("ingress_rule" in rt or str(after.get("type", "")).lower() == "ingress") and _block_open(after):
         return True
     # aws_security_group with inline ingress = [{cidr_blocks: [...]}].
-    return any(isinstance(rule, dict) and _block_open(rule) for rule in _as_list(after.get("ingress")))
+    if any(isinstance(rule, dict) and _block_open(rule) for rule in _as_list(after.get("ingress"))):
+        return True
+    # GCP google_compute_firewall: an INGRESS rule (default direction) with world source_ranges (F1).
+    if "firewall" in rt and str(after.get("direction", "INGRESS")).upper() == "INGRESS" \
+            and ({str(x) for x in _as_list(after.get("source_ranges"))} & _WORLD_CIDRS):
+        return True
+    # Azure NSG: a standalone azurerm_network_security_rule, or inline `security_rule` blocks (F2).
+    return ("security_rule" in rt or "network_security" in rt) and (
+        _azure_rule_open(after)
+        or any(isinstance(r, dict) and _azure_rule_open(r)
+               for r in _as_list(after.get("security_rule"))))
 
 
 _RBAC_PRIVESC_VERBS = {"escalate", "bind", "impersonate"}
@@ -749,10 +788,16 @@ def parse_terraform_plan(out: str, err: str = "") -> list[Issue]:
     # reality, so the apply will NOT revert it — a manual admin grant that persists. Gate that at its
     # real severity (round-7 F2 surfaced it; round-8 F4 makes the persistent case gate).
     rc_list = plan.get("resource_changes", []) if isinstance(plan, dict) else []
-    changed = {rc.get("address", "") for rc in rc_list if isinstance(rc, dict)}
+    # An address is "will be reverted" ONLY if it has a REAL planned change (create/update/delete/
+    # replace). A no-op/read entry does NOT overwrite the drift — and the genuine persistent case
+    # (config already matches the drifted reality) is EXACTLY when terraform emits a no-op for the
+    # address, so counting no-ops as "reverting" made the gate inert against real plans AND trivially
+    # gameable by a shadow no-op (round-9 F9-1). Exclude no-op/read from `changed`.
+    changed = {rc.get("address", "") for rc in rc_list if isinstance(rc, dict)
+               and _change_type((rc.get("change") or {}).get("actions", [])) is not None}
     rd = plan.get("resource_drift", []) if isinstance(plan, dict) else []
     for ch in extract_iam_changes({"resource_changes": rd if isinstance(rd, list) else []}):
-        persists = ch.address not in changed  # apply won't revert it
+        persists = ch.address not in changed  # no real planned change → apply won't revert it
         for rule_id, sev, msg in _evaluate(ch):
             issues.append(Issue(
                 kind=IssueKind.IAM_RISK, severity=(sev if persists else Severity.WARNING),
