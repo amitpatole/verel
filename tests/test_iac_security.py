@@ -397,6 +397,19 @@ def test_parsers_tolerate_noniterable_and_nonstr_leaves():
         {"grade": 1, "check": {"name": "x"}}]}])), list)
 
 
+def test_public_lambda_permission_flagged():
+    # Round-19 parity: aws_lambda_permission principal="*" (anyone may invoke) must gate — it's a flat
+    # field, not a Statement doc, so it needs its own rule.
+    assert _rules(_rc("aws_lambda_permission.p", "aws_lambda_permission",
+                      {"principal": "*", "action": "lambda:InvokeFunction"}))["PUBLIC_PRINCIPAL"] \
+        == Severity.CRITICAL
+    # scoped by source_arn (S3/API-GW callback) → clean; a service principal → clean
+    assert "PUBLIC_PRINCIPAL" not in _rules(_rc("aws_lambda_permission.p", "aws_lambda_permission",
+        {"principal": "*", "source_arn": "arn:aws:s3:::mybucket"}))
+    assert "PUBLIC_PRINCIPAL" not in _rules(_rc("aws_lambda_permission.p", "aws_lambda_permission",
+        {"principal": "s3.amazonaws.com"}))
+
+
 def test_nonstr_type_address_kind_tolerated():
     # Round-18 (fuzz): a non-string/unhashable `type`/`address` (plan) or `kind` (manifest) must not
     # crash — type/cloud do .lower(), address is a set key/locator, kind is a set membership test.

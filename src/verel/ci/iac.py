@@ -465,6 +465,16 @@ def _evaluate(ch: IamChange) -> list[tuple[str, Severity, str]]:
             hits.append(("WILDCARD_RESOURCE", Severity.ERROR,
                          f"wildcard action on a wildcard resource at {ch.address}"))
 
+    # --- AWS Lambda/resource permission with a FLAT public principal (round-19 parity with the
+    # Statement public-principal rule). `aws_lambda_permission` models its grant as flat fields, not a
+    # Statement doc, so a `principal:"*"` (anyone may invoke) is invisible to the _statements engine.
+    # Scoped by source_account / source_arn (e.g. S3/API-GW callback) ⇒ not world-open. ---
+    if ("lambda_permission" in ch.rtype
+            and _is_public_principal(str(after.get("principal", "")))
+            and not (after.get("source_account") or after.get("source_arn"))):
+        hits.append(("PUBLIC_PRINCIPAL", Severity.CRITICAL,
+                     f"resource grants public invoke (principal=*) at {ch.address}"))
+
     # --- AWS managed-policy attachment (admin-tier managed policies) ---
     arn = str(after.get("policy_arn", "")).lower()
     if any(arn.endswith(m) or arn.endswith("/" + m) for m in _ADMIN_MANAGED_POLICIES):
