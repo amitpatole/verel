@@ -228,10 +228,13 @@ def extract_iam_changes(plan: dict) -> list[IamChange]:
         after = (change.get("after") or {}) if isinstance(change.get("after"), dict) else {}
         unknown = (change.get("after_unknown") or {}) if isinstance(change.get("after_unknown"), dict) else {}
         # Extract when the type is a known IAM type OR — generically — when `after` carries any policy
-        # document (a Statement) OR when an IAM-relevant field is computed (known after apply). The
-        # last clause catches a non-IAM-typed resource whose computed inline policy is invisible in
-        # `after` (round-6 finding P2: "the plan is not reality").
-        if not is_iam_resource(rtype) and not _statements(after) and not _unknown_iam_fields(unknown):
+        # document (a Statement) OR an IAM-relevant field is computed (known after apply) OR the
+        # resource flags public exposure (`publicly_accessible`). The computed clause catches a
+        # non-IAM-typed resource whose inline policy is invisible in `after` (round-6 P2); the
+        # public-exposure clause makes the generic PUBLIC_DB_ENDPOINT rule reachable for ANY routable
+        # resource type, not just the curated db/redshift list (round-12 F12-1, e.g. DMS/ElastiCache).
+        if (not is_iam_resource(rtype) and not _statements(after) and not _unknown_iam_fields(unknown)
+                and after.get("publicly_accessible") is not True):
             continue
         ct = _change_type(change.get("actions", []))
         if ct is None:
@@ -409,8 +412,13 @@ def _evaluate(ch: IamChange) -> list[tuple[str, Severity, str]]:
         if any(_is_public_principal(p) for p in s["principals"]):
             hits.append(("PUBLIC_PRINCIPAL", Severity.CRITICAL,
                          f"policy grants access to a public principal at {ch.address}"))
+        # The privilege-escalation-ACTION rule applies to IDENTITY policies only. A statement WITH a
+        # Principal is a trust/resource-based policy where the action says what the named principal may
+        # do TO this resource — `sts:AssumeRole` there is the normal "who may assume me", not a
+        # capability gained. Flagging it would FAIL every ordinary aws_iam_role (round-12 false
+        # positive). The real trust-policy risk is a PUBLIC principal, already caught above.
         priv = [a for a in s["actions"] if _is_privesc(a)]
-        if priv:
+        if priv and not s["principals"]:
             # The DANGER is the action; a named-resource scope reduces but does not remove it.
             scoped = bool(s["resources"]) and "*" not in s["resources"]
             hits.append(("PRIVILEGE_ESCALATION", Severity.ERROR if scoped else Severity.CRITICAL,

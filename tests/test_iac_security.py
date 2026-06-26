@@ -443,6 +443,39 @@ def test_azure_public_blob_access_flagged():
                                                   {"allow_blob_public_access": False}))
 
 
+def test_ordinary_role_trust_policy_is_clean():
+    # Round-12 (HIGH false-positive): a normal service-trust role (assume_role_policy with
+    # sts:AssumeRole + a Service principal, no permissions) must PASS — sts:AssumeRole in a TRUST
+    # policy is "who may assume me", not a privesc the role gains.
+    after = {"assume_role_policy": _doc({"Effect": "Allow", "Action": "sts:AssumeRole",
+                                         "Principal": {"Service": "ec2.amazonaws.com"}})}
+    assert _rules(_rc("aws_iam_role.app", "aws_iam_role", after)) == {}
+
+
+def test_wildcard_principal_trust_policy_still_flagged():
+    # ...but a role ANYONE may assume (wildcard principal) is still CRITICAL via PUBLIC_PRINCIPAL.
+    after = {"assume_role_policy": _doc({"Effect": "Allow", "Action": "sts:AssumeRole",
+                                         "Principal": {"AWS": "*"}})}
+    assert _rules(_rc("aws_iam_role.app", "aws_iam_role", after))["PUBLIC_PRINCIPAL"] == Severity.CRITICAL
+
+
+def test_assumerole_in_identity_policy_still_flagged():
+    # sts:AssumeRole in an IDENTITY policy (no Principal) IS a privesc concern — must still gate.
+    after = {"policy": _doc({"Effect": "Allow", "Action": "sts:AssumeRole",
+                            "Resource": "arn:aws:iam::1:role/admin"})}
+    assert "PRIVILEGE_ESCALATION" in _rules(_rc("aws_iam_role_policy.x", "aws_iam_role_policy", after))
+
+
+def test_publicly_accessible_on_noncurated_type_flagged():
+    # Round-12 F12-1: the generic PUBLIC_DB_ENDPOINT rule must be reachable for ANY routable type, not
+    # only the curated db/redshift list — e.g. a DMS replication instance with a public IP.
+    assert _rules(_rc("aws_dms_replication_instance.x", "aws_dms_replication_instance",
+                      {"publicly_accessible": True}))["PUBLIC_DB_ENDPOINT"] == Severity.ERROR
+    # a non-IAM resource that does NOT flag public exposure is still ignored (no over-extraction)
+    assert _rules(_rc("aws_dms_replication_instance.x", "aws_dms_replication_instance",
+                      {"publicly_accessible": False})) == {}
+
+
 def test_computed_publicly_accessible_fails_closed():
     # Round-9: a computed publicly_accessible / acl / source_ranges must fail closed.
     rc = {"address": "aws_db_instance.d", "type": "aws_db_instance",
