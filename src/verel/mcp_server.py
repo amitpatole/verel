@@ -299,8 +299,8 @@ def _tool_iac_check(args: dict) -> dict:
     from .ci import grade_iac
     try:
         rep = grade_iac(os.path.abspath(repo), plan=plan, manifests=manifests)
-    except (ValueError, FileNotFoundError) as e:
-        return _err(f"could not read IaC artifact: {e}")
+    except (ValueError, FileNotFoundError, RecursionError, MemoryError) as e:
+        return _err(f"could not read IaC artifact: {type(e).__name__}: {e}")
     return {
         "verdict": rep.verdict.value,
         "issues": [{"grader": i.source.value, "severity": i.severity.value, "locator": i.locator,

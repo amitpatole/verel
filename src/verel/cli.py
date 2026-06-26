@@ -60,7 +60,8 @@ def _doctor() -> int:
     from .actuators.cloudcreds import resolve as _resolve_creds
     for _cloud in ("aws", "gcp", "azure"):
         cc = _resolve_creds(_cloud)
-        print(f"  {ok(cc.available)}{_cloud} creds — {cc.source}")
+        warn = f"  ⚠ {cc.warning}" if cc.warning else ""
+        print(f"  {ok(cc.available)}{_cloud} creds — {cc.source}{warn}")
     try:
         import mem0  # noqa: F401
         m = True
@@ -202,19 +203,25 @@ def _verify_access(args) -> int:
     if not creds.available:
         print(f"verify-access: no {args.cloud} credentials ({creds.source}) — fail closed", file=sys.stderr)
         return 2
+    if creds.warning:
+        print(f"verify-access: warning: {creds.warning}", file=sys.stderr)
     v = EffectiveAccessVerifier()
-    if args.cloud == "aws":
-        if not args.policy_file:
-            print("verify-access: --policy-file is required for aws", file=sys.stderr)
-            return 2
-        rep = v.aws_validate_policy(args.policy_file, creds)
-    elif args.cloud == "gcp":
-        if not args.scope:
-            print("verify-access: --scope is required for gcp (e.g. projects/<id>)", file=sys.stderr)
-            return 2
-        rep = v.gcp_analyze_iam(args.scope, creds)
-    else:
-        rep = v.azure_role_assignments(creds)
+    try:
+        if args.cloud == "aws":
+            if not args.policy_file:
+                print("verify-access: --policy-file is required for aws", file=sys.stderr)
+                return 2
+            rep = v.aws_validate_policy(args.policy_file, creds)
+        elif args.cloud == "gcp":
+            if not args.scope:
+                print("verify-access: --scope is required for gcp (e.g. projects/<id>)", file=sys.stderr)
+                return 2
+            rep = v.gcp_analyze_iam(args.scope, creds)
+        else:
+            rep = v.azure_role_assignments(creds)
+    except ValueError as e:  # safe_arg rejected an injected option/metachar in policy_file / scope
+        print(f"verify-access: {e}", file=sys.stderr)
+        return 2
     print(f"[verify-access:{args.cloud}] verdict={rep.verdict.value}  ({creds.source})")
     if rep.errored:
         print(f"  ! {rep.summary}", file=sys.stderr)

@@ -22,7 +22,11 @@ import os
 
 from ..verdict.models import Confidence, GraderKind, Issue, IssueKind, Report, Severity, Verdict
 from .graders import GraderSpec
-from .iac import _as_list, _load_json, parse_terraform_plan
+from .iac import _as_list, _load_json, parse_terraform_plan, safe_arg, safe_args
+
+# Cap on a single IaC artifact we read off disk (plan / manifests) before parsing — a hostile repo
+# can't OOM us with a multi-GB file. 25 MiB is far above any real terraform plan / manifest set.
+_MAX_ARTIFACT_BYTES = 25 * 1024 * 1024
 
 # ---------------------------------------------------------------------------
 # The native-manifest RBAC sensor (Capture B).
@@ -121,14 +125,14 @@ def _load_manifests(out: str) -> list:
     text = out or ""
     try:
         data = json.loads(text)
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, RecursionError, ValueError):
         objs: list = []
         for line in text.splitlines():
             line = line.strip()
             if line.startswith("{"):
                 try:
                     objs.append(json.loads(line))
-                except json.JSONDecodeError:
+                except (json.JSONDecodeError, RecursionError, ValueError):
                     continue
         return objs
     if isinstance(data, dict):
@@ -169,7 +173,7 @@ def parse_kube_score(out: str, err: str = "") -> list[Issue]:
     comments:[{summary}]}]}. grade 1=critical, 5/7=warning, 10=ok. <=1 gates, <10 advises."""
     try:
         data = json.loads(out or "[]")
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, RecursionError, ValueError):
         return []
     issues: list[Issue] = []
     for obj in data if isinstance(data, list) else []:
@@ -210,18 +214,24 @@ def parse_kube_linter(out: str, err: str = "") -> list[Issue]:
 
 
 def _polaris_failed(node: object) -> list[dict]:
-    """Walk a polaris result tree, collecting failed ResultMessage dicts (Success is False)."""
+    """Walk a polaris result tree, collecting failed ResultMessage dicts (Success is False).
+    Iterative (explicit stack) + depth-bounded so a deeply-nested hostile tree can't overflow."""
     found: list[dict] = []
-    if isinstance(node, dict):
-        if "Success" in node and "Severity" in node:
-            if node.get("Success") is False:
-                found.append(node)
-            return found
-        for v in node.values():
-            found.extend(_polaris_failed(v))
-    elif isinstance(node, list):
-        for v in node:
-            found.extend(_polaris_failed(v))
+    stack: list[tuple[object, int]] = [(node, 0)]
+    while stack:
+        cur, depth = stack.pop()
+        if depth > 200:
+            continue
+        if isinstance(cur, dict):
+            if "Success" in cur and "Severity" in cur:
+                if cur.get("Success") is False:
+                    found.append(cur)
+                continue
+            for v in cur.values():
+                stack.append((v, depth + 1))
+        elif isinstance(cur, list):
+            for v in cur:
+                stack.append((v, depth + 1))
     return found
 
 
@@ -249,33 +259,40 @@ def parse_polaris(out: str, err: str = "") -> list[Issue]:
 def kubectl_dryrun_spec(repo: str, path: str = ".", covers: list[str] | None = None):
     """Validate + RBAC-scan manifests via client-side dry-run (no cluster needed)."""
     return GraderSpec(GraderKind.IAC,
-                      ["kubectl", "apply", "-f", path, "--dry-run=client", "-o", "json"],
+                      ["kubectl", "apply", "-f", safe_arg(path, "manifest path"),
+                       "--dry-run=client", "-o", "json"],
                       cwd=repo, covers=covers or [], parser=parse_kube_objects, lang="yaml")
 
 
 def helm_template_spec(repo: str, chart: str, *, values: list[str] | None = None,
                        covers: list[str] | None = None):
-    cmd = ["helm", "template", chart]
-    for v in values or []:
+    # safe_arg on chart + values closes helm option-injection — notably `--post-renderer=<prog>`
+    # (arbitrary code execution) and `--set`/`-f` smuggling — since a leading `-` is rejected.
+    cmd = ["helm", "template", safe_arg(chart, "helm chart")]
+    for v in safe_args(values or [], "helm values"):
         cmd += ["-f", v]
     return GraderSpec(GraderKind.IAC, cmd, cwd=repo, covers=covers or [],
                       parser=parse_helm_template, lang="yaml")
 
 
 def kube_score_spec(repo: str, paths: list[str], covers: list[str] | None = None):
-    return GraderSpec(GraderKind.SECURITY, ["kube-score", "score", "--output-format", "json", *paths],
+    return GraderSpec(GraderKind.SECURITY,
+                      ["kube-score", "score", "--output-format", "json",
+                       *safe_args(paths, "kube-score path")],
                       cwd=repo, covers=covers or [], parser=parse_kube_score, lang="yaml")
 
 
 def kube_linter_spec(repo: str, paths: list[str] | None = None, covers: list[str] | None = None):
-    return GraderSpec(GraderKind.SECURITY, ["kube-linter", "lint", "--format", "json",
-                                            *(paths or ["."])],
+    return GraderSpec(GraderKind.SECURITY,
+                      ["kube-linter", "lint", "--format", "json",
+                       *safe_args(paths or ["."], "kube-linter path")],
                       cwd=repo, covers=covers or [], parser=parse_kube_linter, lang="yaml")
 
 
 def polaris_spec(repo: str, audit_path: str = ".", covers: list[str] | None = None):
-    return GraderSpec(GraderKind.SECURITY, ["polaris", "audit", "--audit-path", audit_path,
-                                            "--format", "json"],
+    return GraderSpec(GraderKind.SECURITY,
+                      ["polaris", "audit", "--audit-path", safe_arg(audit_path, "audit path"),
+                       "--format", "json"],
                       cwd=repo, covers=covers or [], parser=parse_polaris, lang="yaml")
 
 
@@ -290,8 +307,10 @@ def _read_in_repo(repo: str, rel: str) -> str:
         raise ValueError(f"path escapes the repo: {rel!r}")
     if not os.path.isfile(rp):
         raise FileNotFoundError(rel)
+    if os.path.getsize(rp) > _MAX_ARTIFACT_BYTES:
+        raise ValueError(f"artifact too large (> {_MAX_ARTIFACT_BYTES} bytes): {rel!r}")
     with open(rp, encoding="utf-8") as f:
-        return f.read()
+        return f.read(_MAX_ARTIFACT_BYTES + 1)
 
 
 def grade_iac(repo: str, *, plan: str | None = None, manifests: str | None = None) -> Report:

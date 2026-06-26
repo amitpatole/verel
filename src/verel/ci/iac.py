@@ -22,10 +22,26 @@ IAM-affecting change from any provider into one shape and runs deterministic ris
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 
 from ..verdict.models import Confidence, GraderKind, Issue, IssueKind, Severity
 from .graders import GraderSpec
+
+# Argv hardening: every path/value interpolated into a grader's argv is charset-validated so a value
+# like `--post-renderer=x`, `-rf`, `; rm`, or a leading-`-` option can't be smuggled into the tool
+# (argv form already blocks the shell; this blocks option-injection too). Used by every spec below.
+_SAFE_ARG = re.compile(r"^[A-Za-z0-9_./@][A-Za-z0-9_./@=:+,-]*$")
+
+
+def safe_arg(value: str, what: str = "argument") -> str:
+    if not isinstance(value, str) or not _SAFE_ARG.match(value):
+        raise ValueError(f"unsafe {what}: {value!r}")
+    return value
+
+
+def safe_args(values: list[str], what: str = "argument") -> list[str]:
+    return [safe_arg(v, what) for v in (values or [])]
 
 # ---------------------------------------------------------------------------
 # Severity mapping for config scanners (trivy/checkov share this vocabulary).
@@ -48,9 +64,11 @@ def _as_list(x: object) -> list:
 
 
 def _load_json(out: str) -> dict:
+    # RecursionError: a deeply-nested attacker JSON makes json.loads itself recurse past the limit —
+    # not a JSONDecodeError. Catch it (and ValueError/MemoryError) so a hostile plan can't crash us.
     try:
         data = json.loads(out or "{}")
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, RecursionError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}
 
@@ -86,7 +104,7 @@ def parse_terraform_validate(out: str, err: str = "") -> list[Issue]:
 _IAM_TYPE_SUBSTRINGS = (
     "iam", "_iam_", "_policy", "role_assignment", "role_definition", "role_binding", "rolebinding",
     "cluster_role", "clusterrole", "kubernetes_role", "security_group", "access_policy",
-    "lambda_permission", "_grant",
+    "lambda_permission", "_grant", "kms_key", "glacier_vault", "secretsmanager",
 )
 
 
@@ -157,19 +175,36 @@ def extract_iam_changes(plan: dict) -> list[IamChange]:
 
 
 # --- statement extraction (AWS-style policy documents) ---------------------
-def _statements(after: dict) -> list[dict]:
-    """Normalize AWS IAM policy documents found in an `after` state into {effect,actions,resources,
-    principals} dicts. Policy docs live as JSON strings under `policy`/`assume_role_policy`."""
-    docs: list[dict] = []
-    for key in ("policy", "assume_role_policy"):
-        raw = after.get(key)
-        if isinstance(raw, str):
+def _collect_policy_docs(node: object, docs: list[dict], depth: int = 0) -> None:
+    """Recursively find IAM policy documents ANYWHERE in an `after` state — not just under
+    `policy`/`assume_role_policy`, but `inline_policy`, KMS key `policy`, GCP `policy_data`, etc.
+    A doc is a dict (or JSON string) carrying a `Statement` key. Depth-bounded against hostile nesting."""
+    if depth > 8:
+        return
+    if isinstance(node, str):
+        if "Statement" in node:  # cheap prefilter before parsing
             try:
-                docs.append(json.loads(raw))
-            except json.JSONDecodeError:
-                continue
-        elif isinstance(raw, dict):
-            docs.append(raw)
+                d = json.loads(node)
+            except (json.JSONDecodeError, RecursionError, ValueError):
+                return
+            if isinstance(d, dict) and "Statement" in d:
+                docs.append(d)
+    elif isinstance(node, dict):
+        if "Statement" in node:
+            docs.append(node)
+        else:
+            for v in node.values():
+                _collect_policy_docs(v, docs, depth + 1)
+    elif isinstance(node, list):
+        for v in node:
+            _collect_policy_docs(v, docs, depth + 1)
+
+
+def _statements(after: dict) -> list[dict]:
+    """Normalize every AWS-style IAM policy document found anywhere in `after` into
+    {effect,actions,resources,principals,not_action,not_resource} dicts."""
+    docs: list[dict] = []
+    _collect_policy_docs(after, docs)
     stmts: list[dict] = []
     for doc in docs:
         for s in _as_list(doc.get("Statement")):
@@ -180,6 +215,10 @@ def _statements(after: dict) -> list[dict]:
                 "actions": [str(a) for a in _as_list(s.get("Action"))],
                 "resources": [str(r) for r in _as_list(s.get("Resource"))],
                 "principals": _principals(s.get("Principal")),
+                # allow-by-exclusion: NotAction/NotResource grant "everything EXCEPT", the canonical
+                # over-broad admin pattern — captured so _evaluate can flag it.
+                "not_action": [str(a) for a in _as_list(s.get("NotAction"))],
+                "not_resource": [str(r) for r in _as_list(s.get("NotResource"))],
             })
     return stmts
 
@@ -209,8 +248,29 @@ _PUBLIC_PRINCIPALS = {"*", "allusers", "allauthenticatedusers", "system:anonymou
 
 
 def _is_wildcard_action(a: str) -> bool:
+    # Any trailing `*` broadens beyond a single API call: `*`, `iam:*`, AND `s3:Get*` / `iam:Put*`.
     a = a.strip()
-    return a == "*" or a.endswith(":*")
+    return a == "*" or a.endswith("*")
+
+
+def _is_privesc(a: str) -> bool:
+    """An action is a privilege-escalation primitive, OR a wildcard that would cover one
+    (`iam:Put*` covers `iam:PutRolePolicy`; `iam:*` / `*` cover everything)."""
+    a = a.lower()
+    if a in _PRIVESC_ACTIONS:
+        return True
+    if a.endswith("*"):
+        prefix = a[:-1]
+        if prefix in ("", "iam:", "sts:"):
+            return True
+        return any(p.startswith(prefix) for p in _PRIVESC_ACTIONS)
+    return False
+
+
+def _is_public_principal(p: str) -> bool:
+    p = p.lower()
+    # `allUsers` / `*`, AND a wildcard ANYWHERE in a principal ARN (`arn:aws:iam::*:root` = every account).
+    return p in _PUBLIC_PRINCIPALS or "*" in p
 
 
 def _evaluate(ch: IamChange) -> list[tuple[str, Severity, str]]:
@@ -222,16 +282,22 @@ def _evaluate(ch: IamChange) -> list[tuple[str, Severity, str]]:
     for s in _statements(after):
         if str(s["effect"]).lower() != "allow":
             continue
-        acts = [a.lower() for a in s["actions"]]
-        if any(p in _PUBLIC_PRINCIPALS for p in (x.lower() for x in s["principals"])):
+        # Allow-by-exclusion (NotAction/NotResource) grants "everything except" → presumptively admin.
+        if s.get("not_action") or s.get("not_resource"):
+            hits.append(("ALLOW_BY_EXCLUSION", Severity.ERROR,
+                         f"allow-by-exclusion (NotAction/NotResource) is over-broad at {ch.address}"))
+        if any(_is_public_principal(p) for p in s["principals"]):
             hits.append(("PUBLIC_PRINCIPAL", Severity.CRITICAL,
                          f"policy grants access to a public principal at {ch.address}"))
-        if any(a in _PRIVESC_ACTIONS for a in acts) and ("*" in s["resources"] or not s["resources"]):
-            hits.append(("PRIVILEGE_ESCALATION", Severity.CRITICAL,
-                         f"privilege-escalation action on a wildcard resource at {ch.address}"))
+        priv = [a for a in s["actions"] if _is_privesc(a)]
+        if priv:
+            # The DANGER is the action; a named-resource scope reduces but does not remove it.
+            scoped = bool(s["resources"]) and "*" not in s["resources"]
+            hits.append(("PRIVILEGE_ESCALATION", Severity.ERROR if scoped else Severity.CRITICAL,
+                         f"privilege-escalation action ({priv[0]}) granted at {ch.address}"))
         if any(_is_wildcard_action(a) for a in s["actions"]):
             hits.append(("WILDCARD_ACTION", Severity.ERROR,
-                         f"wildcard action (*) granted at {ch.address}"))
+                         f"wildcard action granted at {ch.address}"))
         if "*" in s["resources"] and any(_is_wildcard_action(a) for a in s["actions"]):
             hits.append(("WILDCARD_RESOURCE", Severity.ERROR,
                          f"wildcard action on a wildcard resource at {ch.address}"))
@@ -256,7 +322,7 @@ def _evaluate(ch: IamChange) -> list[tuple[str, Severity, str]]:
         hits.append(("ADMIN_GRANT", Severity.ERROR, f"admin role {az_role} granted at {ch.address}"))
 
     # --- Network exposure: security-group open ingress ---
-    if _open_ingress(after):
+    if _open_ingress(after, ch.rtype):
         hits.append(("OPEN_INGRESS", Severity.ERROR,
                      f"ingress open to the world (0.0.0.0/0) at {ch.address}"))
 
@@ -267,33 +333,63 @@ def _evaluate(ch: IamChange) -> list[tuple[str, Severity, str]]:
     return hits
 
 
-def _open_ingress(after: dict) -> bool:
-    world = {"0.0.0.0/0", "::/0"}
-    # aws_security_group_rule: type=ingress, cidr_blocks=[...]
-    if str(after.get("type", "")).lower() == "ingress" and (set(_as_list(after.get("cidr_blocks"))) & world):
+_WORLD_CIDRS = {"0.0.0.0/0", "::/0"}
+
+
+def _block_open(d: dict) -> bool:
+    """A cidr block open to the world via any shape: cidr_blocks / ipv6_cidr_blocks (lists, on
+    aws_security_group[_rule]) or cidr_ipv4 / cidr_ipv6 (strings, on the newer dedicated rule)."""
+    vals: set[str] = set()
+    for k in ("cidr_blocks", "ipv6_cidr_blocks"):
+        vals |= {str(x) for x in _as_list(d.get(k))}
+    for k in ("cidr_ipv4", "cidr_ipv6"):
+        v = d.get(k)
+        if isinstance(v, str):
+            vals.add(v)
+    return bool(vals & _WORLD_CIDRS)
+
+
+def _open_ingress(after: dict, rtype: str = "") -> bool:
+    rt = rtype.lower()
+    # aws_security_group_rule (type=ingress) OR aws_vpc_security_group_ingress_rule (no `type` field).
+    if ("ingress_rule" in rt or str(after.get("type", "")).lower() == "ingress") and _block_open(after):
         return True
-    # aws_security_group: ingress = [{cidr_blocks: [...]}]
-    for rule in _as_list(after.get("ingress")):
-        if isinstance(rule, dict) and (set(_as_list(rule.get("cidr_blocks"))) & world):
-            return True
-    return False
+    # aws_security_group with inline ingress = [{cidr_blocks: [...]}].
+    return any(isinstance(rule, dict) and _block_open(rule) for rule in _as_list(after.get("ingress")))
+
+
+_RBAC_PRIVESC_VERBS = {"escalate", "bind", "impersonate"}
+_RBAC_SECRET_VERBS = {"get", "list", "watch", "*"}
 
 
 def _k8s_rbac(ch: IamChange) -> list[tuple[str, Severity, str]]:
+    """RBAC rules for the TERRAFORM kubernetes provider (snake_case: rule/role_ref/subject). Kept at
+    parity with the native-manifest sensor (verel.ci.k8s._role_risks): wildcard, escalate/bind/
+    impersonate, cluster-wide secret read, cluster-admin / system:masters, anonymous subjects."""
     hits: list[tuple[str, Severity, str]] = []
     after = ch.after
+    cluster = "cluster" in ch.rtype.lower()
     for rule in _as_list(after.get("rule")):
         if not isinstance(rule, dict):
             continue
-        verbs = [str(v) for v in _as_list(rule.get("verbs"))]
-        res = [str(r) for r in _as_list(rule.get("resources"))]
+        verbs = {str(v).lower() for v in _as_list(rule.get("verbs"))}
+        res = {str(r).lower() for r in _as_list(rule.get("resources"))}
         if "*" in verbs and "*" in res:
             hits.append(("WILDCARD_RBAC", Severity.ERROR, f"RBAC rule grants */* at {ch.address}"))
+        if verbs & _RBAC_PRIVESC_VERBS:
+            hits.append(("PRIVILEGE_ESCALATION", Severity.CRITICAL,
+                         f"RBAC grants {sorted(verbs & _RBAC_PRIVESC_VERBS)} at {ch.address}"))
+        if "secrets" in res and (verbs & _RBAC_SECRET_VERBS):
+            hits.append(("SECRETS_ACCESS", Severity.ERROR if cluster else Severity.WARNING,
+                         f"grants {'cluster-wide ' if cluster else ''}read of secrets at {ch.address}"))
     for ref in _as_list(after.get("role_ref")):
         if isinstance(ref, dict) and str(ref.get("name", "")).lower() == "cluster-admin":
             hits.append(("ADMIN_GRANT", Severity.ERROR, f"cluster-admin bound at {ch.address}"))
     for subj in _as_list(after.get("subject")):
-        if isinstance(subj, dict) and str(subj.get("name", "")).lower() in _PUBLIC_PRINCIPALS:
+        nm = str(subj.get("name", "")).lower() if isinstance(subj, dict) else ""
+        if nm == "system:masters":
+            hits.append(("ADMIN_GRANT", Severity.ERROR, f"system:masters bound at {ch.address}"))
+        elif nm in _PUBLIC_PRINCIPALS:
             hits.append(("PUBLIC_PRINCIPAL", Severity.CRITICAL,
                          f"RBAC bound to an anonymous/unauthenticated subject at {ch.address}"))
     return hits
@@ -403,7 +499,7 @@ def terraform_plan_spec(repo: str, planfile: str = "tfplan.bin", covers: list[st
 
 def trivy_config_spec(repo: str, covers: list[str] | None = None, *, paths: list[str] | None = None):
     return GraderSpec(GraderKind.SECURITY, ["trivy", "config", "--quiet", "--format", "json",
-                                            *(paths or ["."])],
+                                            *safe_args(paths or ["."], "trivy path")],
                       cwd=repo, covers=covers or [], parser=parse_trivy_config, lang="hcl")
 
 
@@ -465,7 +561,7 @@ def parse_checkov(out: str, err: str = "") -> list[Issue]:
     file_line_range:[start,end],severity,resource}]}} (or a list across frameworks). Only failures."""
     try:
         data = json.loads(out or "{}")
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, RecursionError, ValueError):
         return []
     issues: list[Issue] = []
     for results in _checkov_results(data):
@@ -486,7 +582,8 @@ def parse_checkov(out: str, err: str = "") -> list[Issue]:
 
 
 def checkov_spec(repo: str, covers: list[str] | None = None, *, directory: str = "."):
-    return GraderSpec(GraderKind.SECURITY, ["checkov", "-d", directory, "-o", "json", "--compact"],
+    return GraderSpec(GraderKind.SECURITY,
+                      ["checkov", "-d", safe_arg(directory, "checkov dir"), "-o", "json", "--compact"],
                       cwd=repo, covers=covers or [], parser=parse_checkov, lang="hcl")
 
 
@@ -496,7 +593,7 @@ def parse_conftest(out: str, err: str = "") -> list[Issue]:
     failures gate (ERROR); warnings advise (WARNING)."""
     try:
         data = json.loads(out or "[]")
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, RecursionError, ValueError):
         return []
     issues: list[Issue] = []
     for r in data if isinstance(data, list) else []:
@@ -518,8 +615,9 @@ def conftest_spec(repo: str, paths: list[str], *, policy_dir: str = "policy",
     """Policy-as-code gate. Convention (the "policy bundle"): rego policies live in `policy_dir` in the
     repo, versioned alongside the IaC they govern; signing/distribution of shared bundles is a later
     item (IAC-KICKOFF.md §open-risks)."""
-    return GraderSpec(GraderKind.POLICY, ["conftest", "test", "--policy", policy_dir, "-o", "json",
-                                          *paths],
+    return GraderSpec(GraderKind.POLICY,
+                      ["conftest", "test", "--policy", safe_arg(policy_dir, "policy dir"), "-o", "json",
+                       *safe_args(paths, "conftest path")],
                       cwd=repo, covers=covers or [], parser=parse_conftest, lang="rego")
 
 
@@ -550,6 +648,8 @@ def infracost_spec(repo: str, budgets: dict[str, float], command: list[str] | No
     def parse(out: str, err: str = "") -> list[Issue]:
         return parse_infracost(out, err, budgets)
 
+    if command and (not command or command[0] not in ("infracost",)):
+        raise ValueError(f"infracost command must invoke `infracost`, got {command[0]!r}")
     return GraderSpec(GraderKind.COST,
                       command or ["infracost", "breakdown", "--path", ".", "--format", "json"],
                       cwd=repo, covers=covers or [], parser=parse, lang="hcl")
@@ -561,7 +661,7 @@ def parse_parliament(out: str, err: str = "") -> list[Issue]:
     HIGH/CRITICAL gate; MEDIUM/LOW advise (same severity floor as the other security graders)."""
     try:
         data = json.loads(out or "[]")
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, RecursionError, ValueError):
         return []
     issues: list[Issue] = []
     for f in data if isinstance(data, list) else []:
@@ -578,8 +678,9 @@ def parse_parliament(out: str, err: str = "") -> list[Issue]:
 
 
 def parliament_spec(repo: str, policy_file: str, covers: list[str] | None = None):
-    return GraderSpec(GraderKind.IAM, ["parliament", "--json", "--file", policy_file],
-                      cwd=repo, covers=covers or [policy_file], parser=parse_parliament, lang="json")
+    pf = safe_arg(policy_file, "policy file")
+    return GraderSpec(GraderKind.IAM, ["parliament", "--json", "--file", pf],
+                      cwd=repo, covers=covers or [pf], parser=parse_parliament, lang="json")
 
 
 # --- Cloudsplaining (least-privilege risk categories) --------------------
@@ -614,6 +715,7 @@ def parse_cloudsplaining(out: str, err: str = "") -> list[Issue]:
 
 
 def cloudsplaining_spec(repo: str, account_file: str, covers: list[str] | None = None):
-    return GraderSpec(GraderKind.IAM, ["cloudsplaining", "scan", "--input-file", account_file,
-                                       "--output-format", "json"],
+    return GraderSpec(GraderKind.IAM,
+                      ["cloudsplaining", "scan", "--input-file", safe_arg(account_file, "account file"),
+                       "--output-format", "json"],
                       cwd=repo, covers=covers or [], parser=parse_cloudsplaining, lang="json")

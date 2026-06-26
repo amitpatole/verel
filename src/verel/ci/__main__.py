@@ -56,8 +56,8 @@ def main(argv=None) -> int:
             return 2
         try:
             rep = grade_iac(args.repo, plan=args.plan, manifests=args.manifests)
-        except (ValueError, FileNotFoundError) as e:
-            print(f"iac: {e}", file=sys.stderr)
+        except (ValueError, FileNotFoundError, RecursionError, MemoryError) as e:
+            print(f"iac: {type(e).__name__}: {e}", file=sys.stderr)
             return 2
         print(f"[iac] verdict={rep.verdict.value}")
         for i in rep.issues[:50]:

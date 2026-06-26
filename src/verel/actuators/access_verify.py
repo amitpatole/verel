@@ -18,6 +18,7 @@ import os
 import subprocess
 from collections.abc import Callable
 
+from ..ci.iac import safe_arg
 from ..verdict.models import Confidence, GraderKind, Issue, IssueKind, Report, Severity, Verdict
 from .cloudcreds import CloudCreds
 
@@ -73,7 +74,7 @@ def parse_aws_validate_policy(out: str, err: str = "") -> list[Issue]:
     ERROR + SECURITY_WARNING gate; WARNING advises; SUGGESTION informs."""
     try:
         data = json.loads(out or "{}")
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, RecursionError, ValueError):
         return []
     issues = []
     for f in data.get("findings", []) if isinstance(data, dict) else []:
@@ -91,7 +92,7 @@ def parse_aws_simulate(out: str, err: str = "", sensitive: set[str] | None = Non
     sensitive = sensitive or _SENSITIVE_ACTIONS
     try:
         data = json.loads(out or "{}")
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, RecursionError, ValueError):
         return []
     issues = []
     for r in data.get("EvaluationResults", []) if isinstance(data, dict) else []:
@@ -109,7 +110,7 @@ def parse_gcp_analyze_iam(out: str, err: str = "") -> list[Issue]:
     members gate."""
     try:
         data = json.loads(out or "{}")
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, RecursionError, ValueError):
         return []
     main = data.get("mainAnalysis", data) if isinstance(data, dict) else {}
     results = main.get("analysisResults", []) if isinstance(main, dict) else []
@@ -132,7 +133,7 @@ def parse_az_role_assignments(out: str, err: str = "") -> list[Issue]:
     roles at a subscription/management-group scope gate."""
     try:
         data = json.loads(out or "[]")
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, RecursionError, ValueError):
         return []
     issues = []
     for a in data if isinstance(data, list) else []:
@@ -145,36 +146,62 @@ def parse_az_role_assignments(out: str, err: str = "") -> list[Issue]:
     return issues
 
 
-# ---------------------------------------------------------------------------
-# The verifier (runner injected; creds from cloudcreds).
-# ---------------------------------------------------------------------------
+def _unparseable(out: str) -> bool:
+    """rc==0 but non-empty output that isn't valid JSON ⇒ the analyzer didn't return a result we can
+    trust → errored, NOT a silent PASS (a tool that exits 0 with garbage must not read as 'no findings')."""
+    if not out.strip():
+        return False
+    try:
+        json.loads(out)
+    except (json.JSONDecodeError, RecursionError, ValueError):
+        return True
+    return False
+
+
 class EffectiveAccessVerifier:
     def __init__(self, *, runner: EnvRunner = subprocess_env_runner):
         self._run = runner
 
+    def _exec(self, cmd: list[str], env: dict[str, str]) -> tuple[int, str, str]:
+        """Never let a hang/exec-error escape — it becomes a non-zero rc the callers treat as errored."""
+        try:
+            return self._run(cmd, env)
+        except subprocess.TimeoutExpired:
+            return (124, "", "timed out")
+        except OSError as e:
+            return (127, "", f"exec error: {type(e).__name__}: {e}")
+
     def aws_validate_policy(self, policy_file: str, creds: CloudCreds) -> Report:
         if not creds.available:
             return _errored(f"aws: no credentials ({creds.source})")
-        rc, out, err = self._run(
+        safe_arg(policy_file, "policy file")  # no option/metachar injection into the aws CLI
+        rc, out, err = self._exec(
             ["aws", "accessanalyzer", "validate-policy", "--policy-type", "IDENTITY_POLICY",
              "--policy-document", f"file://{policy_file}", "--output", "json"], creds.env)
         if rc != 0:
             return _errored(f"aws validate-policy failed: {err[:200]}")
+        if _unparseable(out):
+            return _errored("aws validate-policy: unparseable output")
         return _report(parse_aws_validate_policy(out), "aws: policy validated")
 
     def gcp_analyze_iam(self, scope: str, creds: CloudCreds) -> Report:
         if not creds.available:
             return _errored(f"gcp: no credentials ({creds.source})")
-        rc, out, err = self._run(
+        safe_arg(scope, "gcp scope")  # e.g. projects/<id> — no flag/metachar injection into gcloud
+        rc, out, err = self._exec(
             ["gcloud", "asset", "analyze-iam-policy", "--scope", scope, "--format", "json"], creds.env)
         if rc != 0:
             return _errored(f"gcloud analyze-iam-policy failed: {err[:200]}")
+        if _unparseable(out):
+            return _errored("gcloud analyze-iam-policy: unparseable output")
         return _report(parse_gcp_analyze_iam(out), "gcp: effective IAM analyzed")
 
     def azure_role_assignments(self, creds: CloudCreds) -> Report:
         if not creds.available:
             return _errored(f"azure: no credentials ({creds.source})")
-        rc, out, err = self._run(["az", "role", "assignment", "list", "--all", "-o", "json"], creds.env)
+        rc, out, err = self._exec(["az", "role", "assignment", "list", "--all", "-o", "json"], creds.env)
         if rc != 0:
             return _errored(f"az role assignment list failed: {err[:200]}")
+        if _unparseable(out):
+            return _errored("az role assignment list: unparseable output")
         return _report(parse_az_role_assignments(out), "azure: role assignments analyzed")
