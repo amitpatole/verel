@@ -39,6 +39,16 @@ def _doctor() -> int:
     print(f"  {ok(sight)}agentvision (eyes) — `pip install verel[sight]`")
     print(f"  {ok(shutil.which('ruff'))}ruff (lint grader)")
     print(f"  {ok(shutil.which('mypy'))}mypy (typecheck grader)")
+    # IaC / DevOps graders + IAM sensor (IAC-KICKOFF.md) — external binaries, install `verel[iac]`.
+    # terraform/tofu is the IAC grader + IAM-change source; the rest broaden coverage by phase.
+    _tf = shutil.which("terraform") or shutil.which("tofu")
+    print(f"  {ok(_tf)}terraform/tofu (IaC + IAM-sensor grader)")
+    for _bin, _label in (("trivy", "trivy (IaC security grader)"),
+                         ("tflint", "tflint (IaC lint grader)"),
+                         ("checkov", "checkov (IaC security grader)"),
+                         ("conftest", "conftest/OPA (policy grader)"),
+                         ("infracost", "infracost (cost grader)")):
+        print(f"  {ok(shutil.which(_bin))}{_label}")
     try:
         import mem0  # noqa: F401
         m = True
