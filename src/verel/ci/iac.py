@@ -183,7 +183,7 @@ class IamChange:
 _UNKNOWN_IAM_KEYS = {
     "policy", "policy_data", "assume_role_policy", "inline_policy", "managed_policy_arns",
     "members", "member", "role", "policy_arn", "role_definition_id", "role_definition_name",
-    "rule", "permissions", "ingress", "cidr_blocks", "cidr_ipv4", "cidr_ipv6",
+    "rule", "role_ref", "subject", "permissions", "ingress", "cidr_blocks", "cidr_ipv4", "cidr_ipv6",
     "block_public_acls", "block_public_policy", "ignore_public_acls", "restrict_public_buckets",
 }
 
@@ -299,6 +299,8 @@ _PRIVESC_ACTIONS = {
     "iam:putrolepolicy", "iam:putuserpolicy", "iam:putgrouppolicy", "iam:createaccesskey",
     "iam:createloginprofile", "iam:updateloginprofile", "iam:updateassumerolepolicy",
     "iam:createuser", "sts:assumerole",
+    # round-7 R7-3: federated assume-role and cross-account lambda invoke-grant are privesc too.
+    "sts:assumerolewithwebidentity", "sts:assumerolewithsaml", "lambda:addpermission",
 }
 _ADMIN_GCP_ROLES = {"roles/owner", "roles/editor", "roles/iam.securityadmin",
                     "roles/resourcemanager.organizationadmin"}
@@ -320,6 +322,9 @@ _PUBLIC_PRINCIPALS = {"*", "allusers", "allauthenticatedusers", "system:anonymou
 # Binding a role to either of these Groups grants it to EVERY (un)authenticated principal = public.
 # `system:authenticated` is the dangerous one a name-only check misses (it's not "anonymous").
 _K8S_PUBLIC_GROUPS = {"system:unauthenticated", "system:authenticated"}
+# Namespaces whose secrets are cluster-admin-equivalent (bootstrap / controller-manager tokens) — a
+# Role reading them is as dangerous as a cluster-wide read, so it gates rather than merely advising.
+_PRIVILEGED_NAMESPACES = {"kube-system", "kube-public"}
 _ADMIN_MANAGED_POLICIES = ("administratoraccess", "poweruseraccess", "iamfullaccess")
 
 
@@ -446,12 +451,18 @@ def _evaluate(ch: IamChange) -> list[tuple[str, Severity, str]]:
         hits.append(("CREDENTIAL_EXPOSURE", Severity.ERROR,
                      f"long-lived service-account key created at {ch.address}"))
 
-    # --- AWS S3 public-access-block being DISABLED (re-enables public exposure account/bucket-wide) ---
+    # --- AWS S3 public-access-block being DISABLED or DELETED (re-exposes account/bucket-wide) ---
     if "public_access_block" in ch.rtype:
         flags = ("block_public_acls", "block_public_policy", "ignore_public_acls",
                  "restrict_public_buckets")
         present = [f for f in flags if f in after]
-        if present and any(after.get(f) is False for f in present):
+        # A pure DELETE (revoke) leaves `after` empty — REMOVING the PAB re-exposes the bucket exactly
+        # like flipping a flag to false, so it must gate too (round-7 F1, the guardrail-removal blind
+        # spot). A replace grades its new `after` via the flag check below.
+        if ch.change_type == "revoke":
+            hits.append(("PUBLIC_ACCESS_BLOCK_DISABLED", Severity.ERROR,
+                         f"S3 public-access-block deleted — protection removed at {ch.address}"))
+        elif present and any(after.get(f) is False for f in present):
             hits.append(("PUBLIC_ACCESS_BLOCK_DISABLED", Severity.ERROR,
                          f"S3 public-access-block disabled at {ch.address}"))
 
@@ -511,7 +522,14 @@ _RBAC_RESOURCE_PRIVESC = {
     "certificatesigningrequests/approval": {"update", "approve", "*"},
     "signers": {"approve", "sign", "*"},
     "nodes": {"update", "patch", "*"},
+    # proxy subresources reach the kubelet/component API directly (exec into any pod, read any
+    # node) — a DISTINCT resource string from `nodes`/`pods`, so it needs its own entry (round-7 F3).
+    "nodes/proxy": {"get", "create", "update", "*"},
+    "pods/proxy": {"get", "create", "*"},
+    "services/proxy": {"get", "create", "*"},
 }
+# Write verbs over the `*` resource = create/modify ANYTHING (incl. rolebindings & webhooks) → takeover.
+_RBAC_WRITE_VERBS = {"create", "update", "patch", "delete", "deletecollection"}
 
 
 def _rbac_resource_privesc(verbs: set[str], res: set[str]) -> list[str]:
@@ -527,6 +545,11 @@ def _k8s_rbac(ch: IamChange) -> list[tuple[str, Severity, str]]:
     hits: list[tuple[str, Severity, str]] = []
     after = ch.after
     cluster = "cluster" in ch.rtype.lower()
+    # A Role in kube-system/kube-public is cluster-admin-EQUIVALENT (its secrets hold the bootstrap /
+    # controller-manager tokens), so treat its secret/read-all reach at the elevated (gating) severity.
+    meta = _as_list(after.get("metadata"))
+    ns = str(meta[0].get("namespace", "")) if meta and isinstance(meta[0], dict) else ""
+    elevated = cluster or ns in _PRIVILEGED_NAMESPACES
     # A ClusterRole that AGGREGATES other roles (aggregation_rule) grows silently to whatever the
     # label-selected roles grant — surface an advisory rather than green-lighting an empty `rule`.
     if after.get("aggregation_rule"):
@@ -550,20 +573,28 @@ def _k8s_rbac(ch: IamChange) -> list[tuple[str, Severity, str]]:
         if escres:
             hits.append(("PRIVILEGE_ESCALATION", Severity.CRITICAL,
                          f"RBAC grants an escalation primitive on {escres} at {ch.address}"))
+        # Write to ALL resources (`*`) = create rolebindings/webhooks → takeover (round-7 F1).
+        if "*" in res and (verbs & _RBAC_WRITE_VERBS):
+            hits.append(("PRIVILEGE_ESCALATION", Severity.CRITICAL if elevated else Severity.ERROR,
+                         f"grants {'cluster-wide ' if cluster else ''}write to all resources "
+                         f"(incl. rolebindings/webhooks) at {ch.address}"))
         reads = verbs & _RBAC_SECRET_VERBS
         if "secrets" in res and reads:
-            hits.append(("SECRETS_ACCESS", Severity.ERROR if cluster else Severity.WARNING,
+            hits.append(("SECRETS_ACCESS", Severity.ERROR if elevated else Severity.WARNING,
                          f"grants {'cluster-wide ' if cluster else ''}read of secrets at {ch.address}"))
         elif "*" in res and (verbs & {"get", "list", "watch"}):
-            # read-all over `*` resources includes secrets — cluster-wide on a ClusterRole (ERROR),
-            # or all secrets in one namespace on a Role (WARNING). The `*` verb is already WILDCARD_RBAC.
-            hits.append(("SECRETS_ACCESS", Severity.ERROR if cluster else Severity.WARNING,
+            # read-all over `*` resources includes secrets — cluster-wide / privileged-namespace gates
+            # (ERROR); an ordinary namespace advises (WARNING). The `*` verb is already WILDCARD_RBAC.
+            hits.append(("SECRETS_ACCESS", Severity.ERROR if elevated else Severity.WARNING,
                          f"grants {'cluster-wide ' if cluster else 'namespace-wide '}"
                          f"read of all resources (incl. secrets) at {ch.address}"))
     for ref in _as_list(after.get("role_ref")):
-        if isinstance(ref, dict) and str(ref.get("name", "")).lower() in _RBAC_BUILTIN_ADMIN_ROLES:
+        # Only a CLUSTERROLE reference to the built-in name is the dangerous aggregated role; a user's
+        # own namespaced Role happening to be named `edit`/`admin` is harmless (round-7 F6).
+        if isinstance(ref, dict) and str(ref.get("name", "")).lower() in _RBAC_BUILTIN_ADMIN_ROLES \
+                and str(ref.get("kind", "")) == "ClusterRole":
             hits.append(("ADMIN_GRANT", Severity.ERROR,
-                         f"built-in admin role {ref.get('name')!r} bound at {ch.address}"))
+                         f"built-in admin ClusterRole {ref.get('name')!r} bound at {ch.address}"))
     for subj in _as_list(after.get("subject")):
         if not isinstance(subj, dict):
             continue
@@ -598,7 +629,7 @@ def iam_risk_issues(changes: list[IamChange]) -> list[Issue]:
 # ===========================================================================
 def plan_summary(plan: dict) -> dict[str, int]:
     """Count planned actions by kind — feeds the gateway escalation and the report summary."""
-    counts = {"create": 0, "update": 0, "delete": 0, "replace": 0, "no-op": 0}
+    counts = {"create": 0, "update": 0, "delete": 0, "replace": 0, "forget": 0, "no-op": 0}
     for rc in (plan.get("resource_changes", []) if isinstance(plan, dict) else []):
         a = set((rc.get("change") or {}).get("actions", []))
         if {"create", "delete"} <= a:
@@ -609,6 +640,8 @@ def plan_summary(plan: dict) -> dict[str, int]:
             counts["create"] += 1
         elif "update" in a:
             counts["update"] += 1
+        elif "forget" in a:  # terraform 1.7+ `removed` block — drop from state, don't destroy
+            counts["forget"] += 1
         else:
             counts["no-op"] += 1
     return counts
@@ -628,11 +661,12 @@ _EXEC_PROVISIONERS = {"local-exec", "remote-exec"}
 
 
 def provisioner_resources(plan: dict) -> list[str]:
-    """Addresses of resources carrying a local-exec/remote-exec provisioner. These run ARBITRARY
-    commands at apply time (e.g. `aws iam attach-role-policy …AdministratorAccess`) whose side effects
-    are INVISIBLE to `resource_changes`/`after` — the canonical "clean plan, dirty apply". Lives in the
-    plan's `configuration` block (not `resource_changes`), so it needs a separate walk; recurses module
-    calls. Round-6 finding P1."""
+    """Addresses of resources that run an ARBITRARY program at apply/refresh whose side effects are
+    INVISIBLE to `resource_changes`/`after` — the canonical "clean plan, dirty apply". Covers a
+    local-exec/remote-exec PROVISIONER (round-6 P1) AND an `external` DATA SOURCE
+    (`data "external" { program = [...] }`, which runs every refresh — round-7 F5). Lives in the
+    plan's `configuration` block (not `resource_changes`), so it needs a separate walk; recurses
+    module calls."""
     out: list[str] = []
 
     def _walk(mod: object, prefix: str, depth: int) -> None:
@@ -642,8 +676,10 @@ def provisioner_resources(plan: dict) -> list[str]:
             if not isinstance(r, dict):
                 continue
             provs = r.get("provisioners") or []
-            if any(isinstance(p, dict) and str(p.get("type", "")).lower() in _EXEC_PROVISIONERS
-                   for p in provs):
+            has_exec = any(isinstance(p, dict) and str(p.get("type", "")).lower() in _EXEC_PROVISIONERS
+                           for p in provs)
+            is_external = r.get("mode") == "data" and str(r.get("type", "")).lower() == "external"
+            if has_exec or is_external:
                 out.append(f"{prefix}{r.get('address', '')}")
         calls = mod.get("module_calls")
         if isinstance(calls, dict):
@@ -669,17 +705,30 @@ def parse_terraform_plan(out: str, err: str = "") -> list[Issue]:
             message=f"planned destroy/replace of {addr}", locator=addr, locator_precise=True,
             detail_json=json.dumps({"rule_id": "DESTROY_OR_REPLACE", "address": addr}),
         ))
-    # A local-exec/remote-exec provisioner runs unauditable commands at apply — GATE it (ERROR): the
-    # plan's clean diff says nothing about what the command does to IAM/the cloud (round-6 P1).
+    # A provisioner / external data source runs unauditable commands at apply/refresh — GATE it
+    # (ERROR): the plan's clean diff says nothing about what the program does (round-6 P1, round-7 F5).
     for addr in provisioner_resources(plan):
         issues.append(Issue(
             kind=IssueKind.MISCONFIG, severity=Severity.ERROR, source=GraderKind.IAC,
-            message=f"{addr} runs a local-exec/remote-exec provisioner — its side effects are not "
-                    f"auditable from the plan (apply may grant/destroy beyond the shown diff)",
+            message=f"{addr} runs an unauditable program at apply/refresh (local-exec/remote-exec "
+                    f"provisioner or external data source) — side effects are invisible in the plan",
             locator=addr, locator_precise=True,
             detail_json=json.dumps({"rule_id": "UNAUDITABLE_PROVISIONER", "address": addr}),
         ))
     issues.extend(iam_risk_issues(extract_iam_changes(plan)))
+    # Out-of-band live divergence terraform reports separately in `resource_drift` (state changed
+    # outside terraform). A manual admin grant matched by config shows NO resource_change — surface its
+    # IAM risk as ADVISORY (WARNING, non-gating) so it isn't silently clean (round-7 F2).
+    drift_plan = {"resource_changes": plan.get("resource_drift", [])} if isinstance(plan, dict) else {}
+    for ch in extract_iam_changes(drift_plan):
+        for rule_id, _sev, msg in _evaluate(ch):
+            issues.append(Issue(
+                kind=IssueKind.IAM_RISK, severity=Severity.WARNING, source=GraderKind.IAM,
+                message=f"[drift] {msg}", locator=ch.source_locus, locator_precise=True,
+                confidence=Confidence.MEDIUM,
+                detail_json=json.dumps({"rule_id": rule_id, "address": ch.address, "drift": True,
+                                        "cloud": ch.cloud, "resource_type": ch.rtype}),
+            ))
     return issues
 
 

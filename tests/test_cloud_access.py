@@ -104,7 +104,12 @@ def test_resolve_azure_requires_token_material(tmp_path):
     (home / ".azure").mkdir(parents=True)
     # Empty ~/.azure (persists after `az logout`) must NOT report creds (red-team S3-F4).
     assert resolve_azure(config_home=tmp_path, home=home).available is False
+    # azureProfile.json is a subscription list that ALSO persists after `az logout` — it is NOT token
+    # material and must not report creds-present (round-7 R7-5).
     (home / ".azure" / "azureProfile.json").write_text("{}")
+    assert resolve_azure(config_home=tmp_path, home=home).available is False
+    # An actual token cache → creds present.
+    (home / ".azure" / "msal_token_cache.json").write_text("{}")
     cc = resolve_azure(config_home=tmp_path, home=home)
     assert cc.available and cc.env["AZURE_CONFIG_DIR"].endswith(".azure")
 

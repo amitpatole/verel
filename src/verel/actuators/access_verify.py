@@ -26,6 +26,7 @@ from ..ci.iac import (
     _PRIVESC_AZURE_GUIDS,
     _PRIVESC_GCP_ROLES,
     safe_arg,
+    safe_args,
 )
 from ..verdict.models import Confidence, GraderKind, Issue, IssueKind, Report, Severity, Verdict
 from .cloudcreds import CloudCreds
@@ -205,6 +206,28 @@ class EffectiveAccessVerifier:
         if _bad_output(out):
             return _errored("aws validate-policy: empty/unparseable output")
         return _report(parse_aws_validate_policy(out), "aws: policy validated")
+
+    def aws_simulate_principal(self, principal_arn: str, actions: list[str], creds: CloudCreds) -> Report:
+        """The TRUE effective-access check for AWS — `aws iam simulate-principal-policy` asks the
+        account what `principal_arn` is ACTUALLY allowed to do (across all attached/inline/boundary/SCP
+        policies), not what one document says. This is the "verify against reality" path; `validate-
+        policy` (above) is only a static lint of a local document (round-7 R7-1). Fail closed on no
+        creds / CLI error / empty output."""
+        if not creds.available:
+            return _errored(f"aws: no credentials ({creds.source})")
+        safe_arg(principal_arn, "principal arn")
+        acts = safe_args(actions, "action name")  # no option/metachar injection into the aws CLI
+        if not acts:
+            return _errored("aws simulate: no action names supplied")
+        rc, out, err = self._exec(
+            ["aws", "iam", "simulate-principal-policy", "--policy-source-arn", principal_arn,
+             "--action-names", *acts, "--output", "json"], creds.env)
+        if rc != 0:
+            return _errored(f"aws simulate-principal-policy failed: {err[:200]}")
+        if _bad_output(out):
+            return _errored("aws simulate-principal-policy: empty/unparseable output")
+        return _report(parse_aws_simulate(out),
+                       f"aws: simulated {len(acts)} action(s) for {principal_arn}")
 
     def gcp_analyze_iam(self, scope: str, creds: CloudCreds) -> Report:
         if not creds.available:

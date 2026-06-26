@@ -247,19 +247,115 @@ def test_cluster_wide_read_all_flagged():
 
 
 def test_namespaced_read_all_warns_not_gates():
-    # Round-6 R4: a namespaced Role reading ALL resources in its namespace still reads every secret in
-    # that namespace (e.g. kube-system SA tokens). It must WARN (advisory) — not pass clean, but not
-    # gate like the cluster-wide case either.
+    # Round-6 R4: a namespaced Role reading ALL resources in an ORDINARY namespace reads every secret
+    # there → WARN (advisory), not clean, not gating.
     from verel.ci import extract_rbac_risks
-    role = {"kind": "Role", "metadata": {"name": "r", "namespace": "kube-system"},
+    role = {"kind": "Role", "metadata": {"name": "r", "namespace": "team"},
             "rules": [{"verbs": ["get", "list", "watch"], "resources": ["*"]}]}
     issues = extract_rbac_risks([role])
     secrets = [i for i in issues if json.loads(i.detail_json)["rule_id"] == "SECRETS_ACCESS"]
     assert len(secrets) == 1 and secrets[0].severity == Severity.WARNING
-    # parity: terraform-provider namespaced Role
-    after = {"rule": [{"verbs": ["get"], "resources": ["*"]}]}
+    # parity: terraform-provider namespaced Role (metadata block carries the namespace)
+    after = {"metadata": [{"namespace": "team"}], "rule": [{"verbs": ["get"], "resources": ["*"]}]}
     tf = _rules(_rc("kubernetes_role.r", "kubernetes_role", after))
     assert tf.get("SECRETS_ACCESS") == Severity.WARNING
+
+
+def test_privileged_namespace_role_gates_not_warns():
+    # Round-7 F4: a Role in kube-system/kube-public reads bootstrap/controller tokens = cluster-admin
+    # equivalent → must GATE (ERROR), not merely warn.
+    from verel.ci import extract_rbac_risks
+    role = {"kind": "Role", "metadata": {"name": "r", "namespace": "kube-system"},
+            "rules": [{"verbs": ["get", "list"], "resources": ["secrets"]}]}
+    secrets = [i for i in extract_rbac_risks([role])
+               if json.loads(i.detail_json)["rule_id"] == "SECRETS_ACCESS"]
+    assert len(secrets) == 1 and secrets[0].severity == Severity.ERROR
+
+
+def test_write_all_resources_flagged_both_paths():
+    # Round-7 F1 (HIGH): create/write over resources:["*"] = create rolebindings/webhooks → takeover.
+    from verel.ci import extract_rbac_risks
+    cr = {"kind": "ClusterRole", "metadata": {"name": "pwn"},
+          "rules": [{"apiGroups": ["*"], "resources": ["*"], "verbs": ["create"]}]}
+    assert "PRIVILEGE_ESCALATION" in {json.loads(i.detail_json)["rule_id"]
+                                      for i in extract_rbac_risks([cr])}
+    after = {"rule": [{"resources": ["*"], "verbs": ["create"]}]}
+    assert "PRIVILEGE_ESCALATION" in _rules(_rc("kubernetes_cluster_role.x", "kubernetes_cluster_role", after))
+
+
+def test_proxy_subresource_privesc_flagged():
+    # Round-7 F3: nodes/proxy reaches the kubelet API (exec into any pod) — a distinct string from nodes.
+    from verel.ci import extract_rbac_risks
+    cr = {"kind": "ClusterRole", "metadata": {"name": "x"},
+          "rules": [{"resources": ["nodes/proxy"], "verbs": ["get", "create"]}]}
+    assert "PRIVILEGE_ESCALATION" in {json.loads(i.detail_json)["rule_id"]
+                                      for i in extract_rbac_risks([cr])}
+
+
+def test_user_owned_namespaced_role_named_edit_not_flagged():
+    # Round-7 F6 (false-positive regression): a user's OWN namespaced Role named `edit` (roleRef.kind
+    # == Role) is harmless and must NOT be flagged as the built-in admin ClusterRole.
+    from verel.ci import extract_rbac_risks
+    rb = {"kind": "RoleBinding", "metadata": {"name": "x", "namespace": "team"},
+          "roleRef": {"kind": "Role", "name": "edit"}, "subjects": [{"kind": "User", "name": "dev"}]}
+    assert extract_rbac_risks([rb]) == []
+    # but a ClusterRole ref to built-in `edit` IS flagged
+    rb2 = {"kind": "RoleBinding", "metadata": {"name": "y", "namespace": "team"},
+           "roleRef": {"kind": "ClusterRole", "name": "edit"}, "subjects": [{"kind": "User", "name": "dev"}]}
+    assert "ADMIN_GRANT" in {json.loads(i.detail_json)["rule_id"] for i in extract_rbac_risks([rb2])}
+
+
+def test_unknown_computed_rolebinding_ref_fails_closed():
+    # Round-7 F2: a computed role_ref (resolves to cluster-admin at apply) must fail closed.
+    rc = {"address": "b", "type": "kubernetes_cluster_role_binding",
+          "change": {"actions": ["create"], "after": {"role_ref": [{"name": None}]},
+                     "after_unknown": {"role_ref": [{"name": True}]}}}
+    assert "UNKNOWN_IAM_CONTENT" in _rules(rc)
+
+
+def test_s3_public_access_block_delete_gates():
+    # Round-7 L2-F1: DELETING a PAB re-exposes the bucket exactly like flipping a flag false — gate it.
+    rc = {"address": "aws_s3_bucket_public_access_block.b", "type": "aws_s3_bucket_public_access_block",
+          "change": {"actions": ["delete"], "after": None,
+                     "before": {"block_public_acls": True}}}
+    assert _rules(rc)["PUBLIC_ACCESS_BLOCK_DISABLED"] == Severity.ERROR
+
+
+def test_data_external_gated_as_unauditable():
+    # Round-7 F5: a data.external source runs an arbitrary program at refresh — gate like a provisioner.
+    from verel.ci import parse_terraform_plan
+    plan = {"configuration": {"root_module": {"resources": [
+        {"address": "data.external.x", "mode": "data", "type": "external",
+         "expressions": {"program": {"constant_value": ["bash", "-c", "aws iam attach-role-policy"]}}}]}}}
+    rules = {json.loads(i.detail_json)["rule_id"] for i in parse_terraform_plan(json.dumps(plan))}
+    assert "UNAUDITABLE_PROVISIONER" in rules
+
+
+def test_resource_drift_iam_risk_surfaced_as_advisory():
+    # Round-7 F2: an out-of-band admin grant recorded in resource_drift must surface (WARNING), not be
+    # silently clean because it produced no resource_change.
+    from verel.ci import parse_terraform_plan
+    plan = {"resource_changes": [], "resource_drift": [
+        {"address": "aws_iam_role_policy.x", "type": "aws_iam_role_policy",
+         "change": {"actions": ["update"],
+                    "after": {"policy": _doc({"Effect": "Allow", "Action": "*", "Resource": "*"})}}}]}
+    issues = parse_terraform_plan(json.dumps(plan))
+    drift = [i for i in issues if json.loads(i.detail_json).get("drift")]
+    assert drift and all(i.severity == Severity.WARNING for i in drift)
+
+
+def test_aws_simulate_effective_allow_via_method():
+    # Round-7 R7-1: the live AWS effective-access method must consume parse_aws_simulate (not dead code).
+    from verel.actuators.access_verify import EffectiveAccessVerifier
+    from verel.actuators.cloudcreds import CloudCreds
+    creds = CloudCreds("aws", True, "/x", env={"AWS_ACCESS_KEY_ID": "x"})
+    out = json.dumps({"EvaluationResults": [
+        {"EvalActionName": "iam:PassRole", "EvalDecision": "allowed",
+         "EvalResourceName": "arn:aws:iam::1:role/admin"}]})
+    v = EffectiveAccessVerifier(runner=lambda cmd, env: (0, out, ""))
+    rep = v.aws_simulate_principal("arn:aws:iam::1:role/app", ["iam:PassRole"], creds)
+    assert rep.verdict.name == "FAIL" and any(
+        json.loads(i.detail_json)["rule_id"] == "EFFECTIVE_ALLOW" for i in rep.issues)
 
 
 # === Round 6: "the plan is not reality" + RBAC evasion + live-verifier parity ===
@@ -325,7 +421,7 @@ def test_builtin_admin_edit_binding_flagged_both_paths():
                "subjects": [{"kind": "User", "name": "mallory"}]}
         rules = {json.loads(i.detail_json)["rule_id"] for i in extract_rbac_risks([crb])}
         assert "ADMIN_GRANT" in rules, builtin
-        after = {"role_ref": [{"name": builtin}]}
+        after = {"role_ref": [{"kind": "ClusterRole", "name": builtin}]}
         assert "ADMIN_GRANT" in _rules(_rc("kubernetes_cluster_role_binding.b",
                                            "kubernetes_cluster_role_binding", after)), builtin
 
