@@ -16,7 +16,7 @@ changes. Every one links to a runnable demo so you can see it on real output, no
 | | Persona | The agentic pain |
 |---|---|---|
 | **P1** | **AI-native / "vibe-coding" team** (3–15 devs, >50% agent-written code, shipping daily) | The agent is author *and* reviewer; nobody has time to verify what it claims. |
-| **P2** | **SRE / platform / DevEx** running agents toward production | You own the blast radius when an agent's "done" is wrong at deploy. |
+| **P2** | **SRE / platform / DevEx** running agents toward production | You own the blast radius when an agent's "done" is wrong at deploy. → see the in-depth [SRE / Platform / Cloud Engineering use cases](use-cases-infra.md). |
 | **P3** | **Front-end / design-system** team using AI agents | The agent can't see the UI it ships — overflow, contrast, 404s reach users. |
 | **P4** | **Enterprise AppSec / compliance** | A green check is a claim; you need verifiable, attestable evidence. |
 

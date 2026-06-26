@@ -63,6 +63,7 @@ nav:
   - Try it yourself: try-it.md
   - 5-minute tutorial: tutorial.md
   - Use cases: use-cases.md
+  - Use cases — SRE / Platform / Cloud: use-cases-infra.md
   - Real-world scenarios: examples.md
   - Adoption: adoption.md
   - Guides:
