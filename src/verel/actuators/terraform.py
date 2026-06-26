@@ -213,8 +213,11 @@ class TerraformActuator:
             return (rc2, show_out, err2)
 
         # covers=[planfile] makes the signed RunReceipt's inputs_digest hash the actual plan bytes
-        # (not a vacuous empty-covers constant); the before/after check above is what lets us assert the
-        # graded bytes == the digested bytes (modulo the same-uid residual — see act() / R-007).
+        # (not a vacuous empty-covers constant). HONEST SCOPE: the before/after digest check guards the
+        # digest's own two reads, but `terraform show` (which drives the classification + grade) and the
+        # receipt's read are SEPARATE path reads — a same-uid attacker who can rewrite the planfile
+        # mid-plan() can still desync classification/grade from the bound digest. That is the same-uid
+        # residual (R-007/R-010); fully closing it needs OS isolation (actel), not an in-process check.
         report = run_grader(
             terraform_plan_spec(self.repo, self.planfile, covers=[self.planfile], binary=self.binary),
             runner=_replay)

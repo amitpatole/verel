@@ -222,6 +222,25 @@ def test_verifier_runner_timeout_is_errored():
     assert EffectiveAccessVerifier(runner=hanging).azure_role_assignments(creds).errored
 
 
+def test_verifier_rc0_empty_output_errors_not_pass():
+    # Red-team R3-F5: rc==0 with empty stdout must be errored, not a silent PASS (these analyzers
+    # always emit a JSON envelope on success — empty == soft-failure).
+    creds = CloudCreds("gcp", available=True, source="/x", env={})
+    rep = EffectiveAccessVerifier(runner=_env_runner(0, "")).gcp_analyze_iam("projects/p", creds)
+    assert rep.errored and rep.verdict == Verdict.FAIL
+
+
+def test_fifo_at_cred_path_does_not_hang(tmp_path):
+    # Red-team R3-F3: a planted FIFO must not block resolve_* (O_NONBLOCK) → available False, no hang.
+    import os
+    if not hasattr(os, "mkfifo"):
+        pytest.skip("no mkfifo")
+    awsd = tmp_path / "AWS"
+    awsd.mkdir()
+    os.mkfifo(awsd / "rootkey.csv")
+    assert resolve_aws(config_home=tmp_path).available is False  # returns promptly, no hang
+
+
 # --- `verel verify-access` CLI subcommand (opt-in, online) ---------------
 def test_cli_verify_access_fails_closed_without_creds(tmp_path, monkeypatch, capsys):
     from verel.cli import main as verel_main

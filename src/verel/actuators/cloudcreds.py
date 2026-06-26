@@ -34,8 +34,11 @@ def _secure_cred_read(path: Path) -> str | None:
     so a pre-existing 0644 cred file keeps working — the symlink/owner checks are the real defense."""
     # O_NOFOLLOW rejects a symlinked FINAL component (→ ELOOP); then fstat the OPEN fd (not a prior
     # lstat) so the regular-file + owner checks apply to the exact bytes we'll read — no lstat→open race.
+    # O_NONBLOCK so opening a planted FIFO/device doesn't BLOCK before the S_ISREG check (DoS) — it's a
+    # no-op for read() on a regular file.
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     try:
-        fd = os.open(str(path), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        fd = os.open(str(path), flags)
     except OSError:
         return None
     try:

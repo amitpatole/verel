@@ -146,11 +146,12 @@ def parse_az_role_assignments(out: str, err: str = "") -> list[Issue]:
     return issues
 
 
-def _unparseable(out: str) -> bool:
-    """rc==0 but non-empty output that isn't valid JSON ⇒ the analyzer didn't return a result we can
-    trust → errored, NOT a silent PASS (a tool that exits 0 with garbage must not read as 'no findings')."""
+def _bad_output(out: str) -> bool:
+    """rc==0 but EMPTY or non-JSON output ⇒ the analyzer didn't return a result we can trust → errored,
+    NOT a silent PASS. These analyzers always emit a JSON envelope on success, so empty stdout on rc==0
+    is a soft-failure that must not read as 'no findings' (red-team R3-F5)."""
     if not out.strip():
-        return False
+        return True
     try:
         json.loads(out)
     except (json.JSONDecodeError, RecursionError, ValueError):
@@ -180,8 +181,8 @@ class EffectiveAccessVerifier:
              "--policy-document", f"file://{policy_file}", "--output", "json"], creds.env)
         if rc != 0:
             return _errored(f"aws validate-policy failed: {err[:200]}")
-        if _unparseable(out):
-            return _errored("aws validate-policy: unparseable output")
+        if _bad_output(out):
+            return _errored("aws validate-policy: empty/unparseable output")
         return _report(parse_aws_validate_policy(out), "aws: policy validated")
 
     def gcp_analyze_iam(self, scope: str, creds: CloudCreds) -> Report:
@@ -192,8 +193,8 @@ class EffectiveAccessVerifier:
             ["gcloud", "asset", "analyze-iam-policy", "--scope", scope, "--format", "json"], creds.env)
         if rc != 0:
             return _errored(f"gcloud analyze-iam-policy failed: {err[:200]}")
-        if _unparseable(out):
-            return _errored("gcloud analyze-iam-policy: unparseable output")
+        if _bad_output(out):
+            return _errored("gcloud analyze-iam-policy: empty/unparseable output")
         return _report(parse_gcp_analyze_iam(out), "gcp: effective IAM analyzed")
 
     def azure_role_assignments(self, creds: CloudCreds) -> Report:
@@ -202,6 +203,6 @@ class EffectiveAccessVerifier:
         rc, out, err = self._exec(["az", "role", "assignment", "list", "--all", "-o", "json"], creds.env)
         if rc != 0:
             return _errored(f"az role assignment list failed: {err[:200]}")
-        if _unparseable(out):
-            return _errored("az role assignment list: unparseable output")
+        if _bad_output(out):
+            return _errored("az role assignment list: empty/unparseable output")
         return _report(parse_az_role_assignments(out), "azure: role assignments analyzed")
