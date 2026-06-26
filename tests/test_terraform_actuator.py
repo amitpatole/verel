@@ -129,6 +129,26 @@ def test_plan_show_failure_fails_closed_to_irreversible():
     assert res.action_class == ActionClass.IRREVERSIBLE and res.report.errored
 
 
+def test_plan_show_empty_json_fails_closed():
+    # Red-team round 5 (audit): `show -json` exits 0 but emits unparseable/empty JSON ⇒ must still
+    # fail closed to IRREVERSIBLE, not the less-restrictive CONSEQUENTIAL.
+    tf = FakeTf(show_rc=0, show_json="not json")
+    res = _actuator(tf).plan()
+    assert res.action_class == ActionClass.IRREVERSIBLE and res.report.errored
+
+
+def test_act_does_not_raise_on_runner_timeout():
+    # Red-team: a hung apply (TimeoutExpired) must become a clean refusal, not an uncaught exception.
+    import subprocess
+
+    def hanging(_cmd, _cwd=None):
+        raise subprocess.TimeoutExpired(cmd=_cmd, timeout=1)
+
+    act = TerraformActuator(".", runner=hanging, read_bytes=lambda _p: b"PLAN-A")
+    res = act.act(approved_digest=plan_digest(b"PLAN-A"))
+    assert res.applied is False and res.rc == 124
+
+
 # --- actuator.act: plan-binding / TOCTOU (the security core) -------------
 def test_act_applies_only_on_matching_digest():
     tf = FakeTf(blob=b"PLAN-A")

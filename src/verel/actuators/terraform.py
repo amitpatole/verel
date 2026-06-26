@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from hashlib import blake2s
@@ -156,16 +157,27 @@ class TerraformActuator:
     def _planpath(self) -> str:
         return str(Path(self.repo) / self.planfile)
 
+    def _exec(self, cmd: list[str]) -> tuple[int, str, str]:
+        """Run a command, never letting a hang or an exec error escape as an exception — a timed-out
+        or un-spawnable terraform/provider becomes a non-zero rc the callers already treat as errored
+        (fail closed), not an uncaught crash."""
+        try:
+            return self._run(cmd, self.repo)
+        except subprocess.TimeoutExpired:
+            return (124, "", "timed out")
+        except OSError as e:
+            return (127, "", f"exec error: {type(e).__name__}: {e}")
+
     def plan(self) -> PlanResult:
         """Produce a bound binary plan, grade it (drift + IAM), and classify the apply."""
-        rc, _out, err = self._run(
-            [self.binary, "plan", "-input=false", "-lock-timeout=60s", "-out", self.planfile], self.repo)
+        rc, _out, err = self._exec(
+            [self.binary, "plan", "-input=false", "-lock-timeout=60s", "-out", self.planfile])
         if rc != 0:
             return PlanResult(self.planfile, "", _errored_report(f"plan failed: {err[:200]}"),
                               ActionClass.IRREVERSIBLE, ["plan errored — fail closed"], {})
 
         # Machine-readable plan, captured once and reused for BOTH the verdict and escalation.
-        rc2, show_out, err2 = self._run([self.binary, "show", "-json", self.planfile], self.repo)
+        rc2, show_out, err2 = self._exec([self.binary, "show", "-json", self.planfile])
         plan_json: dict = {}
         if rc2 == 0:
             try:
@@ -177,8 +189,11 @@ class TerraformActuator:
         def _replay(_cmd: list[str], _cwd: str | None = None) -> tuple[int, str, str]:
             return (rc2, show_out, err2)
 
-        report = run_grader(terraform_plan_spec(self.repo, self.planfile, binary=self.binary),
-                            runner=_replay)
+        # covers=[planfile] makes the signed RunReceipt's inputs_digest hash the ACTUAL plan bytes
+        # (not a vacuous empty-covers constant) — so the attestation truly binds the graded plan.
+        report = run_grader(
+            terraform_plan_spec(self.repo, self.planfile, covers=[self.planfile], binary=self.binary),
+            runner=_replay)
 
         # Bind the digest to the actual plan-file bytes; no digest ⇒ cannot bind ⇒ fail closed.
         try:
@@ -187,9 +202,10 @@ class TerraformActuator:
             return PlanResult(self.planfile, "", _errored_report(f"planfile unreadable: {e}"),
                               ActionClass.IRREVERSIBLE, ["unbound plan — fail closed"], plan_json)
 
-        # If `show -json` failed we cannot read what the plan DOES — we must not classify it as the
-        # less-restrictive CONSEQUENTIAL. Fail closed to IRREVERSIBLE (red-team round 2).
-        if rc2 != 0:
+        # If `show -json` failed OR returned unparseable/empty JSON we cannot read what the plan DOES —
+        # we must not classify it as the less-restrictive CONSEQUENTIAL. Fail closed to IRREVERSIBLE.
+        # (Round 2 caught rc2!=0; the round-5 audit added the rc2==0-but-empty-JSON sibling case.)
+        if rc2 != 0 or not plan_json:
             return PlanResult(self.planfile, digest, _errored_report(f"plan unreadable: {err2[:200]}"),
                               ActionClass.IRREVERSIBLE, ["plan JSON unreadable — fail closed"], plan_json)
 
@@ -210,7 +226,7 @@ class TerraformActuator:
             return ActResult(False, "plan-binding mismatch — plan changed since approval; refused")
         # Applying a SAVED plan file does not prompt and ignores config drift — it applies precisely
         # what was graded + approved. That is the whole point of plan-binding.
-        rc, _out, err = self._run([self.binary, "apply", "-input=false", self.planfile], self.repo)
+        rc, _out, err = self._exec([self.binary, "apply", "-input=false", self.planfile])
         return ActResult(rc == 0, "applied" if rc == 0 else f"apply failed: {err[:200]}", rc=rc)
 
     def destroy(self, *, approved: bool = False) -> ActResult:
@@ -218,14 +234,14 @@ class TerraformActuator:
         approval) passes approved=True."""
         if not approved:
             return ActResult(False, "destroy not approved — refused (fail closed)")
-        rc, _out, err = self._run([self.binary, "destroy", "-input=false", "-auto-approve"], self.repo)
+        rc, _out, err = self._exec([self.binary, "destroy", "-input=false", "-auto-approve"])
         return ActResult(rc == 0, "destroyed" if rc == 0 else f"destroy failed: {err[:200]}", rc=rc)
 
     def watch(self) -> Report:
         """Act-then-verify: re-plan after apply. `-detailed-exitcode` → 0 no changes (converged),
         2 changes remain (drift), 1 error."""
-        rc, _out, err = self._run(
-            [self.binary, "plan", "-input=false", "-detailed-exitcode", "-lock-timeout=60s"], self.repo)
+        rc, _out, err = self._exec(
+            [self.binary, "plan", "-input=false", "-detailed-exitcode", "-lock-timeout=60s"])
         if rc == 0:
             return Report(verdict=Verdict.PASS, summary="post-apply: converged (no drift)",
                           grader=GraderKind.IAC)

@@ -5,6 +5,8 @@ JSON; the verifier's env-runner is injected (offline). Secret values must never 
 
 import json
 
+import pytest
+
 from verel.actuators import (
     CloudCreds,
     EffectiveAccessVerifier,
@@ -18,17 +20,30 @@ from verel.actuators import (
 )
 from verel.verdict import GraderKind, Severity, Verdict
 
-
 # --- credential resolution ----------------------------------------------
+_AKID = "AKIAIIIIIIIIIIIIIIII"   # 20-char access-key-id shape (AKIA + 16)
+_ASEC = "s" * 40                 # 40-char secret
+_FULL_SA = {"type": "service_account", "project_id": "proj-x", "client_email": "x@proj.iam",
+            "private_key": "-----KEY-----", "private_key_id": "abc123", "token_uri": "https://oauth2"}
+
+
 def test_resolve_aws_from_rootkey_csv(tmp_path):
     awsd = tmp_path / "AWS"
     awsd.mkdir()
     # utf-8-sig BOM + the real column headers from `rootkey.csv`
-    (awsd / "rootkey.csv").write_text("﻿Access key ID,Secret access key\nAKIAEXAMPLE,sshhhh\n")
+    (awsd / "rootkey.csv").write_text(f"﻿Access key ID,Secret access key\n{_AKID},{_ASEC}\n")
     cc = resolve_aws(config_home=tmp_path)
     assert cc.available and cc.cloud == "aws"
-    assert cc.env["AWS_ACCESS_KEY_ID"] == "AKIAEXAMPLE"
-    assert cc.env["AWS_SECRET_ACCESS_KEY"] == "sshhhh"
+    assert cc.env["AWS_ACCESS_KEY_ID"] == _AKID
+    assert cc.env["AWS_SECRET_ACCESS_KEY"] == _ASEC
+
+
+def test_resolve_aws_rejects_garbage_shape(tmp_path):
+    # Hardening: a non-empty but malformed row must NOT report available=True (red-team S3-F2).
+    awsd = tmp_path / "AWS"
+    awsd.mkdir()
+    (awsd / "rootkey.csv").write_text("Access key ID,Secret access key\nnot-a-key,short\n")
+    assert resolve_aws(config_home=tmp_path).available is False
 
 
 def test_resolve_aws_absent_fails_closed(tmp_path):
@@ -39,18 +54,29 @@ def test_resolve_aws_absent_fails_closed(tmp_path):
 def test_creds_repr_never_leaks_secrets(tmp_path):
     awsd = tmp_path / "AWS"
     awsd.mkdir()
-    (awsd / "rootkey.csv").write_text("Access key ID,Secret access key\nAKIA,TOPSECRETVALUE\n")
+    secret = "TOPSECRETVALUE" + "x" * 30
+    (awsd / "rootkey.csv").write_text(f"Access key ID,Secret access key\n{_AKID},{secret}\n")
     cc = resolve_aws(config_home=tmp_path)
+    assert cc.available
     text = repr(cc)
-    assert "TOPSECRETVALUE" not in text and "AKIA" not in text
-    assert "AWS_SECRET_ACCESS_KEY" in text  # key NAME is fine, value is not
+    assert secret not in text and _AKID not in text   # neither value appears
+    assert "AWS_SECRET_ACCESS_KEY" in text            # key NAME is fine, value is not
+    assert secret not in str(cc) and secret not in f"{cc}"
+
+
+def test_source_is_never_a_secret(tmp_path):
+    # Guard against a future refactor putting a credential value in `source` (the one printed field).
+    awsd = tmp_path / "AWS"
+    awsd.mkdir()
+    (awsd / "rootkey.csv").write_text(f"Access key ID,Secret access key\n{_AKID},{_ASEC}\n")
+    cc = resolve_aws(config_home=tmp_path)
+    assert cc.source not in cc.env.values() and _ASEC not in cc.source
 
 
 def test_resolve_gcp_service_account(tmp_path):
     gcpd = tmp_path / "gcp"
     gcpd.mkdir()
-    (gcpd / "sa.json").write_text(json.dumps({"type": "service_account", "project_id": "proj-x",
-                                              "client_email": "x@proj.iam", "private_key": "KEY"}))
+    (gcpd / "sa.json").write_text(json.dumps(_FULL_SA))
     (tmp_path / "gcloud").mkdir()
     cc = resolve_gcp(config_home=tmp_path)
     assert cc.available and cc.project == "proj-x"
@@ -64,9 +90,21 @@ def test_resolve_gcp_no_service_account_fails_closed(tmp_path):
     assert cc.available is False
 
 
-def test_resolve_azure_config_dir(tmp_path):
+def test_resolve_gcp_stub_sa_rejected(tmp_path):
+    # Hardening: a {"type":"service_account"} stub WITHOUT a real key must not report available
+    # (red-team S3-F3 — plant-able first-match / shallow validation).
+    gcpd = tmp_path / "gcp"
+    gcpd.mkdir()
+    (gcpd / "sa.json").write_text(json.dumps({"type": "service_account", "project_id": "p"}))
+    assert resolve_gcp(config_home=tmp_path).available is False
+
+
+def test_resolve_azure_requires_token_material(tmp_path):
     home = tmp_path / "home"
     (home / ".azure").mkdir(parents=True)
+    # Empty ~/.azure (persists after `az logout`) must NOT report creds (red-team S3-F4).
+    assert resolve_azure(config_home=tmp_path, home=home).available is False
+    (home / ".azure" / "azureProfile.json").write_text("{}")
     cc = resolve_azure(config_home=tmp_path, home=home)
     assert cc.available and cc.env["AZURE_CONFIG_DIR"].endswith(".azure")
 
@@ -158,6 +196,32 @@ def test_verifier_cli_error_fails_closed():
     assert v.azure_role_assignments(creds).errored
 
 
+def test_verifier_rc0_garbage_output_errors_not_pass():
+    # Red-team S2-F5: rc==0 but non-JSON output must be errored, NOT a silent PASS (zero findings).
+    v = EffectiveAccessVerifier(runner=_env_runner(0, "not json at all"))
+    creds = CloudCreds("azure", available=True, source="/x", env={})
+    rep = v.azure_role_assignments(creds)
+    assert rep.errored and rep.verdict == Verdict.FAIL
+
+
+def test_verifier_rejects_injected_scope():
+    # Red-team S2-F2: a scope/policy_file that could inject a gcloud/aws option is refused.
+    v = EffectiveAccessVerifier(runner=_env_runner(0, "{}"))
+    creds = CloudCreds("gcp", available=True, source="/x", env={})
+    with pytest.raises(ValueError):
+        v.gcp_analyze_iam("--billing-project=evil", creds)
+
+
+def test_verifier_runner_timeout_is_errored():
+    import subprocess
+
+    def hanging(_cmd, _env=None):
+        raise subprocess.TimeoutExpired(cmd=_cmd, timeout=1)
+
+    creds = CloudCreds("azure", available=True, source="/x", env={})
+    assert EffectiveAccessVerifier(runner=hanging).azure_role_assignments(creds).errored
+
+
 # --- `verel verify-access` CLI subcommand (opt-in, online) ---------------
 def test_cli_verify_access_fails_closed_without_creds(tmp_path, monkeypatch, capsys):
     from verel.cli import main as verel_main
@@ -172,7 +236,7 @@ def test_cli_verify_access_requires_scope_for_gcp(tmp_path, monkeypatch, capsys)
     from verel.cli import main as verel_main
     gcpd = tmp_path / ".config" / "gcp"
     gcpd.mkdir(parents=True)
-    (gcpd / "sa.json").write_text(json.dumps({"type": "service_account", "project_id": "p"}))
+    (gcpd / "sa.json").write_text(json.dumps(_FULL_SA))
     monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
     monkeypatch.setattr("verel.actuators.cloudcreds._config_home", lambda: tmp_path / ".config")
     rc = verel_main(["verify-access", "--cloud", "gcp"])
