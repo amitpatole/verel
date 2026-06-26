@@ -86,7 +86,7 @@ def _load_json(out: str) -> dict:
     # not a JSONDecodeError. Catch it (and ValueError/MemoryError) so a hostile plan can't crash us.
     try:
         data = json.loads(out or "{}")
-    except (json.JSONDecodeError, RecursionError, ValueError):
+    except (json.JSONDecodeError, RecursionError, ValueError, MemoryError):
         return {}
     return data if isinstance(data, dict) else {}
 
@@ -124,6 +124,7 @@ _IAM_TYPE_SUBSTRINGS = (
     "cluster_role", "clusterrole", "kubernetes_role", "security_group", "access_policy",
     "lambda_permission", "_grant", "kms_key", "glacier_vault", "secretsmanager",
     "public_access_block", "ram_resource_share", "ram_principal_association", "organizations_policy",
+    "service_account_key",
 )
 
 
@@ -179,16 +180,19 @@ def extract_iam_changes(plan: dict) -> list[IamChange]:
     out: list[IamChange] = []
     for rc in (plan.get("resource_changes", []) if isinstance(plan, dict) else []):
         rtype = rc.get("type", "")
-        if not is_iam_resource(rtype):
-            continue
         change = rc.get("change", {}) or {}
+        after = (change.get("after") or {}) if isinstance(change.get("after"), dict) else {}
+        # Extract when the type is a known IAM type OR — generically — when `after` carries any policy
+        # document (a Statement). This catches inline-policy resources whose names miss the substring
+        # list (aws_api_gateway_rest_api, aws_opensearch_domain, legacy aws_s3_bucket policy, …).
+        if not is_iam_resource(rtype) and not _statements(after):
+            continue
         ct = _change_type(change.get("actions", []))
         if ct is None:
             continue
         out.append(IamChange(
             cloud=_cloud_of(rtype), change_type=ct, address=rc.get("address", ""),
-            after=(change.get("after") or {}) if isinstance(change.get("after"), dict) else {},
-            source_locus=rc.get("address", ""), rtype=rtype,
+            after=after, source_locus=rc.get("address", ""), rtype=rtype,
         ))
     return out
 
@@ -268,6 +272,10 @@ _PRIVESC_GCP_ROLES = {"roles/iam.serviceaccounttokencreator", "roles/iam.service
                       "roles/iam.securityadmin", "roles/iam.workloadidentityuser",
                       "roles/iam.serviceaccountadmin"}
 _ADMIN_AZURE_ROLES = {"owner", "contributor", "user access administrator"}
+# Built-in Azure role GUIDs (an assignment can reference role_definition_id instead of _name).
+_ADMIN_AZURE_GUIDS = {"8e3af657-a8ff-443c-a75c-2fe8c4bcb635",   # Owner
+                      "b24988ac-6180-42a0-ab88-20f7382dd24c"}   # Contributor
+_PRIVESC_AZURE_GUIDS = {"18d7d88d-d35e-4fb5-a5c3-7773c20a72d9"}  # User Access Administrator
 # Azure privilege-escalation actions (concrete, no wildcard) — granting role assignments / elevation.
 _PRIVESC_AZURE_ACTIONS = ("microsoft.authorization/roleassignments/write",
                           "microsoft.authorization/elevateaccess",
@@ -367,10 +375,14 @@ def _evaluate(ch: IamChange) -> list[tuple[str, Severity, str]]:
             hits.append(("PUBLIC_PRINCIPAL", Severity.CRITICAL,
                          f"role granted to a public member at {ch.address}"))
 
-    # --- Azure: built-in admin assignment AND custom role_definition (wildcard OR privesc action) ---
+    # --- Azure: built-in admin assignment (by NAME or role_definition_id GUID) AND custom role ---
     az_role = str(after.get("role_definition_name", "")).lower()
-    if az_role in _ADMIN_AZURE_ROLES:
-        hits.append(("ADMIN_GRANT", Severity.ERROR, f"admin role {az_role} granted at {ch.address}"))
+    az_guid = str(after.get("role_definition_id", "")).rstrip("/").split("/")[-1].lower()
+    if az_role in _ADMIN_AZURE_ROLES or az_guid in _ADMIN_AZURE_GUIDS:
+        hits.append(("ADMIN_GRANT", Severity.ERROR, f"admin role granted at {ch.address}"))
+    if az_guid in _PRIVESC_AZURE_GUIDS:
+        hits.append(("PRIVILEGE_ESCALATION", Severity.CRITICAL,
+                     f"User Access Administrator granted at {ch.address}"))
     for perm in _as_list(after.get("permissions")):
         if isinstance(perm, dict):
             acts = [str(a) for a in _as_list(perm.get("actions")) + _as_list(perm.get("data_actions"))]
@@ -380,6 +392,11 @@ def _evaluate(ch: IamChange) -> list[tuple[str, Severity, str]]:
             if any(p in a.lower() for a in acts for p in _PRIVESC_AZURE_ACTIONS):
                 hits.append(("PRIVILEGE_ESCALATION", Severity.CRITICAL,
                              f"custom role grants a role-assignment/elevation action at {ch.address}"))
+
+    # --- GCP long-lived service-account KEY creation (exportable credential = exfil / privesc) ---
+    if "service_account_key" in ch.rtype and ch.change_type in ("grant", "widen", "replace"):
+        hits.append(("CREDENTIAL_EXPOSURE", Severity.ERROR,
+                     f"long-lived service-account key created at {ch.address}"))
 
     # --- AWS S3 public-access-block being DISABLED (re-enables public exposure account/bucket-wide) ---
     if "public_access_block" in ch.rtype:
@@ -429,6 +446,8 @@ def _open_ingress(after: dict, rtype: str = "") -> bool:
 
 _RBAC_PRIVESC_VERBS = {"escalate", "bind", "impersonate"}
 _RBAC_SECRET_VERBS = {"get", "list", "watch", "*"}
+# (resource, create) pairs that are escalation primitives even without `*`: minting SA tokens, exec.
+_RBAC_DANGEROUS_RESOURCES = {"serviceaccounts/token", "pods/exec", "pods/attach"}
 
 
 def _k8s_rbac(ch: IamChange) -> list[tuple[str, Severity, str]]:
@@ -443,8 +462,12 @@ def _k8s_rbac(ch: IamChange) -> list[tuple[str, Severity, str]]:
             continue
         verbs = {str(v).lower() for v in _as_list(rule.get("verbs"))}
         res = {str(r).lower() for r in _as_list(rule.get("resources"))}
-        if "*" in verbs and "*" in res:
+        nonres = {str(u) for u in _as_list(rule.get("non_resource_urls"))}
+        if "*" in verbs and ("*" in res or "*" in nonres):
             hits.append(("WILDCARD_RBAC", Severity.ERROR, f"RBAC rule grants */* at {ch.address}"))
+        if (verbs & {"create", "*"}) and (res & _RBAC_DANGEROUS_RESOURCES):
+            hits.append(("PRIVILEGE_ESCALATION", Severity.CRITICAL,
+                         f"RBAC grants create on {sorted(res & _RBAC_DANGEROUS_RESOURCES)} at {ch.address}"))
         if verbs & _RBAC_PRIVESC_VERBS:
             hits.append(("PRIVILEGE_ESCALATION", Severity.CRITICAL,
                          f"RBAC grants {sorted(verbs & _RBAC_PRIVESC_VERBS)} at {ch.address}"))

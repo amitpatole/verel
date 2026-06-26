@@ -177,6 +177,44 @@ def test_absolute_path_rejected():
         kube_score_spec(".", paths=["/etc"])
 
 
+# === Round 4: bypasses of the round-3 fixes (IAM-coverage long tail) ===
+def test_azure_admin_by_role_definition_id_guid():
+    after = {"scope": "/subscriptions/SUB", "principal_id": "x",
+             "role_definition_id": "/subscriptions/SUB/providers/Microsoft.Authorization/"
+                                   "roleDefinitions/8e3af657-a8ff-443c-a75c-2fe8c4bcb635"}  # Owner GUID
+    assert "ADMIN_GRANT" in _rules(_rc("azurerm_role_assignment.x", "azurerm_role_assignment", after))
+
+
+def test_inline_policy_resource_outside_typelist_flagged():
+    # aws_api_gateway_rest_api isn't in the IAM type substrings, but its inline policy with Principal:*
+    # must still be extracted (generic: any `after` carrying a Statement) and flagged.
+    after = {"policy": _doc({"Effect": "Allow", "Principal": "*", "Action": "execute-api:Invoke",
+                            "Resource": "*"})}
+    assert "PUBLIC_PRINCIPAL" in _rules(_rc("aws_api_gateway_rest_api.p", "aws_api_gateway_rest_api",
+                                            after))
+
+
+def test_service_account_key_creation_flagged():
+    assert "CREDENTIAL_EXPOSURE" in _rules(_rc("google_service_account_key.k",
+                                               "google_service_account_key", {"public_key_type": "x"}))
+
+
+def test_tf_rbac_token_mint_flagged():
+    after = {"rule": [{"verbs": ["create"], "resources": ["serviceaccounts/token"], "api_groups": [""]}]}
+    assert _rules(_rc("kubernetes_cluster_role.t", "kubernetes_cluster_role",
+                      after))["PRIVILEGE_ESCALATION"] == Severity.CRITICAL
+
+
+def test_native_rbac_token_mint_and_nonresource_wildcard():
+    from verel.ci import extract_rbac_risks
+    tok = {"kind": "ClusterRole", "metadata": {"name": "m"},
+           "rules": [{"verbs": ["create"], "resources": ["serviceaccounts/token"]}]}
+    nr = {"kind": "ClusterRole", "metadata": {"name": "nr"},
+          "rules": [{"verbs": ["*"], "nonResourceURLs": ["*"]}]}
+    rules = {json.loads(i.detail_json)["rule_id"] for i in extract_rbac_risks([tok, nr])}
+    assert "PRIVILEGE_ESCALATION" in rules and "WILDCARD_RBAC" in rules
+
+
 # === Cluster 2: argv option-injection (incl. helm --post-renderer RCE) ===
 def test_helm_post_renderer_rejected():
     with pytest.raises(ValueError):
