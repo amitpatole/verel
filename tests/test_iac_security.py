@@ -142,6 +142,41 @@ def test_path_traversal_rejected():
         checkov_spec(".", directory="../../secrets")
 
 
+# === Round 3: bypasses of the round-2 fixes ===
+def test_gcp_impersonation_role_flagged():
+    # roles/iam.serviceAccountTokenCreator = full impersonation (GCP's iam:PassRole analogue).
+    after = {"role": "roles/iam.serviceAccountTokenCreator", "member": "user:evil@x"}
+    assert _rules(_rc("google_service_account_iam_member.m", "google_service_account_iam_member",
+                      after))["PRIVILEGE_ESCALATION"] == Severity.CRITICAL
+
+
+def test_azure_roleassignments_write_flagged():
+    after = {"permissions": [{"actions": ["Microsoft.Authorization/roleAssignments/write"]}]}
+    assert _rules(_rc("azurerm_role_definition.r", "azurerm_role_definition",
+                      after))["PRIVILEGE_ESCALATION"] == Severity.CRITICAL
+
+
+def test_s3_public_access_block_disable_flagged():
+    after = {"block_public_acls": False, "block_public_policy": False,
+             "ignore_public_acls": False, "restrict_public_buckets": False}
+    assert _rules(_rc("aws_s3_bucket_public_access_block.pab", "aws_s3_bucket_public_access_block",
+                      after))["PUBLIC_ACCESS_BLOCK_DISABLED"] == Severity.ERROR
+
+
+def test_s3_public_access_block_enabled_is_clean():
+    after = {"block_public_acls": True, "block_public_policy": True,
+             "ignore_public_acls": True, "restrict_public_buckets": True}
+    assert _rules(_rc("aws_s3_bucket_public_access_block.pab", "aws_s3_bucket_public_access_block",
+                      after)) == {}
+
+
+def test_absolute_path_rejected():
+    with pytest.raises(ValueError):
+        trivy_config_spec(".", paths=["/home/victim/.aws"])
+    with pytest.raises(ValueError):
+        kube_score_spec(".", paths=["/etc"])
+
+
 # === Cluster 2: argv option-injection (incl. helm --post-renderer RCE) ===
 def test_helm_post_renderer_rejected():
     with pytest.raises(ValueError):

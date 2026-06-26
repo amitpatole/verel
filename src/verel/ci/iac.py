@@ -51,6 +51,8 @@ def safe_path(value: str, what: str = "path") -> str:
     safe_arg(value, what)
     if "://" in value:
         raise ValueError(f"unsafe {what} (remote URL not allowed): {value!r}")
+    if value.startswith("/"):  # absolute → scans/reads OUTSIDE the repo (info-leak); repo-relative only
+        raise ValueError(f"unsafe {what} (absolute path not allowed): {value!r}")
     if ".." in value.replace("\\", "/").split("/"):
         raise ValueError(f"unsafe {what} (path traversal): {value!r}")
     return value
@@ -260,7 +262,16 @@ _PRIVESC_ACTIONS = {
 }
 _ADMIN_GCP_ROLES = {"roles/owner", "roles/editor", "roles/iam.securityadmin",
                     "roles/resourcemanager.organizationadmin"}
+# GCP privilege-escalation roles — the analogue of AWS iam:PassRole (impersonate / mint keys / grant).
+_PRIVESC_GCP_ROLES = {"roles/iam.serviceaccounttokencreator", "roles/iam.serviceaccountuser",
+                      "roles/iam.serviceaccountkeyadmin", "roles/iam.roleadmin",
+                      "roles/iam.securityadmin", "roles/iam.workloadidentityuser",
+                      "roles/iam.serviceaccountadmin"}
 _ADMIN_AZURE_ROLES = {"owner", "contributor", "user access administrator"}
+# Azure privilege-escalation actions (concrete, no wildcard) — granting role assignments / elevation.
+_PRIVESC_AZURE_ACTIONS = ("microsoft.authorization/roleassignments/write",
+                          "microsoft.authorization/elevateaccess",
+                          "microsoft.authorization/denyassignments")
 _PUBLIC_PRINCIPALS = {"*", "allusers", "allauthenticatedusers", "system:anonymous", "system:unauthenticated"}
 _ADMIN_MANAGED_POLICIES = ("administratoraccess", "poweruseraccess", "iamfullaccess")
 
@@ -349,11 +360,14 @@ def _evaluate(ch: IamChange) -> list[tuple[str, Severity, str]]:
         members = [m.lower() for m in members_raw]
         if role in _ADMIN_GCP_ROLES:
             hits.append(("ADMIN_GRANT", Severity.ERROR, f"admin role {role} granted at {ch.address}"))
+        if role in _PRIVESC_GCP_ROLES:
+            hits.append(("PRIVILEGE_ESCALATION", Severity.CRITICAL,
+                         f"privilege-escalation role {role} granted at {ch.address}"))
         if any(m in _PUBLIC_PRINCIPALS or m.split(":")[-1] in _PUBLIC_PRINCIPALS for m in members):
             hits.append(("PUBLIC_PRINCIPAL", Severity.CRITICAL,
                          f"role granted to a public member at {ch.address}"))
 
-    # --- Azure: built-in admin assignment AND custom role_definition with a wildcard action ---
+    # --- Azure: built-in admin assignment AND custom role_definition (wildcard OR privesc action) ---
     az_role = str(after.get("role_definition_name", "")).lower()
     if az_role in _ADMIN_AZURE_ROLES:
         hits.append(("ADMIN_GRANT", Severity.ERROR, f"admin role {az_role} granted at {ch.address}"))
@@ -363,6 +377,18 @@ def _evaluate(ch: IamChange) -> list[tuple[str, Severity, str]]:
             if any(_is_wildcard_action(a) for a in acts):
                 hits.append(("ADMIN_GRANT", Severity.ERROR,
                              f"custom role grants a wildcard action at {ch.address}"))
+            if any(p in a.lower() for a in acts for p in _PRIVESC_AZURE_ACTIONS):
+                hits.append(("PRIVILEGE_ESCALATION", Severity.CRITICAL,
+                             f"custom role grants a role-assignment/elevation action at {ch.address}"))
+
+    # --- AWS S3 public-access-block being DISABLED (re-enables public exposure account/bucket-wide) ---
+    if "public_access_block" in ch.rtype:
+        flags = ("block_public_acls", "block_public_policy", "ignore_public_acls",
+                 "restrict_public_buckets")
+        present = [f for f in flags if f in after]
+        if present and any(after.get(f) is False for f in present):
+            hits.append(("PUBLIC_ACCESS_BLOCK_DISABLED", Severity.ERROR,
+                         f"S3 public-access-block disabled at {ch.address}"))
 
     # --- Network exposure: security-group open ingress ---
     if _open_ingress(after, ch.rtype):
