@@ -49,7 +49,12 @@ def _doctor() -> int:
                          ("conftest", "conftest/OPA (policy grader)"),
                          ("infracost", "infracost (cost grader)"),
                          ("parliament", "parliament (IAM least-priv grader)"),
-                         ("cloudsplaining", "cloudsplaining (IAM least-priv grader)")):
+                         ("cloudsplaining", "cloudsplaining (IAM least-priv grader)"),
+                         ("kubectl", "kubectl (K8s validate + RBAC sensor)"),
+                         ("helm", "helm (K8s render + RBAC sensor)"),
+                         ("kube-score", "kube-score (K8s posture grader)"),
+                         ("kube-linter", "kube-linter (K8s posture grader)"),
+                         ("polaris", "polaris (K8s posture grader)")):
         print(f"  {ok(shutil.which(_bin))}{_label}")
     try:
         import mem0  # noqa: F401
