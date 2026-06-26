@@ -156,3 +156,24 @@ def test_verifier_cli_error_fails_closed():
     v = EffectiveAccessVerifier(runner=_env_runner(1, "", "AccessDenied"))
     creds = CloudCreds("azure", available=True, source="/x", env={"AZURE_CONFIG_DIR": "/d"})
     assert v.azure_role_assignments(creds).errored
+
+
+# --- `verel verify-access` CLI subcommand (opt-in, online) ---------------
+def test_cli_verify_access_fails_closed_without_creds(tmp_path, monkeypatch, capsys):
+    from verel.cli import main as verel_main
+    monkeypatch.setenv("HOME", str(tmp_path))  # empty fake home → no creds anywhere
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    rc = verel_main(["verify-access", "--cloud", "aws", "--policy-file", "p.json"])
+    assert rc == 2 and "no aws credentials" in capsys.readouterr().err
+
+
+def test_cli_verify_access_requires_scope_for_gcp(tmp_path, monkeypatch, capsys):
+    # creds present (fake SA), but --scope missing → usage error (return 2), no provider call
+    from verel.cli import main as verel_main
+    gcpd = tmp_path / ".config" / "gcp"
+    gcpd.mkdir(parents=True)
+    (gcpd / "sa.json").write_text(json.dumps({"type": "service_account", "project_id": "p"}))
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("verel.actuators.cloudcreds._config_home", lambda: tmp_path / ".config")
+    rc = verel_main(["verify-access", "--cloud", "gcp"])
+    assert rc == 2 and "--scope is required" in capsys.readouterr().err

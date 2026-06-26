@@ -193,6 +193,37 @@ def _rules(args) -> int:
     return 0
 
 
+def _verify_access(args) -> int:
+    """OPT-IN effective-access check — query what the cloud ACTUALLY grants (AWS IAM Access Analyzer /
+    GCP Policy Analyzer / Azure role assignments). Needs cloud READ creds (resolved from ~/.config,
+    never logged) and makes live provider calls — deliberately NOT part of the offline gate."""
+    from .actuators import EffectiveAccessVerifier, resolve
+    creds = resolve(args.cloud)
+    if not creds.available:
+        print(f"verify-access: no {args.cloud} credentials ({creds.source}) — fail closed", file=sys.stderr)
+        return 2
+    v = EffectiveAccessVerifier()
+    if args.cloud == "aws":
+        if not args.policy_file:
+            print("verify-access: --policy-file is required for aws", file=sys.stderr)
+            return 2
+        rep = v.aws_validate_policy(args.policy_file, creds)
+    elif args.cloud == "gcp":
+        if not args.scope:
+            print("verify-access: --scope is required for gcp (e.g. projects/<id>)", file=sys.stderr)
+            return 2
+        rep = v.gcp_analyze_iam(args.scope, creds)
+    else:
+        rep = v.azure_role_assignments(creds)
+    print(f"[verify-access:{args.cloud}] verdict={rep.verdict.value}  ({creds.source})")
+    if rep.errored:
+        print(f"  ! {rep.summary}", file=sys.stderr)
+    for i in rep.issues[:50]:
+        print(f"      {i.source.value}:{i.severity.value} {i.locator or ''} {i.message[:80]}")
+    from .verdict.models import Verdict
+    return 0 if rep.verdict != Verdict.FAIL else 1
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="verel", description="verified agents framework")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -243,6 +274,13 @@ def main(argv=None) -> int:
     rl.add_argument("--write", action="store_true",
                     help="write/append the snippet to its file in the current repo (else print)")
 
+    va = sub.add_parser("verify-access",
+                        help="OPT-IN: query what the cloud ACTUALLY grants (needs cloud read creds; "
+                             "makes live provider calls — not an offline gate)")
+    va.add_argument("--cloud", required=True, choices=("aws", "gcp", "azure"))
+    va.add_argument("--policy-file", help="aws: an IAM policy JSON to validate (IAM Access Analyzer)")
+    va.add_argument("--scope", help="gcp: the analyze-iam-policy scope, e.g. projects/<id>")
+
     args = p.parse_args(argv)
     if args.cmd == "version":
         print(__version__)
@@ -266,6 +304,8 @@ def main(argv=None) -> int:
         return _rules(args)
     if args.cmd == "serve":
         return _serve(args)
+    if args.cmd == "verify-access":
+        return _verify_access(args)
     return 2
 
 

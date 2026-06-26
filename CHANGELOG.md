@@ -27,6 +27,10 @@ or a failed audit. See [IAC-KICKOFF.md](https://github.com/amitpatole/verel/blob
   resolved from `~/.config` (never logged). Accurate, but not a pure offline gate.
 - **Security cadence** — argv-only + charset-validated args; fail-closed on every degraded path;
   adversarial cases pinned as regression tests; residuals R-005..R-007 documented.
+- **Surfaces** — the offline sensor is wired to the **`verel_iac_check`** MCP tool and the
+  **`verel-ci iac`** CLI (`--plan` / `--manifests`, exit 1 on FAIL). Effective-access is a separate
+  **opt-in, online** `verel verify-access --cloud {aws,gcp,azure}` subcommand (fails closed without
+  creds; never in the offline gate).
 - **`verel doctor`** probes the IaC binaries and the resolved cloud credentials. `verel[iac]` extra
   (pyyaml for helm YAML scanning). New `examples/demo_iac.py` (no cloud creds).
 
