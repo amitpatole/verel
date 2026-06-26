@@ -94,7 +94,7 @@ def parse_aws_validate_policy(out: str, err: str = "") -> list[Issue]:
             continue
         ft = f.get("findingType", "WARNING")
         issues.append(_iam_issue(f.get("issueCode", "VALIDATE"),
-                                 _AWS_VALIDATE_SEV.get(ft, Severity.WARNING),
+                                 _AWS_VALIDATE_SEV.get(str(ft), Severity.WARNING),
                                  f"{f.get('issueCode', '')}: {f.get('findingDetails', '')}".strip(),
                                  None))
     return issues

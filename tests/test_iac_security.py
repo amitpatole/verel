@@ -397,6 +397,27 @@ def test_parsers_tolerate_noniterable_and_nonstr_leaves():
         {"grade": 1, "check": {"name": "x"}}]}])), list)
 
 
+def test_actions_and_severity_leaves_tolerate_garbage():
+    # Round-18: `change.actions` fed to set() (non-iterable scalar / unhashable list elements),
+    # `(x or [])` iterations, and severity leaves used with .lower()/.get() must not crash.
+    from verel.actuators.access_verify import parse_aws_validate_policy
+    from verel.ci import parse_terraform_plan
+    from verel.ci.iac import parse_checkov, parse_conftest, parse_tflint, parse_trivy_config
+    rc = lambda a: json.dumps({"resource_changes": [{"type": "aws_iam_role", "change": {"actions": a}}]})
+    for a in (1, None, [{}], [[]]):  # non-iterable + unhashable elements
+        assert isinstance(parse_terraform_plan(rc(a)), list)
+    assert isinstance(parse_terraform_plan(json.dumps(
+        {"configuration": {"root_module": {"resources": 1}}})), list)
+    assert isinstance(parse_terraform_plan(json.dumps(
+        {"configuration": {"root_module": {"resources": [{"provisioners": 1}]}}})), list)
+    assert isinstance(parse_conftest(json.dumps([{"failures": 1, "warnings": True}])), list)
+    # severity leaves: non-str (.lower) and unhashable (.get key)
+    assert isinstance(parse_trivy_config(json.dumps({"Results": [{"Misconfigurations": [{"Severity": 1}]}]})), list)
+    assert isinstance(parse_checkov(json.dumps({"results": {"failed_checks": [{"severity": 1}]}})), list)
+    assert isinstance(parse_tflint(json.dumps({"issues": [{"rule": {"severity": [1]}}]})), list)
+    assert isinstance(parse_aws_validate_policy(json.dumps({"findings": [{"findingType": [1]}]})), list)
+
+
 def test_malformed_nondict_fields_do_not_crash():
     # Round-14 R14-1: a hostile truthy NON-dict `change`/`metadata`/`roleRef` must not crash the
     # grader (the `x or {}` idiom only guards None/falsy) — skip it and return a verdict.

@@ -72,7 +72,7 @@ _SCAN_SEV = {
 
 
 def _scan_severity(s: str) -> Severity:
-    return _SCAN_SEV.get((s or "low").lower(), Severity.WARNING)
+    return _SCAN_SEV.get(str(s or "low").lower(), Severity.WARNING)
 
 
 def _as_list(x: object) -> list:
@@ -161,9 +161,9 @@ def _cloud_of(rtype: str) -> str:
     return "unknown"
 
 
-def _change_type(actions: list[str]) -> str | None:
+def _change_type(actions: object) -> str | None:
     """Map terraform `change.actions` to a normalized change_type; None for no-op/read (skip)."""
-    a = set(actions or [])
+    a = {str(x) for x in _as_list(actions)}
     if not a or a <= {"no-op", "read"}:
         return None
     if {"create", "delete"} <= a:
@@ -760,7 +760,7 @@ def plan_summary(plan: dict) -> dict[str, int]:
     for rc in (_as_list(plan.get("resource_changes")) if isinstance(plan, dict) else []):
         if not isinstance(rc, dict):
             continue
-        a = set(_as_dict(rc.get("change")).get("actions", []))
+        a = {str(x) for x in _as_list(_as_dict(rc.get("change")).get("actions"))}
         if {"create", "delete"} <= a:
             counts["replace"] += 1
         elif "delete" in a:
@@ -782,7 +782,7 @@ def destructive_changes(plan: dict) -> list[str]:
     for rc in (_as_list(plan.get("resource_changes")) if isinstance(plan, dict) else []):
         if not isinstance(rc, dict):
             continue
-        a = set(_as_dict(rc.get("change")).get("actions", []))
+        a = {str(x) for x in _as_list(_as_dict(rc.get("change")).get("actions"))}
         if "delete" in a:  # covers both delete and replace (create+delete)
             out.append(str(rc.get("address", "")))
     return out
@@ -798,7 +798,7 @@ def _config_resources(plan: dict):
     def _walk(mod: object, prefix: str, depth: int):
         if depth > 20 or not isinstance(mod, dict):
             return
-        for r in (mod.get("resources") or []):
+        for r in _as_list(mod.get("resources")):
             if isinstance(r, dict):
                 yield f"{prefix}{r.get('address', '')}", r
         calls = mod.get("module_calls")
@@ -819,7 +819,7 @@ def provisioner_resources(plan: dict) -> list[str]:
     (`data "external" { program = [...] }`, runs every refresh — round-7 F5). Gated ERROR/IRREVERSIBLE."""
     out: list[str] = []
     for addr, r in _config_resources(plan):
-        provs = r.get("provisioners") or []
+        provs = _as_list(r.get("provisioners"))
         has_exec = any(isinstance(p, dict) and str(p.get("type", "")).lower() in _EXEC_PROVISIONERS
                        for p in provs)
         is_external = r.get("mode") == "data" and str(r.get("type", "")).lower() == "external"
@@ -976,8 +976,9 @@ def parse_tflint(out: str, err: str = "") -> list[Issue]:
         fn = rng.get("filename", "")
         line = _as_dict(rng.get("start")).get("line", "")
         name = rule.get("name", "tflint")
+        sev = _TFLINT_SEV.get(str(rule.get("severity", "warning")), Severity.WARNING)
         issues.append(Issue(
-            kind=IssueKind.OTHER, severity=_TFLINT_SEV.get(rule.get("severity", "warning"), Severity.WARNING),
+            kind=IssueKind.OTHER, severity=sev,
             source=GraderKind.LINT, message=f"{name} {it.get('message', '')}".strip(),
             locator=f"{fn}:{line}" if fn else None, detail_json=json.dumps({"rule_id": name}),
         ))
@@ -1046,7 +1047,7 @@ def parse_conftest(out: str, err: str = "") -> list[Issue]:
     for r in data if isinstance(data, list) else []:
         fn = r.get("filename", "") if isinstance(r, dict) else ""
         for sev, key in ((Severity.ERROR, "failures"), (Severity.WARNING, "warnings")):
-            for f in (r.get(key, []) or []) if isinstance(r, dict) else []:
+            for f in (_as_list(r.get(key)) if isinstance(r, dict) else []):
                 msg = f.get("msg", "policy violation") if isinstance(f, dict) else str(f)
                 issues.append(Issue(
                     kind=IssueKind.OTHER, severity=sev, source=GraderKind.POLICY,
