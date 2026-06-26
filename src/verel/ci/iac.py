@@ -82,6 +82,13 @@ def _as_list(x: object) -> list:
     return list(x) if isinstance(x, (list, tuple)) else [x]
 
 
+def _as_dict(x: object) -> dict:
+    """Normalize a field that SHOULD be a dict to a dict — a hostile plan/manifest can make `change` /
+    `metadata` / `roleRef` a truthy NON-dict (e.g. a list), which the `x or {}` idiom does not guard
+    and `.get(...)` then crashes on. Returns {} for anything that isn't a dict (round-14 R14-1)."""
+    return x if isinstance(x, dict) else {}
+
+
 def _load_json(out: str) -> dict:
     # RecursionError: a deeply-nested attacker JSON makes json.loads itself recurse past the limit —
     # not a JSONDecodeError. Catch it (and ValueError/MemoryError) so a hostile plan can't crash us.
@@ -224,9 +231,9 @@ def extract_iam_changes(plan: dict) -> list[IamChange]:
         if not isinstance(rc, dict):  # a hostile `[null]`/"x" entry must not crash the grader
             continue
         rtype = rc.get("type", "")
-        change = rc.get("change", {}) or {}
-        after = (change.get("after") or {}) if isinstance(change.get("after"), dict) else {}
-        unknown = (change.get("after_unknown") or {}) if isinstance(change.get("after_unknown"), dict) else {}
+        change = _as_dict(rc.get("change"))
+        after = _as_dict(change.get("after"))
+        unknown = _as_dict(change.get("after_unknown"))
         # Extract when the type is a known IAM type OR — generically — when `after` carries any policy
         # document (a Statement) OR an IAM-relevant field is computed (known after apply) OR the
         # resource flags public exposure (`publicly_accessible`). The computed clause catches a
@@ -751,7 +758,7 @@ def plan_summary(plan: dict) -> dict[str, int]:
     for rc in (plan.get("resource_changes", []) if isinstance(plan, dict) else []):
         if not isinstance(rc, dict):
             continue
-        a = set((rc.get("change") or {}).get("actions", []))
+        a = set(_as_dict(rc.get("change")).get("actions", []))
         if {"create", "delete"} <= a:
             counts["replace"] += 1
         elif "delete" in a:
@@ -773,7 +780,7 @@ def destructive_changes(plan: dict) -> list[str]:
     for rc in (plan.get("resource_changes", []) if isinstance(plan, dict) else []):
         if not isinstance(rc, dict):
             continue
-        a = set((rc.get("change") or {}).get("actions", []))
+        a = set(_as_dict(rc.get("change")).get("actions", []))
         if "delete" in a:  # covers both delete and replace (create+delete)
             out.append(rc.get("address", ""))
     return out
@@ -870,7 +877,7 @@ def parse_terraform_plan(out: str, err: str = "") -> list[Issue]:
     # address, so counting no-ops as "reverting" made the gate inert against real plans AND trivially
     # gameable by a shadow no-op (round-9 F9-1). Exclude no-op/read from `changed`.
     changed = {rc.get("address", "") for rc in rc_list if isinstance(rc, dict)
-               and _change_type((rc.get("change") or {}).get("actions", [])) is not None}
+               and _change_type(_as_dict(rc.get("change")).get("actions", [])) is not None}
     rd = plan.get("resource_drift", []) if isinstance(plan, dict) else []
     for ch in extract_iam_changes({"resource_changes": rd if isinstance(rd, list) else []}):
         persists = ch.address not in changed  # no real planned change → apply won't revert it

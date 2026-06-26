@@ -27,6 +27,7 @@ from .iac import (
     _PRIVILEGED_NAMESPACES,
     _RBAC_BUILTIN_ADMIN_ROLES,
     _RBAC_WRITE_VERBS,
+    _as_dict,
     _as_list,
     _load_json,
     _rbac_resource_privesc,
@@ -53,7 +54,7 @@ _ANON_GROUPS = {"system:unauthenticated", "system:authenticated"}  # binding to 
 
 
 def _locus(obj: dict) -> str:
-    md = obj.get("metadata") or {}
+    md = _as_dict(obj.get("metadata"))
     ns = md.get("namespace")
     kind = obj.get("kind", "")
     name = md.get("name", "")
@@ -74,7 +75,7 @@ def _role_risks(obj: dict, locus: str, cluster: bool) -> list[Issue]:
     out: list[Issue] = []
     # A Role in kube-system/kube-public is cluster-admin-EQUIVALENT (bootstrap/controller tokens live
     # in its secrets), so its secret/read-all reach gates at the elevated severity (round-7 F4).
-    ns = (obj.get("metadata") or {}).get("namespace", "")
+    ns = _as_dict(obj.get("metadata")).get("namespace", "")
     elevated = cluster or ns in _PRIVILEGED_NAMESPACES
     # A ClusterRole that AGGREGATES other roles grows silently to whatever the label-selected roles
     # grant — surface an advisory rather than green-lighting an (often empty) `rules` (round-6 R5).
@@ -130,7 +131,7 @@ def _role_risks(obj: dict, locus: str, cluster: bool) -> list[Issue]:
 def _binding_risks(obj: dict, locus: str) -> list[Issue]:
     kind = obj.get("kind", "")
     out: list[Issue] = []
-    ref = obj.get("roleRef") or {}
+    ref = _as_dict(obj.get("roleRef"))
     ref_name = str(ref.get("name", "")).lower()
     # Only a CLUSTERROLE reference to the built-in name is the dangerous aggregated role; a user's own
     # namespaced Role happening to be named `edit`/`admin` is harmless (round-7 F6, false-positive).

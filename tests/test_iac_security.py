@@ -344,6 +344,20 @@ def test_data_http_advisory():
     assert len(http) == 1 and http[0].severity == Severity.WARNING
 
 
+def test_malformed_nondict_fields_do_not_crash():
+    # Round-14 R14-1: a hostile truthy NON-dict `change`/`metadata`/`roleRef` must not crash the
+    # grader (the `x or {}` idiom only guards None/falsy) — skip it and return a verdict.
+    from verel.actuators.terraform import escalate
+    from verel.ci import extract_rbac_risks, parse_terraform_plan
+    assert isinstance(parse_terraform_plan(json.dumps(
+        {"resource_changes": [{"type": "aws_iam_role", "change": [1, 2]}]})), list)
+    assert isinstance(parse_terraform_plan(json.dumps(
+        {"resource_changes": [], "resource_drift": [{"change": [1]}]})), list)
+    escalate({"resource_changes": [{"change": [1]}]})  # must not raise
+    assert extract_rbac_risks([{"kind": "Role", "metadata": [1], "rules": []}]) == []
+    assert extract_rbac_risks([{"kind": "RoleBinding", "metadata": {"name": "x"}, "roleRef": [1]}]) == []
+
+
 def test_malformed_resource_drift_does_not_crash():
     # Round-8 F3: a hostile `resource_drift: [null]` / non-list must not crash the grader.
     from verel.ci import parse_terraform_plan
