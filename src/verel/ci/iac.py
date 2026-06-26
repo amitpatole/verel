@@ -143,13 +143,13 @@ _IAM_TYPE_SUBSTRINGS = (
 )
 
 
-def is_iam_resource(rtype: str) -> bool:
-    t = (rtype or "").lower()
+def is_iam_resource(rtype: object) -> bool:
+    t = str(rtype or "").lower()
     return any(s in t for s in _IAM_TYPE_SUBSTRINGS)
 
 
-def _cloud_of(rtype: str) -> str:
-    t = (rtype or "").lower()
+def _cloud_of(rtype: object) -> str:
+    t = str(rtype or "").lower()
     if t.startswith("aws_"):
         return "aws"
     if t.startswith("google_"):
@@ -232,7 +232,7 @@ def extract_iam_changes(plan: dict) -> list[IamChange]:
     for rc in (_as_list(plan.get("resource_changes")) if isinstance(plan, dict) else []):
         if not isinstance(rc, dict):  # a hostile `[null]`/"x" entry must not crash the grader
             continue
-        rtype = rc.get("type", "")
+        rtype = str(rc.get("type", ""))
         change = _as_dict(rc.get("change"))
         after = _as_dict(change.get("after"))
         unknown = _as_dict(change.get("after_unknown"))
@@ -248,9 +248,10 @@ def extract_iam_changes(plan: dict) -> list[IamChange]:
         ct = _change_type(change.get("actions", []))
         if ct is None:
             continue
+        addr = str(rc.get("address", ""))  # coerce: address is used as a set key / locator downstream
         out.append(IamChange(
-            cloud=_cloud_of(rtype), change_type=ct, address=rc.get("address", ""),
-            after=after, source_locus=rc.get("address", ""), rtype=rtype, after_unknown=unknown,
+            cloud=_cloud_of(rtype), change_type=ct, address=addr,
+            after=after, source_locus=addr, rtype=rtype, after_unknown=unknown,
         ))
     return out
 
@@ -878,7 +879,7 @@ def parse_terraform_plan(out: str, err: str = "") -> list[Issue]:
     # (config already matches the drifted reality) is EXACTLY when terraform emits a no-op for the
     # address, so counting no-ops as "reverting" made the gate inert against real plans AND trivially
     # gameable by a shadow no-op (round-9 F9-1). Exclude no-op/read from `changed`.
-    changed = {rc.get("address", "") for rc in rc_list if isinstance(rc, dict)
+    changed = {str(rc.get("address", "")) for rc in rc_list if isinstance(rc, dict)
                and _change_type(_as_dict(rc.get("change")).get("actions", [])) is not None}
     rd = plan.get("resource_drift", []) if isinstance(plan, dict) else []
     for ch in extract_iam_changes({"resource_changes": rd if isinstance(rd, list) else []}):
