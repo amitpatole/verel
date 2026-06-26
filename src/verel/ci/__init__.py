@@ -42,6 +42,20 @@ from .graders import (
 )
 from .heal import HealResult, HealRound, self_heal
 from .hooks import install_precommit, is_installed
+from .iac import (
+    IamChange,
+    destructive_changes,
+    extract_iam_changes,
+    iam_risk_issues,
+    is_iam_resource,
+    parse_terraform_plan,
+    parse_terraform_validate,
+    parse_trivy_config,
+    plan_summary,
+    terraform_plan_spec,
+    terraform_validate_spec,
+    trivy_config_spec,
+)
 from .medic import Action, Diagnosis, classify_issue, enrich_diagnoses, quarantine_severity, triage
 from .pipeline import (
     Stage,
@@ -68,6 +82,10 @@ __all__ = [
     "gotest_spec", "govet_spec", "parse_go_test", "parse_go_vet",
     "perf_spec", "parse_perf", "bandit_spec", "npm_audit_spec", "parse_bandit", "parse_npm_audit",
     "mutation_spec", "parse_mutation",
+    "terraform_validate_spec", "terraform_plan_spec", "trivy_config_spec",
+    "parse_terraform_validate", "parse_terraform_plan", "parse_trivy_config",
+    "extract_iam_changes", "iam_risk_issues", "is_iam_resource", "IamChange",
+    "plan_summary", "destructive_changes",
     "Stage", "StageResult", "run_stage", "inner_loop_stage", "precommit_stage", "premerge_stage",
     "postmerge_stage",
     "Action", "Diagnosis", "classify_issue", "triage", "quarantine_severity", "enrich_diagnoses",

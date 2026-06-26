@@ -33,6 +33,11 @@ lancedb = ["lancedb>=0.5"]  # embedded vector store — zero-infra ANN recall (a
 redis = ["redis>=5"]  # networked shared brain — atomic optimistic-concurrency RMW over Redis
 operator = ["kopf>=1.37", "kubernetes>=29"]  # the Kubernetes operator (Kopf) reconciling the Verel CRDs
 mcp = ["mcp>=1.0", "anyio>=4"]
+# IaC / DevOps graders + IAM sensor (IAC-KICKOFF.md). The graders shell out to EXTERNAL binaries
+# (terraform/tofu, trivy, tflint, checkov, conftest, infracost) — not pip deps — so this extra adds no
+# Python packages today; it's the documented install target and a place to pin python helpers later.
+# `verel doctor` probes for the binaries; a required IaC grader whose tool is absent fails closed.
+iac = []
 dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.6", "mypy>=1.10", "bandit>=1.7"]  # bandit = the pre-merge `security` grader; must be installed for that gate to run (else it fails closed)
 
 [project.scripts]

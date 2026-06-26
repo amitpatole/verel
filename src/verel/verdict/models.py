@@ -82,6 +82,10 @@ class IssueKind(str, Enum):
     INTENT_MISMATCH = "intent_mismatch"
     SURVIVED_MUTANT = "survived_mutant"  # a fault injected into the change that no test caught
     COMPLEXITY = "complexity"  # over-complex / over-engineered code (cyclomatic, speculative generality)
+    # Infrastructure / cloud kinds (the IaC + IAM sensor track — see IAC-KICKOFF.md).
+    IAC_DRIFT = "iac_drift"  # a planned destroy/replace — visibility, escalated at the gateway
+    IAM_RISK = "iam_risk"  # dangerous IAM change: wildcard / privesc / public principal / admin grant
+    MISCONFIG = "misconfig"  # infra misconfiguration from a config scanner (trivy/checkov/tflint)
     OTHER = "other"
 
 
@@ -108,6 +112,12 @@ class GraderKind(str, Enum):
     SECURITY = "security"
     CONTRACT = "contract"
     COST = "cost"
+    # Infrastructure / cloud graders (IAC-KICKOFF.md). IAC = terraform/tofu/helm/kubectl plan+validate;
+    # IAM = the cloud-IAM change sensor (wildcard/privesc/public/admin); POLICY = policy-as-code
+    # (conftest/OPA/Cedar). All three are deterministic evidence → PRECISE_GRADERS (they gate).
+    IAC = "iac"
+    IAM = "iam"
+    POLICY = "policy"
     OTHER = "other"
 
 
