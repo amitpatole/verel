@@ -235,6 +235,190 @@ def test_nested_list_wrapper_unwrapped():
                for i in extract_rbac_risks([nested]))
 
 
+def test_cluster_wide_read_all_flagged():
+    from verel.ci import extract_rbac_risks
+    cr = {"kind": "ClusterRole", "metadata": {"name": "reader"},
+          "rules": [{"verbs": ["get", "list", "watch"], "resources": ["*"]}]}
+    assert any(json.loads(i.detail_json)["rule_id"] == "SECRETS_ACCESS"
+               for i in extract_rbac_risks([cr]))
+    # parity: terraform-provider path
+    after = {"rule": [{"verbs": ["get", "list", "watch"], "resources": ["*"]}]}
+    assert "SECRETS_ACCESS" in _rules(_rc("kubernetes_cluster_role.r", "kubernetes_cluster_role", after))
+
+
+def test_namespaced_read_all_warns_not_gates():
+    # Round-6 R4: a namespaced Role reading ALL resources in its namespace still reads every secret in
+    # that namespace (e.g. kube-system SA tokens). It must WARN (advisory) — not pass clean, but not
+    # gate like the cluster-wide case either.
+    from verel.ci import extract_rbac_risks
+    role = {"kind": "Role", "metadata": {"name": "r", "namespace": "kube-system"},
+            "rules": [{"verbs": ["get", "list", "watch"], "resources": ["*"]}]}
+    issues = extract_rbac_risks([role])
+    secrets = [i for i in issues if json.loads(i.detail_json)["rule_id"] == "SECRETS_ACCESS"]
+    assert len(secrets) == 1 and secrets[0].severity == Severity.WARNING
+    # parity: terraform-provider namespaced Role
+    after = {"rule": [{"verbs": ["get"], "resources": ["*"]}]}
+    tf = _rules(_rc("kubernetes_role.r", "kubernetes_role", after))
+    assert tf.get("SECRETS_ACCESS") == Severity.WARNING
+
+
+# === Round 6: "the plan is not reality" + RBAC evasion + live-verifier parity ===
+def test_provisioner_local_exec_gates_and_escalates():
+    # P1: a null_resource local-exec that grants admin is INVISIBLE to resource_changes — must GATE
+    # (grader FAIL) and class the apply IRREVERSIBLE (human approval), not verdict-gated CONSEQUENTIAL.
+    from verel.actuators.terraform import escalate
+    from verel.ci import parse_terraform_plan
+    from verel.gateway import ActionClass
+    plan = {
+        "resource_changes": [{"address": "null_resource.grant", "type": "null_resource",
+                              "change": {"actions": ["create"], "after": {"triggers": None}}}],
+        "configuration": {"root_module": {"resources": [
+            {"address": "null_resource.grant", "type": "null_resource",
+             "provisioners": [{"type": "local-exec",
+                               "expressions": {"command": {"constant_value": "aws iam attach-role-policy"}}}]}]}},
+    }
+    rules = {json.loads(i.detail_json)["rule_id"] for i in parse_terraform_plan(json.dumps(plan))}
+    assert "UNAUDITABLE_PROVISIONER" in rules
+    cls, reasons = escalate(plan)
+    assert cls == ActionClass.IRREVERSIBLE and any("provisioner" in r for r in reasons)
+
+
+def test_provisioner_in_module_detected():
+    from verel.ci.iac import provisioner_resources
+    plan = {"configuration": {"root_module": {"module_calls": {"app": {"module": {"resources": [
+        {"address": "null_resource.x", "type": "null_resource",
+         "provisioners": [{"type": "remote-exec"}]}]}}}}}}
+    assert provisioner_resources(plan) == ["module.app.null_resource.x"]
+
+
+def test_unknown_computed_iam_policy_fails_closed():
+    # P2: policy is "(known after apply)" → null in `after`, true in after_unknown. Must GATE, not pass.
+    rc = {"address": "aws_iam_role_policy.x", "type": "aws_iam_role_policy",
+          "change": {"actions": ["create"], "after": {"name": "x", "role": "app"},
+                     "after_unknown": {"policy": True}}}
+    assert _rules(rc)["UNKNOWN_IAM_CONTENT"] == Severity.ERROR
+
+
+def test_unknown_computed_policy_on_non_iam_typed_resource_fails_closed():
+    # P2 double-blind: a non-IAM-typed resource with a computed inline policy is invisible to both the
+    # type list AND `after` — the after_unknown clause must still extract + gate it.
+    rc = {"address": "aws_s3_bucket.b", "type": "aws_s3_bucket",
+          "change": {"actions": ["create"], "after": {"bucket": "b"},
+                     "after_unknown": {"policy": True}}}
+    assert "UNKNOWN_IAM_CONTENT" in _rules(rc)
+
+
+def test_known_iam_policy_not_falsely_unknown():
+    # False-positive guard: a fully-known least-privilege policy must NOT trip UNKNOWN_IAM_CONTENT.
+    after = {"policy": _doc({"Effect": "Allow", "Action": "s3:GetObject", "Resource": "arn:x"})}
+    rc = _rc("aws_iam_role_policy.lp", "aws_iam_role_policy", after)
+    rc["change"]["after_unknown"] = {"policy": False}
+    assert "UNKNOWN_IAM_CONTENT" not in _rules(rc)
+
+
+def test_builtin_admin_edit_binding_flagged_both_paths():
+    # R1: binding to the built-in `admin`/`edit` ClusterRole (not just cluster-admin) is an admin grant.
+    from verel.ci import extract_rbac_risks
+    for builtin in ("admin", "edit"):
+        crb = {"kind": "ClusterRoleBinding", "metadata": {"name": "x"},
+               "roleRef": {"kind": "ClusterRole", "name": builtin},
+               "subjects": [{"kind": "User", "name": "mallory"}]}
+        rules = {json.loads(i.detail_json)["rule_id"] for i in extract_rbac_risks([crb])}
+        assert "ADMIN_GRANT" in rules, builtin
+        after = {"role_ref": [{"name": builtin}]}
+        assert "ADMIN_GRANT" in _rules(_rc("kubernetes_cluster_role_binding.b",
+                                           "kubernetes_cluster_role_binding", after)), builtin
+
+
+def test_system_authenticated_group_subject_flagged_tf_path():
+    # R2 parity: the terraform path must flag a Group subject system:authenticated (effectively public).
+    after = {"role_ref": [{"name": "view"}],
+             "subject": [{"kind": "Group", "name": "system:authenticated"}]}
+    assert _rules(_rc("kubernetes_cluster_role_binding.b", "kubernetes_cluster_role_binding",
+                      after))["PUBLIC_PRINCIPAL"] == Severity.CRITICAL
+
+
+def test_resource_scoped_privesc_primitives_flagged():
+    # R3: webhook configs / CSR approval / node mutation are cluster-takeover even without a wildcard.
+    from verel.ci import extract_rbac_risks
+    cases = [
+        {"verbs": ["create"], "resources": ["mutatingwebhookconfigurations"]},
+        {"verbs": ["approve"], "resources": ["certificatesigningrequests"]},
+        {"verbs": ["update"], "resources": ["nodes"]},
+    ]
+    for rule in cases:
+        cr = {"kind": "ClusterRole", "metadata": {"name": "x"}, "rules": [rule]}
+        rules = {json.loads(i.detail_json)["rule_id"] for i in extract_rbac_risks([cr])}
+        assert "PRIVILEGE_ESCALATION" in rules, rule
+        assert "PRIVILEGE_ESCALATION" in _rules(
+            _rc("kubernetes_cluster_role.x", "kubernetes_cluster_role", {"rule": [rule]})), rule
+
+
+def test_aggregation_rule_clusterrole_advised():
+    # R5: an aggregating ClusterRole with empty rules grows silently → advisory, not silent green.
+    from verel.ci import extract_rbac_risks
+    cr = {"kind": "ClusterRole", "metadata": {"name": "agg"},
+          "aggregationRule": {"clusterRoleSelectors": [{"matchLabels": {"x": "y"}}]}, "rules": []}
+    rules = {json.loads(i.detail_json)["rule_id"] for i in extract_rbac_risks([cr])}
+    assert "AGGREGATION_RULE" in rules
+
+
+def test_live_verifier_privesc_sets_superset_of_offline():
+    # E1 drift-guard: the live effective-access verifier must NEVER be blinder than the offline plan
+    # grader, or it would silently pass grants the plan grader catches. Pin the superset relationship.
+    from verel.actuators import access_verify
+    from verel.ci import iac
+    assert iac._PRIVESC_ACTIONS <= access_verify._SENSITIVE_ACTIONS
+    assert (iac._ADMIN_GCP_ROLES | iac._PRIVESC_GCP_ROLES) <= access_verify._GCP_GATING_ROLES
+    assert (iac._ADMIN_AZURE_GUIDS | iac._PRIVESC_AZURE_GUIDS) <= access_verify._AZURE_GATING_GUIDS
+
+
+def test_live_verifier_catches_login_profile_and_token_creator():
+    # E1: concrete grants the OLD hand-rolled sets dropped — now flagged.
+    from verel.actuators.access_verify import parse_aws_simulate, parse_gcp_analyze_iam
+    aws = json.dumps({"EvaluationResults": [
+        {"EvalActionName": "iam:CreateLoginProfile", "EvalDecision": "allowed",
+         "EvalResourceName": "arn:aws:iam::1:user/admin"}]})
+    assert any(json.loads(i.detail_json)["rule_id"] == "EFFECTIVE_ALLOW"
+               for i in parse_aws_simulate(aws))
+    gcp = json.dumps({"mainAnalysis": {"analysisResults": [
+        {"iamBinding": {"role": "roles/iam.serviceAccountTokenCreator",
+                        "members": ["user:attacker@evil.com"]}}]}})
+    assert any(json.loads(i.detail_json)["rule_id"] == "ADMIN_GRANT"
+               for i in parse_gcp_analyze_iam(gcp))
+
+
+def test_aws_simulate_resource_specific_allow_flagged():
+    # E2: a per-resource ALLOW hidden under a top-level implicitDeny must still be caught.
+    from verel.actuators.access_verify import parse_aws_simulate
+    out = json.dumps({"EvaluationResults": [
+        {"EvalActionName": "iam:PassRole", "EvalDecision": "implicitDeny",
+         "ResourceSpecificResults": [
+             {"EvalResourceName": "arn:aws:iam::1:role/admin", "EvalResourceDecision": "allowed"}]}]})
+    assert any(json.loads(i.detail_json)["rule_id"] == "EFFECTIVE_ALLOW"
+               for i in parse_aws_simulate(out))
+
+
+def test_gcp_cred_project_mismatch_fails_closed():
+    # E3: a cred for a DIFFERENT project must not produce a falsely-scoped green for the target.
+    from verel.actuators.access_verify import EffectiveAccessVerifier
+    from verel.actuators.cloudcreds import CloudCreds
+    creds = CloudCreds("gcp", True, "/x", project="prod-account", env={"X": "1"})
+    rep = EffectiveAccessVerifier(runner=lambda *a, **k: (0, "{}", "")).gcp_analyze_iam(
+        "projects/sandbox-account", creds)
+    assert rep.errored and rep.verdict.name == "FAIL"
+
+
+def test_azure_guid_only_admin_assignment_flagged():
+    # E4: an Owner assignment surfaced only via roleDefinitionId GUID (empty name) is still flagged.
+    from verel.actuators.access_verify import parse_az_role_assignments
+    out = json.dumps([{"roleDefinitionName": "",
+                       "roleDefinitionId": "/subscriptions/x/.../8e3af657-a8ff-443c-a75c-2fe8c4bcb635",
+                       "scope": "/subscriptions/abc"}])
+    assert any(json.loads(i.detail_json)["rule_id"] == "ADMIN_GRANT"
+               for i in parse_az_role_assignments(out))
+
+
 def test_least_privilege_inline_policy_is_clean():
     # Round-4 generic extraction must NOT cry wolf on a scoped least-privilege policy (false-positive check).
     after = {"policy": _doc({"Effect": "Allow", "Action": "s3:GetObject",

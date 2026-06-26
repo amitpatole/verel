@@ -18,7 +18,15 @@ import os
 import subprocess
 from collections.abc import Callable
 
-from ..ci.iac import safe_arg
+from ..ci.iac import (
+    _ADMIN_AZURE_GUIDS,
+    _ADMIN_AZURE_ROLES,
+    _ADMIN_GCP_ROLES,
+    _PRIVESC_ACTIONS,
+    _PRIVESC_AZURE_GUIDS,
+    _PRIVESC_GCP_ROLES,
+    safe_arg,
+)
 from ..verdict.models import Confidence, GraderKind, Issue, IssueKind, Report, Severity, Verdict
 from .cloudcreds import CloudCreds
 
@@ -33,14 +41,15 @@ def subprocess_env_runner(cmd: list[str], env: dict[str, str] | None = None, *,
     return r.returncode, r.stdout, r.stderr
 
 
-# Actions that, if EFFECTIVELY allowed on a broad resource, indicate a privilege-escalation / admin
-# reach worth flagging in a simulate result (the same primitives the pre-apply sensor watches).
-_SENSITIVE_ACTIONS = {
-    "iam:passrole", "iam:createpolicyversion", "iam:attachrolepolicy", "iam:attachuserpolicy",
-    "iam:createaccesskey", "iam:putrolepolicy", "sts:assumerole", "*",
-}
-_ADMIN_GCP_ROLES = {"roles/owner", "roles/editor"}
-_ADMIN_AZURE_ROLES = {"owner", "contributor", "user access administrator"}
+# Actions that, if EFFECTIVELY allowed, indicate privilege-escalation / admin reach. This MUST be a
+# superset of the pre-apply sensor's privesc set — a live check that is BLINDER than the plan grader
+# would silently pass grants the plan grader catches (round-6 finding E1, thesis-breaking). So we
+# reuse the canonical `_PRIVESC_ACTIONS` from the offline sensor as the single source of truth.
+_SENSITIVE_ACTIONS = _PRIVESC_ACTIONS | {"*"}
+# GCP admin OR privilege-escalation roles, reusing the offline sensor's canonical sets (E1).
+_GCP_GATING_ROLES = _ADMIN_GCP_ROLES | _PRIVESC_GCP_ROLES
+# Azure built-in admin/privesc role GUIDs (an assignment may carry only roleDefinitionId) (E1/E4).
+_AZURE_GATING_GUIDS = _ADMIN_AZURE_GUIDS | _PRIVESC_AZURE_GUIDS
 _PUBLIC = {"allusers", "allauthenticatedusers"}
 
 
@@ -97,10 +106,19 @@ def parse_aws_simulate(out: str, err: str = "", sensitive: set[str] | None = Non
     issues = []
     for r in data.get("EvaluationResults", []) if isinstance(data, dict) else []:
         action = str(r.get("EvalActionName", ""))
-        if r.get("EvalDecision") == "allowed" and action.lower() in sensitive:
+        if action.lower() not in sensitive:
+            continue
+        if r.get("EvalDecision") == "allowed":
             res = r.get("EvalResourceName", "*")
             issues.append(_iam_issue("EFFECTIVE_ALLOW", Severity.ERROR,
                                      f"principal is effectively allowed {action} on {res}", action))
+        # Per-resource results can ALLOW a specific resource even when the top-level decision is a
+        # generic implicitDeny — that allow is the real grant and must not be missed (E2).
+        for rsr in r.get("ResourceSpecificResults", []) if isinstance(r, dict) else []:
+            if isinstance(rsr, dict) and rsr.get("EvalResourceDecision") == "allowed":
+                res = rsr.get("EvalResourceName", "*")
+                issues.append(_iam_issue("EFFECTIVE_ALLOW", Severity.ERROR,
+                                         f"principal is effectively allowed {action} on {res}", action))
     return issues
 
 
@@ -119,9 +137,9 @@ def parse_gcp_analyze_iam(out: str, err: str = "") -> list[Issue]:
         b = (r or {}).get("iamBinding", {}) if isinstance(r, dict) else {}
         role = str(b.get("role", "")).lower()
         members = [str(m).lower() for m in b.get("members", []) or []]
-        if role in _ADMIN_GCP_ROLES:
+        if role in _GCP_GATING_ROLES:
             issues.append(_iam_issue("ADMIN_GRANT", Severity.ERROR,
-                                     f"effective admin role {role}", role))
+                                     f"effective admin/privesc role {role}", role))
         if any(m.split(":")[-1] in _PUBLIC for m in members):
             issues.append(_iam_issue("PUBLIC_PRINCIPAL", Severity.CRITICAL,
                                      f"effective public member on {role}", role))
@@ -138,11 +156,14 @@ def parse_az_role_assignments(out: str, err: str = "") -> list[Issue]:
     issues = []
     for a in data if isinstance(data, list) else []:
         role = str(a.get("roleDefinitionName", "")).lower()
+        # An assignment can surface only a roleDefinitionId GUID (empty/renamed name) — match the GUID
+        # tail against the offline sensor's built-in admin/privesc GUIDs so it can't slip through (E4).
+        guid = str(a.get("roleDefinitionId", "")).rstrip("/").split("/")[-1].lower()
         scope = str(a.get("scope", ""))
         broad = scope.count("/") <= 2 or "/managementGroups/" in scope  # /subscriptions/<id> or higher
-        if role in _ADMIN_AZURE_ROLES and broad:
+        if (role in _ADMIN_AZURE_ROLES or guid in _AZURE_GATING_GUIDS) and broad:
             issues.append(_iam_issue("ADMIN_GRANT", Severity.ERROR,
-                                     f"effective {role} at {scope}", scope))
+                                     f"effective {role or guid} at {scope}", scope))
     return issues
 
 
@@ -189,6 +210,13 @@ class EffectiveAccessVerifier:
         if not creds.available:
             return _errored(f"gcp: no credentials ({creds.source})")
         safe_arg(scope, "gcp scope")  # e.g. projects/<id> — no flag/metachar injection into gcloud
+        # Bind cred identity to the audited target: if the SA key names a project AND the scope names a
+        # DIFFERENT project, we'd be analyzing the wrong reality and reporting it as the target's —
+        # fail closed instead of presenting a falsely-scoped green (round-6 finding E3).
+        scope_proj = scope.split("projects/", 1)[1].split("/")[0] if "projects/" in scope else ""
+        if creds.project and scope_proj and creds.project != scope_proj:
+            return _errored(f"gcp: credential project {creds.project!r} does not match audited scope "
+                            f"project {scope_proj!r} — refusing to report a mismatched reality")
         rc, out, err = self._exec(
             ["gcloud", "asset", "analyze-iam-policy", "--scope", scope, "--format", "json"], creds.env)
         if rc != 0:
