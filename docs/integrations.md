@@ -15,7 +15,7 @@ webhook, an agent framework, or Kubernetes. Every channel returns the same thing
 | **REST gate** | Language-agnostic HTTP gate over one repo — any CI / script `POST`s, gets a verdict | `verel serve` | [↓](#rest-gate-any-language-any-ci) |
 | **GitHub PR webhook** | HMAC-verified `pull_request` events run the gate on the configured repo | `POST /github` | [↓](#github-pr-webhook) |
 | **Commit-status callback** | Posts a red/green check back onto the PR | `post_commit_status` / `on_event` | [↓](#post-a-check-back-to-the-pr) |
-| **GitHub Action** | Fails the build on a FAIL verdict | `amitpatole/verel@v1.0.1` | [↓](#ci-matrix) |
+| **GitHub Action** | Fails the build on a FAIL verdict | `amitpatole/verel@v1.1.0` | [↓](#ci-matrix) |
 | **pre-commit hook** | Gates the commit on the verdict bus | `.pre-commit-hooks.yaml` (`verel-precommit`) | [↓](#pre-commit) |
 | **Agent SDK shims** | The gate as a tool for OpenAI / Anthropic / LangChain / LangGraph / CrewAI / AutoGen / Claude Agent SDK | `verel.integrations.sdk` | [↓](#agent-sdk-shims) |
 | **Gate a PR vs. its ticket** | Pull a PR's acceptance criteria + diff from GitHub, grade intent | `grade_pr()` / `verel_spec` | [↓](#gate-a-pr-against-its-ticket) |
@@ -47,8 +47,9 @@ The config is the standard `mcpServers` shape every host understands:
 }
 ```
 
-Tools the agent gets: `verel_gate`, `verel_sight`, `verel_verify`, `verel_ci_check`, `verel_spec`,
-`verel_invariants`, `verel_smell`, `verel_recall`, `verel_remember`, `verel_build_tool`. See the full
+Tools the agent gets: `verel_gate`, `verel_sight`, `verel_verify`, `verel_ci_check`,
+`verel_iac_check`, `verel_spec`, `verel_invariants`, `verel_smell`, `verel_recall`, `verel_remember`,
+`verel_build_tool`. See the full
 [MCP tool reference](usage.md#mcp-tools-the-verified-review-graders) and the
 [Graders reference](graders.md).
 
@@ -174,7 +175,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: amitpatole/verel@v1.0.1
+      - uses: amitpatole/verel@v1.1.0
         with:
           repo: .                 # path to gate (default ".")
           install: "-e .[dev]"    # YOUR project's deps so its tests import
@@ -213,7 +214,7 @@ For a build that has no Python — or where you'd rather not install Verel per-j
 ```yaml
 # .pre-commit-config.yaml
 - repo: https://github.com/amitpatole/verel
-  rev: v1.0.1
+  rev: v1.1.0
   hooks: [{ id: verel-precommit }]
 ```
 
@@ -321,6 +322,49 @@ tools = langchain_tools()   # [StructuredTool(name="verel_gate", ...)] — bind 
 `{"error": "..."}` (it never raises), so a stray model tool call can't crash your loop.
 
 ---
+
+## IaC / DevOps & cloud IAM
+
+Grade Terraform/OpenTofu, the wider DevOps toolchain, and **cloud-IAM blast radius** on the same
+verdict bus — and gate `apply`/`destroy` through the action gateway. Tools shell out behind pure
+parsers (offline-tested), each mapping onto an existing trust tier:
+
+| Tool | Grader | Spec |
+|---|---|---|
+| `terraform/tofu validate` · `plan` | `IAC` (+ IAM sensor) | `terraform_validate_spec` · `terraform_plan_spec` |
+| `tflint` | `LINT` | `tflint_spec` |
+| `trivy config` · `checkov` | `SECURITY` | `trivy_config_spec` · `checkov_spec` |
+| `conftest` / OPA | `POLICY` | `conftest_spec` |
+| `infracost` (vs explicit budget) | `COST` | `infracost_spec(repo, budgets={...})` |
+| `helm template` · `kubectl --dry-run` | `IAC` (+ RBAC sensor) | `helm_template_spec` · `kubectl_dryrun_spec` |
+| `kube-score` · `kube-linter` · `polaris` | `SECURITY` | `kube_score_spec` · `kube_linter_spec` · `polaris_spec` |
+| Parliament · Cloudsplaining | `IAM` | `parliament_spec` · `cloudsplaining_spec` |
+
+**Catch dangerous IAM before apply** — the sensor reads a `terraform show -json` plan offline:
+
+```python
+from verel.ci import parse_terraform_plan
+for i in parse_terraform_plan(open("tfplan.json").read()):
+    print(i.severity.value, i.source.value, i.detail["rule_id"], i.locator)
+# error iam WILDCARD_ACTION aws_iam_policy.admin
+```
+
+**Gate the apply** — the actuator plans, grades the **bound** plan, and applies *exactly* that file
+(a re-plan/substitution between approval and apply is refused — TOCTOU defense). Any destroy/replace or
+IAM widening ⇒ `IRREVERSIBLE` (dry-run + human approval):
+
+```python
+from verel.actuators import TerraformActuator
+act = TerraformActuator(repo=".")
+plan = act.plan()                       # bound plan + digest + IAC/IAM verdict
+print(plan.report.verdict.value, plan.action_class.value, plan.escalation_reasons)
+# act.act(plan.plan_digest) applies ONLY the approved plan; act.watch() confirms convergence
+```
+
+Credentials for the effective-access verifier (AWS IAM Access Analyzer / GCP Policy Analyzer / Azure
+role assignments) are resolved from `~/.config` and never logged — `verel doctor` shows what's
+detected. See the [Graders reference](graders.md#iac-devops-grade-terraform-kubernetes-cloud-iam-before-apply)
+and `examples/demo_iac.py`.
 
 ## Kubernetes
 

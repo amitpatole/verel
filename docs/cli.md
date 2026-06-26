@@ -4,7 +4,7 @@ Verel ships **four** console scripts:
 
 | Script | Purpose |
 |---|---|
-| `verel` | The interactive / agent command line (`doctor`, `loop`, `fleet`, `heal`, `verify`, `serve`, `mcp`, `rules`, `ci`). |
+| `verel` | The interactive / agent command line (`doctor`, `loop`, `fleet`, `heal`, `verify`, `verify-access`, `serve`, `mcp`, `rules`, `ci`). |
 | `verel-ci` | The gated CI entry point — runs the verdict bus and exits non-zero on a `fail` (CI / git-hook). |
 | `verel-mcp` | The stdio MCP server a host launches to expose the graders as MCP tools (see [below](#verel-mcp-the-stdio-mcp-server)). |
 | `verel-operator` | The Kubernetes (Kopf) operator that reconciles the Verel CRDs (see [below](#verel-operator-the-kubernetes-operator)). |
@@ -23,6 +23,7 @@ Verel ships **four** console scripts:
 | `heal` | Self-healing CI — failing tests → an agent fixes → green. |
 | `ci` | Delegate to `verel-ci` (agent-run CI). |
 | `verify` | Verify a run-receipt — `ed25519` receipts are publicly verifiable (see below). |
+| `verify-access` | **Opt-in, online.** Query what the cloud *actually* grants (AWS IAM Access Analyzer / GCP Policy Analyzer / Azure role assignments). Needs cloud read creds from `~/.config`; **not** part of the offline gate. |
 | `serve` | Run the REST gate server over a repo (`POST /gate`, `POST /github`). |
 | `mcp install` | Print the `verel-mcp` server config + where each agent host expects it. |
 | `rules` | Emit a rules-file snippet that makes any agent gate via Verel before "done". |
@@ -47,7 +48,7 @@ verel doctor
 A representative run:
 
 ```text
-verel 1.0.1
+verel 1.1.0
   OK python 3.11.9
   OK git
   -- ollama cloud key (~/.config/ollama/key)
@@ -77,7 +78,31 @@ verel ci check --repo . --no-lint
 ```
 
 `verel ci …` forwards its remainder verbatim to `verel-ci`, so any `verel-ci` subcommand/flag
-(`check`, `precommit`, `install`) works behind `verel ci`. See [`verel-ci`](#verel-ci-the-ci-gate).
+(`check`, `precommit`, `iac`, `install`) works behind `verel ci`. See [`verel-ci`](#verel-ci-the-ci-gate).
+
+```bash
+# Grade an IaC artifact OFFLINE — catch a dangerous cloud-IAM change before apply (exit 1 on FAIL):
+terraform plan -out tfplan.bin && terraform show -json tfplan.bin > tfplan.json
+verel ci iac --repo . --plan tfplan.json        # drift (INFO) + IAM risks (gate)
+verel ci iac --repo . --manifests rendered.json # K8s RBAC sensor (kubectl -o json)
+```
+
+```bash
+# OPT-IN effective-access check — what does the cloud ACTUALLY grant? (online; reads creds from ~/.config)
+verel verify-access --cloud aws --policy-file policy.json                 # static: IAM Access Analyzer validate-policy
+verel verify-access --cloud aws --principal-arn arn:aws:iam::123456789012:role/app \
+                    --action iam:PassRole sts:AssumeRole                  # EFFECTIVE: simulate-principal-policy
+verel verify-access --cloud gcp   --scope projects/my-proj               # analyze-iam-policy
+verel verify-access --cloud azure                                        # role assignment list
+# Fails closed (exit 2) when the cloud's creds are absent; never runs in the offline gate.
+```
+
+For AWS, `--policy-file` is **static validation** (does this policy *document* have findings?) while
+`--principal-arn` is **effective access** — it asks the account, via `simulate-principal-policy`, what a
+role/user is *actually* allowed across all attached/inline/SCP policies. `--action` defaults to the
+privilege-escalation primitives when omitted. GCP needs `--scope` (e.g. `projects/<id>`); Azure lists
+role assignments. The verifier never claims a cloud identity it didn't check, and reuses the offline
+sensor's privesc sets so the live check is never *blinder* than the plan grader.
 
 ### Verify a receipt (`verel verify`) — publicly verifiable "done"
 

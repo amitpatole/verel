@@ -64,7 +64,7 @@ offline examples in `examples/`) run with no key at all.
 | **CLI** | `verel …` | `doctor` · `loop` · `fleet` · `heal` · `ci` |
 | **CI CLI / git hook** | `verel-ci …` | a verdict-bus gate in CI or a pre-commit hook |
 | **MCP server** | `verel-mcp` | exposing gate / recall / build-tool / ci-check to an MCP host |
-| **GitHub Action** | `amitpatole/verel@v1.0.1` | failing a build on a FAIL verdict |
+| **GitHub Action** | `amitpatole/verel@v1.1.0` | failing a build on a FAIL verdict |
 | **pre-commit** | `.pre-commit-hooks.yaml` | gating commits |
 
 ### CLI reference
@@ -93,7 +93,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: amitpatole/verel@v1.0.1
+      - uses: amitpatole/verel@v1.1.0
         with:
           repo: .
           install: "-e .[dev]"      # your project deps so its tests import
@@ -102,7 +102,7 @@ jobs:
 ```yaml
 # .pre-commit-config.yaml
 - repo: https://github.com/amitpatole/verel
-  rev: v1.0.1
+  rev: v1.1.0
   hooks: [{ id: verel-precommit }]
 ```
 
@@ -234,8 +234,10 @@ See **[Memory backends](memory-backends.md)** for how the brain uses it.
 
 ## Agent-run CI/CD (`verel.ci`)
 
-Tests, lint, and types as first-class graders, across **Python · JS/TS · Go**, plus **perf** and
-**security**. Stages compose graders and gate them with attestation + failure-memory.
+Tests, lint, and types as first-class graders, across **Python · JS/TS · Go**, plus **perf**,
+**security**, and **IaC / cloud-IAM** (Terraform plan + Kubernetes RBAC — see
+[Integrations](integrations.md) and [Graders](graders.md)). Stages compose graders and gate them with
+attestation + failure-memory.
 
 ```python
 from verel.ci import inner_loop_stage, premerge_stage, run_stage
@@ -427,15 +429,16 @@ rep = grade_smell(".", ["billing.py"], complexity_budget=12)   # over-complex fu
 ### MCP tools — the Verified-Review graders
 
 Three of the five Verified-Review graders are exposed as MCP tools by `verel-mcp` (alongside
-`verel_gate` / `verel_ci_check` / `verel_verify` / `verel_recall` / `verel_remember` /
-`verel_build_tool`). The **mutation** grader and the **action gateway** have no MCP tool — invoke them
-from Python (see above).
+`verel_gate` / `verel_ci_check` / `verel_iac_check` / `verel_verify` / `verel_recall` /
+`verel_remember` / `verel_build_tool`). The **mutation** grader and the **action gateway** have no MCP
+tool — invoke them from Python (see above).
 
 | MCP tool | Required args | Optional args | Gates on |
 |---|---|---|---|
 | `verel_spec` | `repo`, `criteria` | `files[]`, `checks_per_criterion` | a violated acceptance criterion (`intent_mismatch`) |
 | `verel_invariants` | `repo` | `invariants[]`, `files[]` | a falsified declared business rule |
 | `verel_smell` | `repo`, `files[]` | `complexity_budget` | a function over the cyclomatic-complexity budget |
+| `verel_iac_check` | `repo` | `plan`, `manifests` | a dangerous cloud-IAM change (wildcard/privesc/public/admin) in a terraform plan or K8s manifests — offline, before apply |
 
 Example tool-call payloads (the shape an MCP host sends):
 

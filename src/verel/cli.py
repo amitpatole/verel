@@ -39,6 +39,29 @@ def _doctor() -> int:
     print(f"  {ok(sight)}agentvision (eyes) — `pip install verel[sight]`")
     print(f"  {ok(shutil.which('ruff'))}ruff (lint grader)")
     print(f"  {ok(shutil.which('mypy'))}mypy (typecheck grader)")
+    # IaC / DevOps graders + IAM sensor (IAC-KICKOFF.md) — external binaries, install `verel[iac]`.
+    # terraform/tofu is the IAC grader + IAM-change source; the rest broaden coverage by phase.
+    _tf = shutil.which("terraform") or shutil.which("tofu")
+    print(f"  {ok(_tf)}terraform/tofu (IaC + IAM-sensor grader)")
+    for _bin, _label in (("trivy", "trivy (IaC security grader)"),
+                         ("tflint", "tflint (IaC lint grader)"),
+                         ("checkov", "checkov (IaC security grader)"),
+                         ("conftest", "conftest/OPA (policy grader)"),
+                         ("infracost", "infracost (cost grader)"),
+                         ("parliament", "parliament (IAM least-priv grader)"),
+                         ("cloudsplaining", "cloudsplaining (IAM least-priv grader)"),
+                         ("kubectl", "kubectl (K8s validate + RBAC sensor)"),
+                         ("helm", "helm (K8s render + RBAC sensor)"),
+                         ("kube-score", "kube-score (K8s posture grader)"),
+                         ("kube-linter", "kube-linter (K8s posture grader)"),
+                         ("polaris", "polaris (K8s posture grader)")):
+        print(f"  {ok(shutil.which(_bin))}{_label}")
+    # Cloud creds for the effective-access verifier (Phase 5) — resolved from ~/.config (never logged).
+    from .actuators.cloudcreds import resolve as _resolve_creds
+    for _cloud in ("aws", "gcp", "azure"):
+        cc = _resolve_creds(_cloud)
+        warn = f"  ⚠ {cc.warning}" if cc.warning else ""
+        print(f"  {ok(cc.available)}{_cloud} creds — {cc.source}{warn}")
     try:
         import mem0  # noqa: F401
         m = True
@@ -171,6 +194,50 @@ def _rules(args) -> int:
     return 0
 
 
+def _verify_access(args) -> int:
+    """OPT-IN effective-access check — query what the cloud ACTUALLY grants (AWS IAM Access Analyzer /
+    GCP Policy Analyzer / Azure role assignments). Needs cloud READ creds (resolved from ~/.config,
+    never logged) and makes live provider calls — deliberately NOT part of the offline gate."""
+    from .actuators import EffectiveAccessVerifier, resolve
+    creds = resolve(args.cloud)
+    if not creds.available:
+        print(f"verify-access: no {args.cloud} credentials ({creds.source}) — fail closed", file=sys.stderr)
+        return 2
+    if creds.warning:
+        print(f"verify-access: warning: {creds.warning}", file=sys.stderr)
+    v = EffectiveAccessVerifier()
+    try:
+        if args.cloud == "aws":
+            if args.principal_arn:
+                # Effective-access: ask the account what the principal is ACTUALLY allowed (round-7).
+                from .ci.iac import _PRIVESC_ACTIONS
+                actions = args.action or sorted(_PRIVESC_ACTIONS)
+                rep = v.aws_simulate_principal(args.principal_arn, actions, creds)
+            elif args.policy_file:
+                rep = v.aws_validate_policy(args.policy_file, creds)
+            else:
+                print("verify-access: aws needs --principal-arn (effective access) or --policy-file "
+                      "(static validation)", file=sys.stderr)
+                return 2
+        elif args.cloud == "gcp":
+            if not args.scope:
+                print("verify-access: --scope is required for gcp (e.g. projects/<id>)", file=sys.stderr)
+                return 2
+            rep = v.gcp_analyze_iam(args.scope, creds)
+        else:
+            rep = v.azure_role_assignments(creds)
+    except ValueError as e:  # safe_arg rejected an injected option/metachar in policy_file / scope
+        print(f"verify-access: {e}", file=sys.stderr)
+        return 2
+    print(f"[verify-access:{args.cloud}] verdict={rep.verdict.value}  ({creds.source})")
+    if rep.errored:
+        print(f"  ! {rep.summary}", file=sys.stderr)
+    for i in rep.issues[:50]:
+        print(f"      {i.source.value}:{i.severity.value} {i.locator or ''} {i.message[:80]}")
+    from .verdict.models import Verdict
+    return 0 if rep.verdict != Verdict.FAIL else 1
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="verel", description="verified agents framework")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -221,6 +288,17 @@ def main(argv=None) -> int:
     rl.add_argument("--write", action="store_true",
                     help="write/append the snippet to its file in the current repo (else print)")
 
+    va = sub.add_parser("verify-access",
+                        help="OPT-IN: query what the cloud ACTUALLY grants (needs cloud read creds; "
+                             "makes live provider calls — not an offline gate)")
+    va.add_argument("--cloud", required=True, choices=("aws", "gcp", "azure"))
+    va.add_argument("--policy-file", help="aws: an IAM policy JSON to validate (IAM Access Analyzer)")
+    va.add_argument("--principal-arn",
+                    help="aws: a role/user ARN to test EFFECTIVE access for (simulate-principal-policy)")
+    va.add_argument("--action", nargs="+",
+                    help="aws: action names to simulate (default: the privilege-escalation primitives)")
+    va.add_argument("--scope", help="gcp: the analyze-iam-policy scope, e.g. projects/<id>")
+
     args = p.parse_args(argv)
     if args.cmd == "version":
         print(__version__)
@@ -244,6 +322,8 @@ def main(argv=None) -> int:
         return _rules(args)
     if args.cmd == "serve":
         return _serve(args)
+    if args.cmd == "verify-access":
+        return _verify_access(args)
     return 2
 
 

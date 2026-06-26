@@ -41,7 +41,7 @@ Two consequences worth internalising:
   also absent from `PRECISE_GRADERS`, which is the separate set used to mark a grader's receipt
   `precise` and to authorise verdict-driven rollback; gating itself only consults `ADVISORY_GRADERS`.)
   For reference, `PRECISE_GRADERS = {TEST, TYPECHECK, LINT, MUTATION, SMELL, DOM, OCR, CV, SECURITY,
-  DSP, ASR}`.
+  IAC, IAM, POLICY, COST, DSP, ASR}`.
 
 ## Every `GraderKind`
 
@@ -58,13 +58,90 @@ Two consequences worth internalising:
 | `LLM_JUDGE` | open-ended model judgement (advisory companion) | advisory (clamped) | emitted alongside `CONTRACT`/`SMELL` for unverifiable findings | `INTENT_MISMATCH`, `OTHER` | — |
 | `DOM` · `OCR` · `CV` | structural/visual defects from the eyes | gates | `verel.senses.perceive` (needs `verel[sight]`) | `OVERFLOW`, `CLIPPED`, `MISSING_ELEMENT`, … | — |
 | `VISION` | the vision-LLM's open-ended opinion | advisory (clamped) | `verel.senses.perceive` (needs `verel[sight]`) | layout/contrast/typo kinds | — |
+| `IAC` | terraform/tofu validate · plan (drift) · helm/kubectl render | gates | `terraform_validate_spec` / `terraform_plan_spec` / `helm_template_spec` / `kubectl_dryrun_spec` | `IAC_DRIFT`, `OTHER` | `examples/demo_iac.py` |
+| `IAM` | cloud-IAM change sensor + least-priv + effective-access | gates | `parse_terraform_plan` (sensor) · `parliament_spec` / `cloudsplaining_spec` · `EffectiveAccessVerifier` | `IAM_RISK` | `examples/demo_iac.py` |
+| `POLICY` | policy-as-code (conftest / OPA) | gates | `conftest_spec` | `OTHER` | `examples/demo_iac.py` |
+| `COST` | cloud spend vs an explicit budget (infracost) | gates | `infracost_spec(repo, budgets={...})` | `OTHER` | `examples/demo_iac.py` |
 | `DSP` · `ASR` · `ACOUSTIC` · `AUDIO_LLM` | hearing (audel / ears) | reserved | not wired in verel | audio kinds | — |
-| `COST` | spend accounting | reserved | not wired in verel | — | — |
 
-`DSP`/`ASR`/`ACOUSTIC`/`AUDIO_LLM` and `COST` are organism-level `GraderKind`s the contract reserves
-(the `audel`/ears organ and cost tracking); they are defined in the model but **not produced by any
-grader inside `verel`** today. `DSP`/`ASR` are precise and `ACOUSTIC`/`AUDIO_LLM` advisory by the same
-rule above, for when the hearing organ lands.
+`DSP`/`ASR`/`ACOUSTIC`/`AUDIO_LLM` are organism-level `GraderKind`s the contract reserves (the
+`audel`/ears organ); they are defined in the model but **not produced by any grader inside `verel`**
+today. `DSP`/`ASR` are precise and `ACOUSTIC`/`AUDIO_LLM` advisory by the same rule above, for when the
+hearing organ lands.
+
+### IaC / DevOps — grade Terraform, Kubernetes & cloud IAM before apply
+
+The IaC graders bring Terraform/OpenTofu, the wider DevOps toolchain, and **cloud-IAM blast radius**
+onto the bus. Tools shell out behind pure parsers (offline-tested; the runner is injected), and each
+maps onto an existing trust tier — so `tflint`→`LINT`, `trivy`/`checkov`/`kube-score`→`SECURITY`,
+`conftest`→`POLICY`, `infracost`→`COST` (against an **explicit** budget, like `PERF`).
+
+The headline is the **IAM change sensor**: `parse_terraform_plan` reads a `terraform show -json` plan,
+normalizes every IAM-affecting change, and runs deterministic rules — wildcard action/resource,
+`iam:PassRole`-style privilege escalation, public principal (`*`/`allUsers`/`system:anonymous`),
+admin grants (`AdministratorAccess`/`roles/owner`/`cluster-admin`), open `0.0.0.0/0` ingress — across
+AWS, GCP, Azure and Kubernetes RBAC. A risk is a grounded `IAM_RISK` `ERROR`/`CRITICAL` on the bus,
+caught **before** apply (`examples/demo_iac.py`, no cloud creds).
+
+```python
+from verel.ci import parse_terraform_plan          # offline — over a `terraform show -json` plan
+issues = parse_terraform_plan(open("tfplan.json").read())
+for i in issues:
+    print(i.severity.value, i.source.value, i.detail["rule_id"], i.locator)
+# error iam WILDCARD_ACTION aws_iam_policy.admin
+```
+
+The same offline sensor is wired to two surfaces: the **`verel_iac_check`** MCP tool (`repo` + `plan`
+and/or `manifests`) and the **`verel-ci iac --repo . --plan tfplan.json`** CLI (exit 1 on FAIL) — so an
+agent or a CI step catches a dangerous grant before apply with no cloud credentials.
+
+#### The IAM/IaC rule catalog
+
+Every `rule_id` the sensor can emit (a grounded `IAM_RISK` on a `GraderKind.IAM` report unless noted),
+grouped by what it catches:
+
+| `rule_id` | Severity | Catches | Clouds |
+|---|---|---|---|
+| `WILDCARD_ACTION` | ERROR | `*`/`?` anywhere in an action (`iam:*`, `s3:Get*`, `iam:*Policy`) | AWS + generic policy docs |
+| `WILDCARD_RESOURCE` | ERROR | wildcard action **on** a `*` resource | AWS + generic |
+| `PRIVILEGE_ESCALATION` | ERROR (scoped) / CRITICAL | `iam:PassRole`/`sts:AssumeRole*`/`lambda:AddPermission` primitives; GCP `serviceAccountTokenCreator`/`roleAdmin`/…; Azure User-Access-Administrator; K8s `escalate`/`bind`/`impersonate`, webhook/CSR/node/proxy primitives, `serviceaccounts/token`, `pods/exec` | AWS · GCP · Azure · K8s |
+| `PUBLIC_PRINCIPAL` | CRITICAL | `*`/`allUsers`/`allAuthenticatedUsers`/`system:anonymous`/`system:unauthenticated`/`system:authenticated`; Lambda public invoke; wildcard principal ARN | AWS · GCP · Azure · K8s |
+| `ADMIN_GRANT` | ERROR | `AdministratorAccess`/`PowerUserAccess`/`IAMFullAccess`; GCP `roles/owner`/`editor`/…; Azure Owner/Contributor (name or GUID); K8s built-in `cluster-admin`/`admin`/`edit` ClusterRole, `system:masters` | AWS · GCP · Azure · K8s |
+| `ALLOW_BY_EXCLUSION` | ERROR | `NotAction`/`NotResource` ("everything except" = presumptive admin) | AWS + generic |
+| `CROSS_ACCOUNT_TRUST` | WARNING (advisory) | trust policy lets a concrete external AWS account assume the role (confused-deputy without an ExternalId) | AWS |
+| `OPEN_INGRESS` | ERROR | `0.0.0.0/0`/`::/0` (incl. split-CIDR halves) ingress | AWS SG · GCP firewall · Azure NSG |
+| `PUBLIC_ACCESS_BLOCK_DISABLED` | ERROR | S3 public-access-block deleted, or any of the 4 flags false/absent | AWS |
+| `PUBLIC_ACL` | ERROR | S3 canned ACL (`public-read`…) or an AllUsers/AuthenticatedUsers grant | AWS |
+| `PUBLIC_DB_ENDPOINT` | ERROR | `publicly_accessible=true` on any routable resource (RDS/Redshift/DMS/…) | AWS |
+| `PUBLIC_BLOB_ACCESS` | ERROR | Azure storage account anonymous public-blob access | Azure |
+| `CREDENTIAL_EXPOSURE` | ERROR | GCP long-lived service-account **key** creation (exportable credential) | GCP |
+| `UNKNOWN_IAM_CONTENT` | ERROR | an IAM-relevant field is "(known after apply)" — blast radius invisible, **fails closed** | all |
+| `UNAUDITABLE_PROVISIONER` | ERROR (`IAC`) | `local-exec`/`remote-exec` provisioner or `external` data source — runs an unauditable program at apply/refresh | all |
+| `HTTP_DATA_SOURCE` | WARNING (advisory, `IAC`) | `data "http"` — fetches a URL every refresh (exfil/SSRF) | all |
+| `DESTROY_OR_REPLACE` | INFO (`IAC_DRIFT`) | a planned destroy/replace (visibility + gateway escalation; does not gate) | all |
+| `WILDCARD_RBAC` | ERROR | RBAC rule granting `*` verbs on `*` resources | K8s |
+| `SECRETS_ACCESS` | ERROR (cluster / privileged ns) / WARNING (ns) | read of `secrets`, or read-all over `*` | K8s |
+| `AGGREGATION_RULE` | WARNING (advisory) | a ClusterRole `aggregationRule` — grows silently to label-selected roles | K8s |
+
+**The plan is not reality.** Three guarantees stop a "clean diff, dirty apply": (1) **provisioners and
+side-effecting data sources are gated** — a `local-exec`/`remote-exec` provisioner, an `external` data
+source, or a `data "http"` runs code the plan's diff can't see (`UNAUDITABLE_PROVISIONER` gates,
+`HTTP_DATA_SOURCE` advises); (2) **computed IAM fails closed** — any IAM field marked "(known after
+apply)" gates as `UNKNOWN_IAM_CONTENT` rather than passing on an unverifiable blast radius;
+(3) **out-of-band drift is graded** — terraform's `resource_drift` is evaluated too, so a live,
+un-reverted manual grant (no planned change to overwrite it) gates at full severity, while a drift the
+apply *will* revert is advisory. The sensor was hardened against a hostile plan/manifest as untrusted
+input over a 14-round adversarial security cadence (every fix pinned as a regression test).
+
+Acting is gated, not just graded. The **terraform actuator** (`verel.actuators.TerraformActuator`)
+plans → grades the **bound** plan file → applies *exactly* that file (a digest mismatch from a re-plan
+between approval and apply is refused — the plan-binding / TOCTOU defense) → re-plans to confirm the
+world converged. The gateway classifies an apply from what the bound plan does: any **destroy/replace
+or IAM widening** ⇒ `IRREVERSIBLE` (dry-run + human approval), pure create/no-op ⇒ `CONSEQUENTIAL`
+(verdict-gated). Direct IAM-mutating tool calls (code/agents) are intercepted the same way
+(`iam_action_class`). Finally, `EffectiveAccessVerifier` confirms what the cloud *actually* grants
+(AWS IAM Access Analyzer / GCP Policy Analyzer / Azure role assignments) with read creds resolved from
+`~/.config` — accurate, but not a pure offline gate.
 
 ### Tests · lint · types — the polyglot CI graders
 

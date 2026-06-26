@@ -29,7 +29,7 @@ attestation so a hollow check can't mint green.
 | ⚖️ **Verdict bus** | `verel.verdict` | One schema for every sense — advisory ceiling clamp, grader attestation, strict-subset stuck/progress. |
 | 🚁 **Fleet** | `verel.fleet` | Agents managing agents — LLM manager fans out, workers in isolated git worktrees, each gated by the bus. |
 | 🔧 **Tool-smith** | `verel.toolsmith` | Agents build their own tools, sandboxed, admitted only on a passing attested eval. |
-| ♻️ **Agent-run CI/CD** | `verel.ci` | Self-healing pipeline + deterministic rollback that never acts on advisory evidence. |
+| ♻️ **Agent-run CI/CD** | `verel.ci` | Self-healing pipeline + deterministic rollback that never acts on advisory evidence; graders span Python/JS-TS/Go, perf, security, mutation, spec/intent — and **IaC / cloud-IAM / Kubernetes-RBAC** (catch dangerous Terraform/cloud grants *before apply*). |
 
 ## Eyes & brain
 
