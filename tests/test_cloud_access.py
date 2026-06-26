@@ -167,6 +167,16 @@ def test_parsers_tolerate_garbage():
         assert p("not json") == []
 
 
+def test_parsers_tolerate_nondict_elements():
+    # Round-15 R15-1: a non-dict element in the cloud analyzer's result array must not crash the
+    # parser (mirrors the R14-1 fail-closed contract; parity with parse_gcp_analyze_iam).
+    assert parse_aws_validate_policy(json.dumps({"findings": ["x"]})) == []
+    assert parse_aws_simulate(json.dumps({"EvaluationResults": ["x"]})) == []
+    assert parse_aws_simulate(json.dumps({"EvaluationResults": "abc"})) == []
+    assert parse_az_role_assignments(json.dumps(["x"])) == []
+    assert parse_gcp_analyze_iam(json.dumps({"mainAnalysis": {"analysisResults": ["x"]}})) == []
+
+
 # --- verifier (env-runner injected) --------------------------------------
 def _env_runner(rc, out, err=""):
     captured = {}
