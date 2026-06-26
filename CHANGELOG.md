@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.1.0 — IaC / DevOps graders, the cloud-IAM change sensor, and act-then-verify
+
+A feature release that brings **Infrastructure-as-Code, the DevOps toolchain, and cloud IAM** onto the
+verdict bus — and gates `terraform apply`/`destroy` through the action gateway. The throughline:
+**catch dangerous cloud-IAM changes before they execute**, instead of discovering them in an incident
+or a failed audit. See [IAC-KICKOFF.md](https://github.com/amitpatole/verel/blob/main/IAC-KICKOFF.md).
+
+- **New grader kinds** — `IAC`, `IAM`, `POLICY` join `PRECISE_GRADERS`; `COST` is promoted (it gates
+  against an explicit budget, like `PERF`). New `IssueKind`s: `IAC_DRIFT`, `IAM_RISK`, `MISCONFIG`.
+- **IaC graders** (pure parsers, offline-tested; runner injected) — `terraform/tofu validate` & `plan`
+  (`IAC`), `tflint` (`LINT`), `trivy config` + `checkov` (`SECURITY`), `conftest`/OPA (`POLICY`),
+  `infracost` (`COST` vs budget), `helm template`/`kubectl --dry-run` + `kube-score`/`kube-linter`/
+  `polaris` (K8s), Parliament + Cloudsplaining (`IAM` least-privilege).
+- **The cloud-IAM change sensor** — normalizes every IAM-affecting change from a `terraform show
+  -json` plan **and** native Kubernetes RBAC, and runs deterministic rules (wildcard action/resource,
+  `iam:PassRole`-style privilege escalation, public principal, admin grants, open `0.0.0.0/0` ingress,
+  cluster-admin / `system:masters`, anonymous subjects) across AWS/GCP/Azure/Kubernetes.
+- **Act-then-verify** — `verel.actuators.TerraformActuator`: plan → grade the **bound** plan file →
+  apply *exactly* that file (a re-plan/substitution between approval and apply is refused — the
+  plan-binding / TOCTOU defense) → re-plan to confirm convergence. The gateway escalates dynamically:
+  any destroy/replace or IAM widening ⇒ `IRREVERSIBLE` (dry-run + human approval); direct IAM-mutating
+  tool calls are intercepted the same way.
+- **Effective-access verification** — `EffectiveAccessVerifier` confirms what the cloud *actually*
+  grants (AWS IAM Access Analyzer / GCP Policy Analyzer / Azure role assignments) with read creds
+  resolved from `~/.config` (never logged). Accurate, but not a pure offline gate.
+- **Security cadence** — argv-only + charset-validated args; fail-closed on every degraded path;
+  adversarial cases pinned as regression tests; residuals R-005..R-007 documented.
+- **`verel doctor`** probes the IaC binaries and the resolved cloud credentials. `verel[iac]` extra
+  (pyyaml for helm YAML scanning). New `examples/demo_iac.py` (no cloud creds).
+
 ## 1.0.1 — operator RBAC fix + release-pipeline & Artifact Hub hardening
 
 A patch release. The headline is a **Kubernetes operator RBAC fix** verified by running the operator on a

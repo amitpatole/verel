@@ -241,6 +241,39 @@ rlimits) and fail closed without it — executing LLM-authored code from a possi
 
 ---
 
+## 13. A dangerous IAM grant in a Terraform plan — caught before apply
+
+**The situation.** An agent (or a human) writes Terraform that attaches a wildcard admin policy and
+opens SSH to the world. It passes `terraform validate`, tests, lint, and types — IAM blast radius is
+invisible to all of them, and only surfaces as an incident or a failed audit later. Verel's **IAM
+change sensor** reads the `terraform show -json` plan, normalizes every IAM-affecting change, and runs
+deterministic risk rules that gate **before** apply — no cloud credentials, nothing applied.
+
+```text
+=== IAM change sensor — grade a terraform plan before apply ===
+
+broken plan: FAIL  (apply → irreversible; 1 destroy/replace (aws_db_instance.legacy), 2 IAM widening (aws_iam_policy.admin, aws_security_group_rule.ssh))
+  [info    ] iac  DESTROY_OR_REPLACE     aws_db_instance.legacy
+  [error   ] iam  WILDCARD_ACTION        aws_iam_policy.admin
+  [error   ] iam  WILDCARD_RESOURCE      aws_iam_policy.admin
+  [error   ] iam  OPEN_INGRESS           aws_security_group_rule.ssh
+
+fixed plan: PASS  (apply → irreversible; 2 IAM widening (aws_iam_policy.admin, aws_security_group_rule.ssh))
+
+→ 3 IAM risk(s) caught in the broken plan, each grounded on a plan address. No cloud credentials, no apply — the dangerous grant never reaches AWS.
+```
+
+Each finding is grounded on the plan address. Note the verdict and the gateway class are independent:
+the *fixed* plan PASSes (no risk rule fires) yet its apply is still `irreversible` — any IAM grant
+crosses a blast-radius line, so it needs human approval even when it's safe. Sensing covers all three
+surfaces (IaC plans, Kubernetes RBAC, and direct IAM SDK/CLI calls); acting is gated by the
+[terraform actuator](graders.md#iac-devops-grade-terraform-kubernetes-cloud-iam-before-apply)
+applying *exactly* the approved plan file.
+
+> `python examples/demo_iac.py` (no cloud credentials — pure offline sensor over a sample plan)
+
+---
+
 ## Run them all
 
 ```bash
@@ -256,6 +289,7 @@ python examples/demo_spec_grader.py       # 9 · "ticket says A, code does B" �
 python examples/demo_invariant_grader.py  # 10 · a declared business rule violated → a grounded FAIL
 python examples/demo_smell_grader.py      # 11 · over-engineering → complexity gates, speculative flagged
 python examples/demo_gateway.py           # 12 · gate the action boundary: write blocked, deploy dry-run
+python examples/demo_iac.py               # 13 · a dangerous IAM grant in a terraform plan → grounded FAIL
 ```
 
 ## More feature-level demos

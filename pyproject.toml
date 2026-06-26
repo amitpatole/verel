@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "verel"
-version = "1.0.1"
+version = "1.1.0"
 description = "The agent framework where nothing is done until a grader returns a verdict — verification + grounded perception (AgentVision eyes), compounding memory, a fleet, agent-built tooling, and agent-run CI/CD."
 readme = "README.md"
 requires-python = ">=3.10"
