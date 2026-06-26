@@ -77,7 +77,14 @@ verel ci check --repo . --no-lint
 ```
 
 `verel ci …` forwards its remainder verbatim to `verel-ci`, so any `verel-ci` subcommand/flag
-(`check`, `precommit`, `install`) works behind `verel ci`. See [`verel-ci`](#verel-ci-the-ci-gate).
+(`check`, `precommit`, `iac`, `install`) works behind `verel ci`. See [`verel-ci`](#verel-ci-the-ci-gate).
+
+```bash
+# Grade an IaC artifact OFFLINE — catch a dangerous cloud-IAM change before apply (exit 1 on FAIL):
+terraform plan -out tfplan.bin && terraform show -json tfplan.bin > tfplan.json
+verel ci iac --repo . --plan tfplan.json        # drift (INFO) + IAM risks (gate)
+verel ci iac --repo . --manifests rendered.json # K8s RBAC sensor (kubectl -o json)
+```
 
 ### Verify a receipt (`verel verify`) — publicly verifiable "done"
 

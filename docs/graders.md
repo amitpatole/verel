@@ -91,6 +91,10 @@ for i in issues:
 # error iam WILDCARD_ACTION aws_iam_policy.admin
 ```
 
+The same offline sensor is wired to two surfaces: the **`verel_iac_check`** MCP tool (`repo` + `plan`
+and/or `manifests`) and the **`verel-ci iac --repo . --plan tfplan.json`** CLI (exit 1 on FAIL) — so an
+agent or a CI step catches a dangerous grant before apply with no cloud credentials.
+
 Acting is gated, not just graded. The **terraform actuator** (`verel.actuators.TerraformActuator`)
 plans → grades the **bound** plan file → applies *exactly* that file (a digest mismatch from a re-plan
 between approval and apply is refused — the plan-binding / TOCTOU defense) → re-plans to confirm the

@@ -18,10 +18,11 @@ camelCase manifests — same risk vocabulary, different surface.
 from __future__ import annotations
 
 import json
+import os
 
-from ..verdict.models import Confidence, GraderKind, Issue, IssueKind, Severity
+from ..verdict.models import Confidence, GraderKind, Issue, IssueKind, Report, Severity, Verdict
 from .graders import GraderSpec
-from .iac import _as_list, _load_json
+from .iac import _as_list, _load_json, parse_terraform_plan
 
 # ---------------------------------------------------------------------------
 # The native-manifest RBAC sensor (Capture B).
@@ -276,3 +277,34 @@ def polaris_spec(repo: str, audit_path: str = ".", covers: list[str] | None = No
     return GraderSpec(GraderKind.SECURITY, ["polaris", "audit", "--audit-path", audit_path,
                                             "--format", "json"],
                       cwd=repo, covers=covers or [], parser=parse_polaris, lang="yaml")
+
+
+# ---------------------------------------------------------------------------
+# One offline entry point for the MCP tool + the `verel-ci iac` CLI.
+# ---------------------------------------------------------------------------
+def _read_in_repo(repo: str, rel: str) -> str:
+    """Read a file that MUST live inside `repo` (charset-validate the path against traversal)."""
+    path = rel if os.path.isabs(rel) else os.path.join(repo, rel)
+    rp = os.path.realpath(path)
+    if rp != os.path.realpath(repo) and not rp.startswith(os.path.realpath(repo) + os.sep):
+        raise ValueError(f"path escapes the repo: {rel!r}")
+    if not os.path.isfile(rp):
+        raise FileNotFoundError(rel)
+    with open(rp, encoding="utf-8") as f:
+        return f.read()
+
+
+def grade_iac(repo: str, *, plan: str | None = None, manifests: str | None = None) -> Report:
+    """Grade IaC artifacts OFFLINE into one IAC Report (no cloud creds, nothing applied): a
+    `terraform show -json` plan (drift + the cloud-IAM change sensor) and/or Kubernetes manifests as
+    JSON (the RBAC sensor). Verdict reduces by gating severity — a wildcard/privesc/public/admin grant
+    (`ERROR`/`CRITICAL`) FAILs; a planned destroy/replace is surfaced (`INFO`, does not gate."""
+    issues: list[Issue] = []
+    if plan:
+        issues.extend(parse_terraform_plan(_read_in_repo(repo, plan)))
+    if manifests:
+        issues.extend(parse_kube_objects(_read_in_repo(repo, manifests)))
+    gating = any(i.severity in (Severity.ERROR, Severity.CRITICAL) for i in issues)
+    verdict = Verdict.FAIL if gating else (Verdict.WARN if issues else Verdict.PASS)
+    return Report(verdict=verdict, summary=f"iac: {len(issues)} issue(s)", issues=issues,
+                  grader=GraderKind.IAC)

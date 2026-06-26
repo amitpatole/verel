@@ -10,6 +10,7 @@ The tool DISPATCH layer (`TOOLS`, `dispatch`) is pure and testable without the `
   verel_recall       read the shared verified brain (resolves DOWN the scope lattice)
   verel_remember     write to the shared brain — trust does NOT travel (candidate until attested)
   verel_ci_check     run the inner-loop CI stage on a repo → verdict + issues
+  verel_iac_check    grade a terraform plan / K8s manifests offline → IaC drift + cloud-IAM risks
   verel_build_tool   detect→scaffold→test→register a tool (needs an LLM key)
 
 `gate` is the conscience: the agent can no longer self-declare "done" — it gets a real verdict with
@@ -278,6 +279,32 @@ def _tool_ci_check(args: dict) -> dict:
              "locator": i.locator, "message": i.message}
             for r in res.reports for i in r.issues
         ],
+    }
+
+
+def _tool_iac_check(args: dict) -> dict:
+    """Grade an IaC artifact OFFLINE (no cloud creds, nothing applied): a `terraform show -json` plan
+    (drift + the cloud-IAM change sensor) and/or Kubernetes manifests as JSON (the RBAC sensor). A
+    wildcard / privilege-escalation / public-principal / admin / open-ingress change gates BEFORE
+    apply; a planned destroy/replace is surfaced. Paths must live inside the repo."""
+    repo = args.get("repo")
+    if not repo or not isinstance(repo, str) or not os.path.isdir(os.path.abspath(repo)):
+        return _err("repo (existing directory) is required")
+    plan, manifests = args.get("plan"), args.get("manifests")
+    if not plan and not manifests:
+        return _err("provide `plan` (a `terraform show -json` file) and/or `manifests` (kubectl -o json)")
+    if (plan is not None and not isinstance(plan, str)) or \
+       (manifests is not None and not isinstance(manifests, str)):
+        return _err("plan / manifests must be file paths (strings) inside the repo")
+    from .ci import grade_iac
+    try:
+        rep = grade_iac(os.path.abspath(repo), plan=plan, manifests=manifests)
+    except (ValueError, FileNotFoundError) as e:
+        return _err(f"could not read IaC artifact: {e}")
+    return {
+        "verdict": rep.verdict.value,
+        "issues": [{"grader": i.source.value, "severity": i.severity.value, "locator": i.locator,
+                    "message": i.message, "rule_id": i.detail.get("rule_id", "")} for i in rep.issues],
     }
 
 
@@ -669,6 +696,16 @@ TOOLS: dict[str, dict[str, Any]] = {
                                     "(ed25519 = publicly verifiable)."},
     "verel_ci_check": {"fn": _tool_ci_check, "schema": {"type": "object", "properties": {"repo": _REPO},
                        "required": ["repo"]}, "description": "Run the inner-loop CI stage on a repo."},
+    "verel_iac_check": {"fn": _tool_iac_check, "schema": {"type": "object", "properties": {
+                            "repo": _REPO,
+                            "plan": {"type": "string",
+                                     "description": "repo path to a `terraform show -json` plan file"},
+                            "manifests": {"type": "string",
+                                          "description": "repo path to K8s manifests JSON"}},
+                        "required": ["repo"]},
+                        "description": "Grade IaC offline: a terraform plan (drift + cloud-IAM change "
+                                       "sensor) and/or K8s manifests (RBAC sensor). Dangerous IAM "
+                                       "(wildcard/privesc/public/admin) gates BEFORE apply."},
     "verel_spec": {"fn": _tool_spec, "schema": {"type": "object", "properties": {
                        "repo": _REPO,
                        "criteria": {"type": "string", "description": "the ticket / acceptance-criteria text"},
