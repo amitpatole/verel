@@ -106,7 +106,7 @@ def parse_terraform_validate(out: str, err: str = "") -> list[Issue]:
     """`terraform validate -json`: {"valid":bool,"diagnostics":[{severity,summary,detail,range}]}."""
     data = _load_json(out)
     issues: list[Issue] = []
-    for d in data.get("diagnostics", []) if isinstance(data, dict) else []:
+    for d in (_as_list(data.get("diagnostics")) if isinstance(data, dict) else []):
         if not isinstance(d, dict):
             continue
         sev = Severity.ERROR if (d.get("severity") == "error") else Severity.WARNING
@@ -116,7 +116,7 @@ def parse_terraform_validate(out: str, err: str = "") -> list[Issue]:
         loc = f"{fn}:{line}" if fn else None
         issues.append(Issue(
             kind=IssueKind.OTHER, severity=sev, source=GraderKind.IAC,
-            message=(d.get("summary") or "validation error").strip(),
+            message=str(d.get("summary") or "validation error").strip(),
             locator=loc, locator_precise=bool(loc),
             detail_json=json.dumps({"detail": d.get("detail", "")}),
         ))
@@ -229,7 +229,7 @@ def _unknown_iam_fields(after_unknown: dict) -> list[str]:
 def extract_iam_changes(plan: dict) -> list[IamChange]:
     """Pull IAM-affecting `resource_changes` out of a `terraform show -json` plan document."""
     out: list[IamChange] = []
-    for rc in (plan.get("resource_changes", []) if isinstance(plan, dict) else []):
+    for rc in (_as_list(plan.get("resource_changes")) if isinstance(plan, dict) else []):
         if not isinstance(rc, dict):  # a hostile `[null]`/"x" entry must not crash the grader
             continue
         rtype = rc.get("type", "")
@@ -742,7 +742,7 @@ def iam_risk_issues(changes: list[IamChange]) -> list[Issue]:
         for rule_id, sev, msg in _evaluate(ch):
             issues.append(Issue(
                 kind=IssueKind.IAM_RISK, severity=sev, source=GraderKind.IAM,
-                message=msg, locator=ch.source_locus, locator_precise=True,
+                message=msg, locator=str(ch.source_locus), locator_precise=True,
                 confidence=Confidence.HIGH,
                 detail_json=json.dumps({"rule_id": rule_id, "address": ch.address,
                                         "change_type": ch.change_type, "cloud": ch.cloud,
@@ -757,7 +757,7 @@ def iam_risk_issues(changes: list[IamChange]) -> list[Issue]:
 def plan_summary(plan: dict) -> dict[str, int]:
     """Count planned actions by kind — feeds the gateway escalation and the report summary."""
     counts = {"create": 0, "update": 0, "delete": 0, "replace": 0, "forget": 0, "no-op": 0}
-    for rc in (plan.get("resource_changes", []) if isinstance(plan, dict) else []):
+    for rc in (_as_list(plan.get("resource_changes")) if isinstance(plan, dict) else []):
         if not isinstance(rc, dict):
             continue
         a = set(_as_dict(rc.get("change")).get("actions", []))
@@ -779,12 +779,12 @@ def plan_summary(plan: dict) -> dict[str, int]:
 def destructive_changes(plan: dict) -> list[str]:
     """Addresses with a planned destroy or replace — the gateway escalates these to IRREVERSIBLE."""
     out: list[str] = []
-    for rc in (plan.get("resource_changes", []) if isinstance(plan, dict) else []):
+    for rc in (_as_list(plan.get("resource_changes")) if isinstance(plan, dict) else []):
         if not isinstance(rc, dict):
             continue
         a = set(_as_dict(rc.get("change")).get("actions", []))
         if "delete" in a:  # covers both delete and replace (create+delete)
-            out.append(rc.get("address", ""))
+            out.append(str(rc.get("address", "")))
     return out
 
 
@@ -872,7 +872,7 @@ def parse_terraform_plan(out: str, err: str = "") -> list[Issue]:
     # → advisory (WARNING). A drift with NO planned change means config already MATCHES the drifted
     # reality, so the apply will NOT revert it — a manual admin grant that persists. Gate that at its
     # real severity (round-7 F2 surfaced it; round-8 F4 makes the persistent case gate).
-    rc_list = plan.get("resource_changes", []) if isinstance(plan, dict) else []
+    rc_list = _as_list(plan.get("resource_changes")) if isinstance(plan, dict) else []
     # An address is "will be reverted" ONLY if it has a REAL planned change (create/update/delete/
     # replace). A no-op/read entry does NOT overwrite the drift — and the genuine persistent case
     # (config already matches the drifted reality) is EXACTLY when terraform emits a no-op for the
@@ -888,7 +888,7 @@ def parse_terraform_plan(out: str, err: str = "") -> list[Issue]:
                 kind=IssueKind.IAM_RISK, severity=(sev if persists else Severity.WARNING),
                 source=GraderKind.IAM,
                 message=f"[{'live, un-reverted' if persists else 'drift'}] {msg}",
-                locator=ch.source_locus, locator_precise=True,
+                locator=str(ch.source_locus), locator_precise=True,
                 confidence=(Confidence.HIGH if persists else Confidence.MEDIUM),
                 detail_json=json.dumps({"rule_id": rule_id, "address": ch.address, "drift": True,
                                         "persists": persists, "cloud": ch.cloud,
@@ -905,7 +905,7 @@ def parse_trivy_config(out: str, err: str = "") -> list[Issue]:
     CauseMetadata:{StartLine}}]}]}."""
     data = _load_json(out)
     issues: list[Issue] = []
-    for res in data.get("Results", []) if isinstance(data, dict) else []:
+    for res in (_as_list(data.get("Results")) if isinstance(data, dict) else []):
         if not isinstance(res, dict):
             continue
         target = res.get("Target", "")
@@ -968,7 +968,7 @@ def parse_tflint(out: str, err: str = "") -> list[Issue]:
     not actually lint is not a clean pass."""
     data = _load_json(out)
     issues: list[Issue] = []
-    for it in data.get("issues", []) if isinstance(data, dict) else []:
+    for it in (_as_list(data.get("issues")) if isinstance(data, dict) else []):
         if not isinstance(it, dict):
             continue
         rule = _as_dict(it.get("rule"))
@@ -981,7 +981,7 @@ def parse_tflint(out: str, err: str = "") -> list[Issue]:
             source=GraderKind.LINT, message=f"{name} {it.get('message', '')}".strip(),
             locator=f"{fn}:{line}" if fn else None, detail_json=json.dumps({"rule_id": name}),
         ))
-    for e in data.get("errors", []) if isinstance(data, dict) else []:
+    for e in (_as_list(data.get("errors")) if isinstance(data, dict) else []):
         msg = e.get("message", "tflint error") if isinstance(e, dict) else str(e)
         issues.append(Issue(kind=IssueKind.OTHER, severity=Severity.ERROR, source=GraderKind.LINT,
                             message=f"tflint: {msg}", detail_json=json.dumps({"rule_id": "tflint-error"})))
@@ -1050,7 +1050,7 @@ def parse_conftest(out: str, err: str = "") -> list[Issue]:
                 msg = f.get("msg", "policy violation") if isinstance(f, dict) else str(f)
                 issues.append(Issue(
                     kind=IssueKind.OTHER, severity=sev, source=GraderKind.POLICY,
-                    message=msg, locator=fn or None,
+                    message=str(msg), locator=str(fn) or None,
                     detail_json=json.dumps({"rule_id": "conftest", "namespace": r.get("namespace", "")
                                             if isinstance(r, dict) else ""}),
                 ))
@@ -1124,7 +1124,7 @@ def parse_parliament(out: str, err: str = "") -> list[Issue]:
         issues.append(Issue(
             kind=IssueKind.IAM_RISK, severity=_scan_severity(f.get("severity", "low")),
             source=GraderKind.IAM, message=f"{f.get('issue', '')} {f.get('title', '')}".strip(),
-            locator=where or None, detail_json=json.dumps({"rule_id": f.get("issue", "parliament")}),
+            locator=str(where) or None, detail_json=json.dumps({"rule_id": f.get("issue", "parliament")}),
         ))
     return issues
 

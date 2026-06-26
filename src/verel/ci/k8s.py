@@ -259,7 +259,7 @@ def parse_kube_score(out: str, err: str = "") -> list[Issue]:
             summ = comments[0].get("summary", "") if comments and isinstance(comments[0], dict) else ""
             issues.append(Issue(
                 kind=IssueKind.MISCONFIG, severity=sev, source=GraderKind.SECURITY,
-                message=f"{c.get('name', 'kube-score')} {summ}".strip(), locator=name or None,
+                message=f"{c.get('name', 'kube-score')} {summ}".strip(), locator=str(name) or None,
                 detail_json=json.dumps({"rule_id": c.get("id", "kube-score")}),
             ))
     return issues
@@ -270,7 +270,7 @@ def parse_kube_linter(out: str, err: str = "") -> list[Issue]:
     Object:{K8sObject:{Namespace,Name,GroupVersionKind:{Kind}}}}]}. No severity → WARNING."""
     data = _load_json(out)
     issues: list[Issue] = []
-    for r in data.get("Reports", []) if isinstance(data, dict) else []:
+    for r in (_as_list(data.get("Reports")) if isinstance(data, dict) else []):
         if not isinstance(r, dict):
             continue
         diag = _as_dict(r.get("Diagnostic"))
@@ -313,7 +313,7 @@ def parse_polaris(out: str, err: str = "") -> list[Issue]:
     failed check carries a Severity (danger→ERROR, warning→WARNING) and a Message."""
     data = _load_json(out)
     issues: list[Issue] = []
-    for res in data.get("Results", []) if isinstance(data, dict) else []:
+    for res in (_as_list(data.get("Results")) if isinstance(data, dict) else []):
         if not isinstance(res, dict):
             continue
         locus = f"{res.get('Kind', '')}/{res.get('Namespace', '')}/{res.get('Name', '')}"

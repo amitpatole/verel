@@ -89,7 +89,7 @@ def parse_aws_validate_policy(out: str, err: str = "") -> list[Issue]:
     except (json.JSONDecodeError, RecursionError, ValueError):
         return []
     issues = []
-    for f in data.get("findings", []) if isinstance(data, dict) else []:
+    for f in (_as_list(data.get("findings")) if isinstance(data, dict) else []):
         if not isinstance(f, dict):  # a non-dict element must not crash the parser (round-15 R15-1)
             continue
         ft = f.get("findingType", "WARNING")
@@ -109,7 +109,7 @@ def parse_aws_simulate(out: str, err: str = "", sensitive: set[str] | None = Non
     except (json.JSONDecodeError, RecursionError, ValueError):
         return []
     issues = []
-    for r in data.get("EvaluationResults", []) if isinstance(data, dict) else []:
+    for r in (_as_list(data.get("EvaluationResults")) if isinstance(data, dict) else []):
         if not isinstance(r, dict):  # round-15 R15-1
             continue
         action = str(r.get("EvalActionName", ""))
@@ -138,7 +138,7 @@ def parse_gcp_analyze_iam(out: str, err: str = "") -> list[Issue]:
     except (json.JSONDecodeError, RecursionError, ValueError):
         return []
     main = data.get("mainAnalysis", data) if isinstance(data, dict) else {}
-    results = main.get("analysisResults", []) if isinstance(main, dict) else []
+    results = _as_list(main.get("analysisResults")) if isinstance(main, dict) else []
     issues = []
     for r in results:
         b = _as_dict(_as_dict(r).get("iamBinding"))
