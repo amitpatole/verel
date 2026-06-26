@@ -47,8 +47,9 @@ The config is the standard `mcpServers` shape every host understands:
 }
 ```
 
-Tools the agent gets: `verel_gate`, `verel_sight`, `verel_verify`, `verel_ci_check`, `verel_spec`,
-`verel_invariants`, `verel_smell`, `verel_recall`, `verel_remember`, `verel_build_tool`. See the full
+Tools the agent gets: `verel_gate`, `verel_sight`, `verel_verify`, `verel_ci_check`,
+`verel_iac_check`, `verel_spec`, `verel_invariants`, `verel_smell`, `verel_recall`, `verel_remember`,
+`verel_build_tool`. See the full
 [MCP tool reference](usage.md#mcp-tools-the-verified-review-graders) and the
 [Graders reference](graders.md).
 

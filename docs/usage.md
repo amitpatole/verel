@@ -427,15 +427,16 @@ rep = grade_smell(".", ["billing.py"], complexity_budget=12)   # over-complex fu
 ### MCP tools — the Verified-Review graders
 
 Three of the five Verified-Review graders are exposed as MCP tools by `verel-mcp` (alongside
-`verel_gate` / `verel_ci_check` / `verel_verify` / `verel_recall` / `verel_remember` /
-`verel_build_tool`). The **mutation** grader and the **action gateway** have no MCP tool — invoke them
-from Python (see above).
+`verel_gate` / `verel_ci_check` / `verel_iac_check` / `verel_verify` / `verel_recall` /
+`verel_remember` / `verel_build_tool`). The **mutation** grader and the **action gateway** have no MCP
+tool — invoke them from Python (see above).
 
 | MCP tool | Required args | Optional args | Gates on |
 |---|---|---|---|
 | `verel_spec` | `repo`, `criteria` | `files[]`, `checks_per_criterion` | a violated acceptance criterion (`intent_mismatch`) |
 | `verel_invariants` | `repo` | `invariants[]`, `files[]` | a falsified declared business rule |
 | `verel_smell` | `repo`, `files[]` | `complexity_budget` | a function over the cyclomatic-complexity budget |
+| `verel_iac_check` | `repo` | `plan`, `manifests` | a dangerous cloud-IAM change (wildcard/privesc/public/admin) in a terraform plan or K8s manifests — offline, before apply |
 
 Example tool-call payloads (the shape an MCP host sends):
 

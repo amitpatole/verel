@@ -70,6 +70,7 @@ from .iac import (
 )
 from .k8s import (
     extract_rbac_risks,
+    grade_iac,
     helm_template_spec,
     kube_linter_spec,
     kube_score_spec,
@@ -118,7 +119,7 @@ __all__ = [
     "extract_rbac_risks", "parse_kube_objects", "parse_helm_template",
     "parse_kube_score", "parse_kube_linter", "parse_polaris",
     "kubectl_dryrun_spec", "helm_template_spec", "kube_score_spec",
-    "kube_linter_spec", "polaris_spec",
+    "kube_linter_spec", "polaris_spec", "grade_iac",
     "Stage", "StageResult", "run_stage", "inner_loop_stage", "precommit_stage", "premerge_stage",
     "postmerge_stage",
     "Action", "Diagnosis", "classify_issue", "triage", "quarantine_severity", "enrich_diagnoses",
