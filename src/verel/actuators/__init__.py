@@ -7,6 +7,14 @@ package move, not a rewrite. See IAC-KICKOFF.md Phase 4.
 
 from __future__ import annotations
 
+from .access_verify import (
+    EffectiveAccessVerifier,
+    parse_aws_simulate,
+    parse_aws_validate_policy,
+    parse_az_role_assignments,
+    parse_gcp_analyze_iam,
+)
+from .cloudcreds import CloudCreds, resolve, resolve_aws, resolve_azure, resolve_gcp
 from .terraform import (
     ActResult,
     PlanResult,
@@ -22,4 +30,7 @@ __all__ = [
     "TerraformActuator", "PlanResult", "ActResult",
     "escalate", "escalation_override", "plan_digest",
     "iam_action_class", "iam_tool_overrides",
+    "CloudCreds", "resolve", "resolve_aws", "resolve_gcp", "resolve_azure",
+    "EffectiveAccessVerifier", "parse_aws_validate_policy", "parse_aws_simulate",
+    "parse_gcp_analyze_iam", "parse_az_role_assignments",
 ]

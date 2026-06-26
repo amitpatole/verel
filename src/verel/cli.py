@@ -56,6 +56,11 @@ def _doctor() -> int:
                          ("kube-linter", "kube-linter (K8s posture grader)"),
                          ("polaris", "polaris (K8s posture grader)")):
         print(f"  {ok(shutil.which(_bin))}{_label}")
+    # Cloud creds for the effective-access verifier (Phase 5) — resolved from ~/.config (never logged).
+    from .actuators.cloudcreds import resolve as _resolve_creds
+    for _cloud in ("aws", "gcp", "azure"):
+        cc = _resolve_creds(_cloud)
+        print(f"  {ok(cc.available)}{_cloud} creds — {cc.source}")
     try:
         import mem0  # noqa: F401
         m = True

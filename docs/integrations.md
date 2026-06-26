@@ -322,6 +322,49 @@ tools = langchain_tools()   # [StructuredTool(name="verel_gate", ...)] — bind 
 
 ---
 
+## IaC / DevOps & cloud IAM
+
+Grade Terraform/OpenTofu, the wider DevOps toolchain, and **cloud-IAM blast radius** on the same
+verdict bus — and gate `apply`/`destroy` through the action gateway. Tools shell out behind pure
+parsers (offline-tested), each mapping onto an existing trust tier:
+
+| Tool | Grader | Spec |
+|---|---|---|
+| `terraform/tofu validate` · `plan` | `IAC` (+ IAM sensor) | `terraform_validate_spec` · `terraform_plan_spec` |
+| `tflint` | `LINT` | `tflint_spec` |
+| `trivy config` · `checkov` | `SECURITY` | `trivy_config_spec` · `checkov_spec` |
+| `conftest` / OPA | `POLICY` | `conftest_spec` |
+| `infracost` (vs explicit budget) | `COST` | `infracost_spec(repo, budgets={...})` |
+| `helm template` · `kubectl --dry-run` | `IAC` (+ RBAC sensor) | `helm_template_spec` · `kubectl_dryrun_spec` |
+| `kube-score` · `kube-linter` · `polaris` | `SECURITY` | `kube_score_spec` · `kube_linter_spec` · `polaris_spec` |
+| Parliament · Cloudsplaining | `IAM` | `parliament_spec` · `cloudsplaining_spec` |
+
+**Catch dangerous IAM before apply** — the sensor reads a `terraform show -json` plan offline:
+
+```python
+from verel.ci import parse_terraform_plan
+for i in parse_terraform_plan(open("tfplan.json").read()):
+    print(i.severity.value, i.source.value, i.detail["rule_id"], i.locator)
+# error iam WILDCARD_ACTION aws_iam_policy.admin
+```
+
+**Gate the apply** — the actuator plans, grades the **bound** plan, and applies *exactly* that file
+(a re-plan/substitution between approval and apply is refused — TOCTOU defense). Any destroy/replace or
+IAM widening ⇒ `IRREVERSIBLE` (dry-run + human approval):
+
+```python
+from verel.actuators import TerraformActuator
+act = TerraformActuator(repo=".")
+plan = act.plan()                       # bound plan + digest + IAC/IAM verdict
+print(plan.report.verdict.value, plan.action_class.value, plan.escalation_reasons)
+# act.act(plan.plan_digest) applies ONLY the approved plan; act.watch() confirms convergence
+```
+
+Credentials for the effective-access verifier (AWS IAM Access Analyzer / GCP Policy Analyzer / Azure
+role assignments) are resolved from `~/.config` and never logged — `verel doctor` shows what's
+detected. See the [Graders reference](graders.md#iac-devops-grade-terraform-kubernetes-cloud-iam-before-apply)
+and `examples/demo_iac.py`.
+
 ## Kubernetes
 
 Run the brain, the gate, and the gateway in-cluster with the Helm chart and the Kopf operator (the
