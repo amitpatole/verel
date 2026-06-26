@@ -397,6 +397,19 @@ def test_parsers_tolerate_noniterable_and_nonstr_leaves():
         {"grade": 1, "check": {"name": "x"}}]}])), list)
 
 
+def test_nonstr_type_address_kind_tolerated():
+    # Round-18 (fuzz): a non-string/unhashable `type`/`address` (plan) or `kind` (manifest) must not
+    # crash — type/cloud do .lower(), address is a set key/locator, kind is a set membership test.
+    from verel.ci import extract_rbac_risks, parse_terraform_plan
+    for bad in (1, 1.5, True, [1], {"k": 1}):
+        assert isinstance(parse_terraform_plan(json.dumps(
+            {"resource_changes": [{"type": bad, "address": bad,
+             "change": {"actions": ["create"], "after": {}}}],
+             "resource_drift": [{"type": "aws_iam_role", "address": bad,
+             "change": {"actions": ["update"], "after": {}}}]})), list)
+        assert extract_rbac_risks([{"kind": bad, "metadata": {"name": "n"}, "rules": []}]) == []
+
+
 def test_actions_and_severity_leaves_tolerate_garbage():
     # Round-18: `change.actions` fed to set() (non-iterable scalar / unhashable list elements),
     # `(x or [])` iterations, and severity leaves used with .lower()/.get() must not crash.

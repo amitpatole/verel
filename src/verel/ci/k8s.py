@@ -172,7 +172,7 @@ def extract_rbac_risks(manifests: list) -> list[Issue]:
     """Run the deterministic RBAC risk rules over native Kubernetes manifest dicts → IAM issues."""
     out: list[Issue] = []
     for obj in _unwrap_lists(manifests):
-        kind = obj.get("kind", "")
+        kind = str(obj.get("kind", ""))
         if kind not in _RBAC_KINDS:
             continue
         locus = _locus(obj)
