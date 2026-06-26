@@ -198,9 +198,11 @@ _UNKNOWN_IAM_KEYS = {
 
 def _has_unknown(node: object, depth: int = 0) -> bool:
     """True if `node` (a terraform after_unknown value) marks anything computed — a literal True, or
-    any True nested in a list/dict (a computed string is `true`; a computed object is `{k: true}`)."""
-    if depth > 8:
-        return False
+    any True nested in a list/dict (a computed string is `true`; a computed object is `{k: true}`).
+    Past the depth bound we FAIL CLOSED (assume unknown) so a pathologically-nested value can't
+    silently downgrade to 'known' — matching the rule's fail-closed contract (round-11 F1)."""
+    if depth > 12:
+        return True
     if node is True:
         return True
     if isinstance(node, dict):
@@ -488,7 +490,8 @@ def _evaluate(ch: IamChange) -> list[tuple[str, Severity, str]]:
         for acp in _as_list(after.get("access_control_policy")):
             for grant in (_as_list(acp.get("grant")) if isinstance(acp, dict) else []):
                 grantee = grant.get("grantee") if isinstance(grant, dict) else None
-                uri = str(grantee.get("uri", "")).lower() if isinstance(grantee, dict) else ""
+                # rstrip('/') so a trailing-slash variant can't slip the suffix match (round-11 F11-1).
+                uri = str(grantee.get("uri", "")).lower().rstrip("/") if isinstance(grantee, dict) else ""
                 if uri.endswith("global/allusers") or uri.endswith("global/authenticatedusers"):
                     hits.append(("PUBLIC_ACL", Severity.ERROR,
                                  f"S3 ACL grant to a public grantee ({uri}) at {ch.address}"))
@@ -1042,7 +1045,12 @@ def infracost_spec(repo: str, budgets: dict[str, float], command: list[str] | No
     def parse(out: str, err: str = "") -> list[Issue]:
         return parse_infracost(out, err, budgets)
 
-    if command and (not command or command[0] not in ("infracost",)):
+    # A custom `command` must invoke `infracost`. The remaining argv (flags like `--path`/`--format`)
+    # is NOT charset-validated — unlike the path-arg specs — because it is DEVELOPER-supplied (not
+    # untrusted plan data) and runs in argv form (no shell), and infracost flags legitimately start
+    # with `-` which safe_arg rejects. So validation here would break the feature, not harden a sink
+    # (round-11 F2: an INFO consistency note, not a vulnerability).
+    if command and command[0] not in ("infracost",):
         raise ValueError(f"infracost command must invoke `infracost`, got {command[0]!r}")
     return GraderSpec(GraderKind.COST,
                       command or ["infracost", "breakdown", "--path", ".", "--format", "json"],
