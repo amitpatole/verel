@@ -398,6 +398,30 @@ def test_s3_public_acl_flagged():
     assert "PUBLIC_ACL" not in _rules(_rc("aws_s3_bucket_acl.b", "aws_s3_bucket_acl", {"acl": "private"}))
 
 
+def test_s3_public_acl_grant_block_flagged():
+    # Round-10: the grant-block form (no canned `acl`) with a global AllUsers grantee must also gate.
+    after = {"access_control_policy": {"grant": [{"permission": "READ", "grantee": {
+        "type": "Group", "uri": "http://acs.amazonaws.com/groups/global/AllUsers"}}]}}
+    assert _rules(_rc("aws_s3_bucket_acl.b", "aws_s3_bucket_acl", after))["PUBLIC_ACL"] == Severity.ERROR
+
+
+def test_split_cidr_world_open_flagged():
+    # Round-10 F10-2: the internet split into two /1 halves is still world-open — must gate, all clouds.
+    aws = {"type": "ingress", "cidr_blocks": ["0.0.0.0/1", "128.0.0.0/1"]}
+    assert "OPEN_INGRESS" in _rules(_rc("aws_security_group_rule.x", "aws_security_group_rule", aws))
+    gcp = {"direction": "INGRESS", "source_ranges": ["0.0.0.0/1", "128.0.0.0/1"]}
+    assert "OPEN_INGRESS" in _rules(_rc("google_compute_firewall.x", "google_compute_firewall", gcp))
+    az = {"access": "Allow", "direction": "Inbound", "source_address_prefixes": ["0.0.0.0/1", "128.0.0.0/1"]}
+    assert "OPEN_INGRESS" in _rules(_rc("azurerm_network_security_rule.x", "azurerm_network_security_rule", az))
+
+
+def test_azure_nsg_absent_direction_fails_closed():
+    # Round-10 F10-3: an Allow rule from 0.0.0.0/0 with direction ABSENT must still gate (fail closed).
+    after = {"access": "Allow", "source_address_prefix": "0.0.0.0/0"}
+    assert "OPEN_INGRESS" in _rules(_rc("azurerm_network_security_rule.x",
+                                        "azurerm_network_security_rule", after))
+
+
 def test_publicly_accessible_db_flagged():
     # Round-9 F4: an RDS/Redshift instance with a public endpoint must gate.
     assert _rules(_rc("aws_db_instance.d", "aws_db_instance",
@@ -405,6 +429,18 @@ def test_publicly_accessible_db_flagged():
         == Severity.ERROR
     assert "PUBLIC_DB_ENDPOINT" not in _rules(
         _rc("aws_db_instance.d", "aws_db_instance", {"publicly_accessible": False}))
+
+
+def test_azure_public_blob_access_flagged():
+    # Round-10 F10-1: the Azure leg of the public-exposure triad (anonymous public blob).
+    assert _rules(_rc("azurerm_storage_account.x", "azurerm_storage_account",
+                      {"allow_blob_public_access": True}))["PUBLIC_BLOB_ACCESS"] == Severity.ERROR
+    # azurerm >=3.0 rename
+    assert "PUBLIC_BLOB_ACCESS" in _rules(_rc("azurerm_storage_account.x", "azurerm_storage_account",
+                                              {"allow_nested_items_to_be_public": True}))
+    # a locked-down account is clean
+    assert "PUBLIC_BLOB_ACCESS" not in _rules(_rc("azurerm_storage_account.x", "azurerm_storage_account",
+                                                  {"allow_blob_public_access": False}))
 
 
 def test_computed_publicly_accessible_fails_closed():

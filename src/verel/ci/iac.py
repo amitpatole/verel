@@ -22,6 +22,7 @@ IAM-affecting change from any provider into one shape and runs deterministic ris
 from __future__ import annotations
 
 import fnmatch
+import ipaddress
 import json
 import re
 from dataclasses import dataclass, field
@@ -127,8 +128,9 @@ _IAM_TYPE_SUBSTRINGS = (
     "service_account_key",
     # network-exposure parity (round-9 F1/F2): GCP firewall + Azure NSG rule, like aws_security_group.
     "firewall", "security_rule", "network_security",
-    # non-policy public exposure (round-9 F3/F4): S3 ACL + publicly-accessible DBs.
-    "bucket_acl", "db_instance", "redshift_cluster", "rds_cluster",
+    # non-policy public exposure (round-9 F3/F4, round-10 F10-1): S3 ACL + publicly-accessible DBs
+    # + Azure anonymous public-blob storage accounts.
+    "bucket_acl", "db_instance", "redshift_cluster", "rds_cluster", "storage_account",
 )
 
 
@@ -189,7 +191,8 @@ _UNKNOWN_IAM_KEYS = {
     "members", "member", "role", "policy_arn", "role_definition_id", "role_definition_name",
     "rule", "role_ref", "subject", "permissions", "ingress", "cidr_blocks", "cidr_ipv4", "cidr_ipv6",
     "block_public_acls", "block_public_policy", "ignore_public_acls", "restrict_public_buckets",
-    "acl", "publicly_accessible", "source_ranges", "source_address_prefix", "source_address_prefixes",
+    "acl", "access_control_policy", "publicly_accessible", "source_ranges", "source_address_prefix",
+    "source_address_prefixes", "allow_blob_public_access", "allow_nested_items_to_be_public",
 }
 
 
@@ -474,17 +477,33 @@ def _evaluate(ch: IamChange) -> list[tuple[str, Severity, str]]:
             hits.append(("PUBLIC_ACCESS_BLOCK_DISABLED", Severity.ERROR,
                          f"S3 public-access-block not fully enabled (flag false/absent) at {ch.address}"))
 
-    # --- AWS S3 public ACL (the non-policy public-bucket path — round-9 F3) ---
+    # --- AWS S3 public ACL (the non-policy public-bucket path — round-9 F3, round-10 grant-block) ---
     if "bucket_acl" in ch.rtype:
         acl = str(after.get("acl", "")).lower()
         if acl in ("public-read", "public-read-write", "authenticated-read"):
             hits.append(("PUBLIC_ACL", Severity.ERROR,
                          f"S3 canned ACL {acl!r} grants public/authenticated access at {ch.address}"))
+        # The grant-block form has no `acl` field: access_control_policy { grant { grantee { uri } } }
+        # with a global AllUsers/AuthenticatedUsers grantee URI = public (round-10 F10-1).
+        for acp in _as_list(after.get("access_control_policy")):
+            for grant in (_as_list(acp.get("grant")) if isinstance(acp, dict) else []):
+                grantee = grant.get("grantee") if isinstance(grant, dict) else None
+                uri = str(grantee.get("uri", "")).lower() if isinstance(grantee, dict) else ""
+                if uri.endswith("global/allusers") or uri.endswith("global/authenticatedusers"):
+                    hits.append(("PUBLIC_ACL", Severity.ERROR,
+                                 f"S3 ACL grant to a public grantee ({uri}) at {ch.address}"))
 
     # --- Publicly-routable DB endpoint (RDS / Redshift — round-9 F4) ---
     if after.get("publicly_accessible") is True:
         hits.append(("PUBLIC_DB_ENDPOINT", Severity.ERROR,
                      f"database has a public endpoint (publicly_accessible=true) at {ch.address}"))
+
+    # --- Azure storage account anonymous public-blob access (round-10 F10-1, the public-exposure
+    # triad's Azure leg). `allow_nested_items_to_be_public` is the azurerm ≥3.0 rename. ---
+    if "storage_account" in ch.rtype and (after.get("allow_blob_public_access") is True
+                                          or after.get("allow_nested_items_to_be_public") is True):
+        hits.append(("PUBLIC_BLOB_ACCESS", Severity.ERROR,
+                     f"storage account permits anonymous public blob access at {ch.address}"))
 
     # --- Network exposure: open ingress (AWS SG / GCP firewall / Azure NSG — round-9 F1/F2 parity) ---
     if _open_ingress(after, ch.rtype):
@@ -501,6 +520,24 @@ def _evaluate(ch: IamChange) -> list[tuple[str, Severity, str]]:
 _WORLD_CIDRS = {"0.0.0.0/0", "::/0"}
 
 
+def _cidrs_cover_world(cidrs) -> bool:
+    """True if the CIDR strings cover at least HALF of either IP space. Catches the literal
+    0.0.0.0/0 / ::/0 AND a split like 0.0.0.0/1 + 128.0.0.0/1 (the whole internet in two halves) that
+    plain string-matching misses (round-10 F10-2). Real CIDR math via `ipaddress`, hostile values
+    skipped."""
+    v4: list[ipaddress.IPv4Network] = []
+    v6: list[ipaddress.IPv6Network] = []
+    for c in cidrs:
+        try:
+            n = ipaddress.ip_network(str(c), strict=False)
+        except ValueError:
+            continue
+        (v6 if isinstance(n, ipaddress.IPv6Network) else v4).append(n)  # type: ignore[arg-type]
+    # collapse_addresses merges to non-overlapping blocks, so the sum is exact (no double count).
+    return (bool(v4) and sum(n.num_addresses for n in ipaddress.collapse_addresses(v4)) >= (1 << 31)) \
+        or (bool(v6) and sum(n.num_addresses for n in ipaddress.collapse_addresses(v6)) >= (1 << 127))
+
+
 def _block_open(d: dict) -> bool:
     """A cidr block open to the world via any shape: cidr_blocks / ipv6_cidr_blocks (lists, on
     aws_security_group[_rule]) or cidr_ipv4 / cidr_ipv6 (strings, on the newer dedicated rule)."""
@@ -511,19 +548,22 @@ def _block_open(d: dict) -> bool:
         v = d.get(k)
         if isinstance(v, str):
             vals.add(v)
-    return bool(vals & _WORLD_CIDRS)
-
-
-_AZURE_WORLD_PREFIXES = {"*", "internet", "0.0.0.0/0", "::/0"}
+    return _cidrs_cover_world(vals)
 
 
 def _azure_rule_open(d: dict) -> bool:
-    """An Azure NSG rule allowing inbound from the whole internet (*/Internet/0.0.0.0/0)."""
-    if str(d.get("access", "")).lower() != "allow" or str(d.get("direction", "")).lower() != "inbound":
+    """An Azure NSG rule allowing inbound from the whole internet (*/Internet/0.0.0.0/0, incl. a
+    split-CIDR). An ABSENT `direction` is treated as inbound — fail closed, matching the GCP default
+    (round-10 F10-3)."""
+    if str(d.get("access", "")).lower() != "allow":
         return False
-    prefixes = {str(d.get("source_address_prefix", "")).lower()}
-    prefixes |= {str(x).lower() for x in _as_list(d.get("source_address_prefixes"))}
-    return bool(prefixes & _AZURE_WORLD_PREFIXES)
+    if str(d.get("direction", "inbound")).lower() != "inbound":
+        return False
+    raw = [str(d.get("source_address_prefix", ""))]
+    raw += [str(x) for x in _as_list(d.get("source_address_prefixes"))]
+    if {p.lower() for p in raw} & {"*", "internet"}:
+        return True
+    return _cidrs_cover_world(raw)
 
 
 def _open_ingress(after: dict, rtype: str = "") -> bool:
@@ -536,7 +576,7 @@ def _open_ingress(after: dict, rtype: str = "") -> bool:
         return True
     # GCP google_compute_firewall: an INGRESS rule (default direction) with world source_ranges (F1).
     if "firewall" in rt and str(after.get("direction", "INGRESS")).upper() == "INGRESS" \
-            and ({str(x) for x in _as_list(after.get("source_ranges"))} & _WORLD_CIDRS):
+            and _cidrs_cover_world([str(x) for x in _as_list(after.get("source_ranges"))]):
         return True
     # Azure NSG: a standalone azurerm_network_security_rule, or inline `security_rule` blocks (F2).
     return ("security_rule" in rt or "network_security" in rt) and (
