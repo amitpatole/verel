@@ -137,6 +137,18 @@ def test_plan_show_empty_json_fails_closed():
     assert res.action_class == ActionClass.IRREVERSIBLE and res.report.errored
 
 
+def test_plan_detects_midplan_file_swap():
+    # Red-team round 2 Finding 1: the planfile is swapped between the classify-read and the digest —
+    # plan() re-digests before/after `show` and must refuse on a mismatch (fail closed IRREVERSIBLE).
+    blobs = iter([b"PLAN-A", b"PLAN-B", b"PLAN-B"])  # before-show, after-show (swapped), ...
+
+    tf = FakeTf(show_json=json.dumps(_plan_json(_rc("aws_s3_bucket.a", "aws_s3_bucket", ["create"]))))
+    act = TerraformActuator(".", runner=tf.runner, read_bytes=lambda _p: next(blobs))
+    res = act.plan()
+    assert res.action_class == ActionClass.IRREVERSIBLE and res.report.errored
+    assert res.plan_digest == ""
+
+
 def test_act_does_not_raise_on_runner_timeout():
     # Red-team: a hung apply (TimeoutExpired) must become a clean refusal, not an uncaught exception.
     import subprocess

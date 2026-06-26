@@ -21,6 +21,7 @@ IAM-affecting change from any provider into one shape and runs deterministic ris
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import re
 from dataclasses import dataclass, field
@@ -42,6 +43,21 @@ def safe_arg(value: str, what: str = "argument") -> str:
 
 def safe_args(values: list[str], what: str = "argument") -> list[str]:
     return [safe_arg(v, what) for v in (values or [])]
+
+
+def safe_path(value: str, what: str = "path") -> str:
+    """A path argument: charset-safe AND no remote scheme (`https://`/`oci://` — `kubectl -f` and
+    `helm template` FETCH those: SSRF / hostile remote chart) AND no `..` traversal segment."""
+    safe_arg(value, what)
+    if "://" in value:
+        raise ValueError(f"unsafe {what} (remote URL not allowed): {value!r}")
+    if ".." in value.replace("\\", "/").split("/"):
+        raise ValueError(f"unsafe {what} (path traversal): {value!r}")
+    return value
+
+
+def safe_paths(values: list[str], what: str = "path") -> list[str]:
+    return [safe_path(v, what) for v in (values or [])]
 
 # ---------------------------------------------------------------------------
 # Severity mapping for config scanners (trivy/checkov share this vocabulary).
@@ -105,6 +121,7 @@ _IAM_TYPE_SUBSTRINGS = (
     "iam", "_iam_", "_policy", "role_assignment", "role_definition", "role_binding", "rolebinding",
     "cluster_role", "clusterrole", "kubernetes_role", "security_group", "access_policy",
     "lambda_permission", "_grant", "kms_key", "glacier_vault", "secretsmanager",
+    "public_access_block", "ram_resource_share", "ram_principal_association", "organizations_policy",
 )
 
 
@@ -245,25 +262,44 @@ _ADMIN_GCP_ROLES = {"roles/owner", "roles/editor", "roles/iam.securityadmin",
                     "roles/resourcemanager.organizationadmin"}
 _ADMIN_AZURE_ROLES = {"owner", "contributor", "user access administrator"}
 _PUBLIC_PRINCIPALS = {"*", "allusers", "allauthenticatedusers", "system:anonymous", "system:unauthenticated"}
+_ADMIN_MANAGED_POLICIES = ("administratoraccess", "poweruseraccess", "iamfullaccess")
+
+
+def _gcp_bindings(after: dict) -> list[tuple[str, list[str]]]:
+    """GCP (role, members) bindings from BOTH the top-level member/binding resources AND the
+    authoritative `*_iam_policy` resources, whose bindings live in a `policy_data` JSON string
+    ({"bindings":[{role,members}]}) that carries no `Statement` key."""
+    out: list[tuple[str, list[str]]] = []
+    if after.get("role"):
+        out.append((str(after.get("role", "")),
+                    [str(m) for m in _as_list(after.get("members")) + _as_list(after.get("member"))]))
+    pd = after.get("policy_data")
+    if isinstance(pd, str):
+        try:
+            doc = json.loads(pd)
+        except (json.JSONDecodeError, RecursionError, ValueError):
+            doc = {}
+        for b in (_as_list(doc.get("bindings")) if isinstance(doc, dict) else []):
+            if isinstance(b, dict):
+                out.append((str(b.get("role", "")), [str(m) for m in _as_list(b.get("members"))]))
+    return out
 
 
 def _is_wildcard_action(a: str) -> bool:
-    # Any trailing `*` broadens beyond a single API call: `*`, `iam:*`, AND `s3:Get*` / `iam:Put*`.
+    # A `*` or `?` ANYWHERE broadens beyond a single API call: `*`, `iam:*`, `s3:Get*`, AND the
+    # mid-string `iam:*Policy` / `s3:*Object*` forms AWS also honors.
     a = a.strip()
-    return a == "*" or a.endswith("*")
+    return "*" in a or "?" in a
 
 
 def _is_privesc(a: str) -> bool:
-    """An action is a privilege-escalation primitive, OR a wildcard that would cover one
-    (`iam:Put*` covers `iam:PutRolePolicy`; `iam:*` / `*` cover everything)."""
+    """An action is a privilege-escalation primitive, OR a glob that would cover one
+    (`iam:Put*`, `iam:*Policy`, `iam:*`, `*` all match a privesc primitive)."""
     a = a.lower()
     if a in _PRIVESC_ACTIONS:
         return True
-    if a.endswith("*"):
-        prefix = a[:-1]
-        if prefix in ("", "iam:", "sts:"):
-            return True
-        return any(p.startswith(prefix) for p in _PRIVESC_ACTIONS)
+    if "*" in a or "?" in a:
+        return any(fnmatch.fnmatchcase(p, a) for p in _PRIVESC_ACTIONS)
     return False
 
 
@@ -302,24 +338,31 @@ def _evaluate(ch: IamChange) -> list[tuple[str, Severity, str]]:
             hits.append(("WILDCARD_RESOURCE", Severity.ERROR,
                          f"wildcard action on a wildcard resource at {ch.address}"))
 
-    # --- AWS managed-policy attachment (AdministratorAccess) ---
+    # --- AWS managed-policy attachment (admin-tier managed policies) ---
     arn = str(after.get("policy_arn", "")).lower()
-    if arn.endswith("administratoraccess") or arn.endswith("/administratoraccess"):
-        hits.append(("ADMIN_GRANT", Severity.ERROR, f"AdministratorAccess attached at {ch.address}"))
+    if any(arn.endswith(m) or arn.endswith("/" + m) for m in _ADMIN_MANAGED_POLICIES):
+        hits.append(("ADMIN_GRANT", Severity.ERROR, f"admin managed policy attached at {ch.address}"))
 
-    # --- GCP role/member bindings ---
-    role = str(after.get("role", "")).lower()
-    members = [str(m).lower() for m in _as_list(after.get("members")) + _as_list(after.get("member"))]
-    if role in _ADMIN_GCP_ROLES:
-        hits.append(("ADMIN_GRANT", Severity.ERROR, f"admin role {role} granted at {ch.address}"))
-    if any(m in _PUBLIC_PRINCIPALS or m.split(":")[-1] in _PUBLIC_PRINCIPALS for m in members):
-        hits.append(("PUBLIC_PRINCIPAL", Severity.CRITICAL,
-                     f"role granted to a public member at {ch.address}"))
+    # --- GCP role/member bindings: top-level (iam_member/binding) AND policy_data (iam_policy) ---
+    for role_raw, members_raw in _gcp_bindings(after):
+        role = role_raw.lower()
+        members = [m.lower() for m in members_raw]
+        if role in _ADMIN_GCP_ROLES:
+            hits.append(("ADMIN_GRANT", Severity.ERROR, f"admin role {role} granted at {ch.address}"))
+        if any(m in _PUBLIC_PRINCIPALS or m.split(":")[-1] in _PUBLIC_PRINCIPALS for m in members):
+            hits.append(("PUBLIC_PRINCIPAL", Severity.CRITICAL,
+                         f"role granted to a public member at {ch.address}"))
 
-    # --- Azure role assignment ---
+    # --- Azure: built-in admin assignment AND custom role_definition with a wildcard action ---
     az_role = str(after.get("role_definition_name", "")).lower()
     if az_role in _ADMIN_AZURE_ROLES:
         hits.append(("ADMIN_GRANT", Severity.ERROR, f"admin role {az_role} granted at {ch.address}"))
+    for perm in _as_list(after.get("permissions")):
+        if isinstance(perm, dict):
+            acts = [str(a) for a in _as_list(perm.get("actions")) + _as_list(perm.get("data_actions"))]
+            if any(_is_wildcard_action(a) for a in acts):
+                hits.append(("ADMIN_GRANT", Severity.ERROR,
+                             f"custom role grants a wildcard action at {ch.address}"))
 
     # --- Network exposure: security-group open ingress ---
     if _open_ingress(after, ch.rtype):
@@ -499,7 +542,7 @@ def terraform_plan_spec(repo: str, planfile: str = "tfplan.bin", covers: list[st
 
 def trivy_config_spec(repo: str, covers: list[str] | None = None, *, paths: list[str] | None = None):
     return GraderSpec(GraderKind.SECURITY, ["trivy", "config", "--quiet", "--format", "json",
-                                            *safe_args(paths or ["."], "trivy path")],
+                                            *safe_paths(paths or ["."], "trivy path")],
                       cwd=repo, covers=covers or [], parser=parse_trivy_config, lang="hcl")
 
 
@@ -583,7 +626,7 @@ def parse_checkov(out: str, err: str = "") -> list[Issue]:
 
 def checkov_spec(repo: str, covers: list[str] | None = None, *, directory: str = "."):
     return GraderSpec(GraderKind.SECURITY,
-                      ["checkov", "-d", safe_arg(directory, "checkov dir"), "-o", "json", "--compact"],
+                      ["checkov", "-d", safe_path(directory, "checkov dir"), "-o", "json", "--compact"],
                       cwd=repo, covers=covers or [], parser=parse_checkov, lang="hcl")
 
 
@@ -616,8 +659,8 @@ def conftest_spec(repo: str, paths: list[str], *, policy_dir: str = "policy",
     repo, versioned alongside the IaC they govern; signing/distribution of shared bundles is a later
     item (IAC-KICKOFF.md §open-risks)."""
     return GraderSpec(GraderKind.POLICY,
-                      ["conftest", "test", "--policy", safe_arg(policy_dir, "policy dir"), "-o", "json",
-                       *safe_args(paths, "conftest path")],
+                      ["conftest", "test", "--policy", safe_path(policy_dir, "policy dir"), "-o", "json",
+                       *safe_paths(paths, "conftest path")],
                       cwd=repo, covers=covers or [], parser=parse_conftest, lang="rego")
 
 
@@ -678,7 +721,7 @@ def parse_parliament(out: str, err: str = "") -> list[Issue]:
 
 
 def parliament_spec(repo: str, policy_file: str, covers: list[str] | None = None):
-    pf = safe_arg(policy_file, "policy file")
+    pf = safe_path(policy_file, "policy file")
     return GraderSpec(GraderKind.IAM, ["parliament", "--json", "--file", pf],
                       cwd=repo, covers=covers or [pf], parser=parse_parliament, lang="json")
 
@@ -716,6 +759,6 @@ def parse_cloudsplaining(out: str, err: str = "") -> list[Issue]:
 
 def cloudsplaining_spec(repo: str, account_file: str, covers: list[str] | None = None):
     return GraderSpec(GraderKind.IAM,
-                      ["cloudsplaining", "scan", "--input-file", safe_arg(account_file, "account file"),
+                      ["cloudsplaining", "scan", "--input-file", safe_path(account_file, "account file"),
                        "--output-format", "json"],
                       cwd=repo, covers=covers or [], parser=parse_cloudsplaining, lang="json")

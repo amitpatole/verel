@@ -8,6 +8,8 @@ non-negotiables the generic gateway can't:
              IAM sensor). The digest binds the exact bytes that were graded.
   * act    — apply EXACTLY the approved plan file. A digest mismatch (a re-plan or file substitution
              between approval and apply) is REFUSED, never applied — the plan-binding / TOCTOU defense.
+             This stops accidental re-plans and cross-trust-domain swaps; a *same-uid* adversary who
+             controls the working dir is out of scope without OS isolation (actel) — see R-007.
   * watch  — re-plan after apply; PASS only when the world converged (no remaining drift).
 
 Honored from day one (the actel/immel rules):
@@ -176,6 +178,14 @@ class TerraformActuator:
             return PlanResult(self.planfile, "", _errored_report(f"plan failed: {err[:200]}"),
                               ActionClass.IRREVERSIBLE, ["plan errored — fail closed"], {})
 
+        # Digest the freshly-written plan BEFORE we read it for classification, so we can detect a
+        # mid-plan() swap of the file (a writer racing show/digest — red-team round 2, Finding 1).
+        try:
+            digest_before = plan_digest(self._read(self._planpath()))
+        except OSError as e:
+            return PlanResult(self.planfile, "", _errored_report(f"planfile unreadable: {e}"),
+                              ActionClass.IRREVERSIBLE, ["unbound plan — fail closed"], {})
+
         # Machine-readable plan, captured once and reused for BOTH the verdict and escalation.
         rc2, show_out, err2 = self._exec([self.binary, "show", "-json", self.planfile])
         plan_json: dict = {}
@@ -183,28 +193,35 @@ class TerraformActuator:
             try:
                 loaded = json.loads(show_out)
                 plan_json = loaded if isinstance(loaded, dict) else {}
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, RecursionError, ValueError):
                 plan_json = {}
-        # Reuse run_grader (attestation + signed receipt) by feeding it the already-captured output.
-        def _replay(_cmd: list[str], _cwd: str | None = None) -> tuple[int, str, str]:
-            return (rc2, show_out, err2)
 
-        # covers=[planfile] makes the signed RunReceipt's inputs_digest hash the ACTUAL plan bytes
-        # (not a vacuous empty-covers constant) — so the attestation truly binds the graded plan.
-        report = run_grader(
-            terraform_plan_spec(self.repo, self.planfile, covers=[self.planfile], binary=self.binary),
-            runner=_replay)
-
-        # Bind the digest to the actual plan-file bytes; no digest ⇒ cannot bind ⇒ fail closed.
+        # Re-digest AFTER show. If the bytes changed between the two reads, a writer swapped the plan
+        # underneath us — the classification we computed may not match the bound bytes → refuse.
         try:
             digest = plan_digest(self._read(self._planpath()))
         except OSError as e:
             return PlanResult(self.planfile, "", _errored_report(f"planfile unreadable: {e}"),
                               ActionClass.IRREVERSIBLE, ["unbound plan — fail closed"], plan_json)
+        if digest != digest_before:
+            return PlanResult(self.planfile, "",
+                              _errored_report("plan file changed during plan — refused (TOCTOU)"),
+                              ActionClass.IRREVERSIBLE, ["plan-file changed mid-plan — fail closed"], {})
+
+        # Reuse run_grader (attestation + signed receipt) by feeding it the already-captured output.
+        def _replay(_cmd: list[str], _cwd: str | None = None) -> tuple[int, str, str]:
+            return (rc2, show_out, err2)
+
+        # covers=[planfile] makes the signed RunReceipt's inputs_digest hash the actual plan bytes
+        # (not a vacuous empty-covers constant); the before/after check above is what lets us assert the
+        # graded bytes == the digested bytes (modulo the same-uid residual — see act() / R-007).
+        report = run_grader(
+            terraform_plan_spec(self.repo, self.planfile, covers=[self.planfile], binary=self.binary),
+            runner=_replay)
 
         # If `show -json` failed OR returned unparseable/empty JSON we cannot read what the plan DOES —
         # we must not classify it as the less-restrictive CONSEQUENTIAL. Fail closed to IRREVERSIBLE.
-        # (Round 2 caught rc2!=0; the round-5 audit added the rc2==0-but-empty-JSON sibling case.)
+        # (Round 2 caught rc2!=0; a later audit added the rc2==0-but-empty-JSON sibling case.)
         if rc2 != 0 or not plan_json:
             return PlanResult(self.planfile, digest, _errored_report(f"plan unreadable: {err2[:200]}"),
                               ActionClass.IRREVERSIBLE, ["plan JSON unreadable — fail closed"], plan_json)
@@ -215,7 +232,12 @@ class TerraformActuator:
     def act(self, approved_digest: str) -> ActResult:
         """Apply EXACTLY the bound plan. Refuses unless the planfile's CURRENT digest equals the
         approved digest — a re-plan or file swap between approval and apply is rejected, not applied.
-        (Human-approval gating for IRREVERSIBLE actions is the gateway's job, upstream of this.)"""
+        (Human-approval gating for IRREVERSIBLE actions is the gateway's job, upstream of this.)
+
+        SCOPE (honest): the digest re-check closes accidental re-plans and any cross-trust-domain /
+        cross-process swap. It does NOT close a same-uid adversary who can rewrite the planfile in the
+        sub-millisecond window between this check and terraform re-opening it by path — that requires
+        running the actuator in a separate trust domain (the actel OS-isolation story). See R-007."""
         try:
             current = plan_digest(self._read(self._planpath()))
         except OSError:

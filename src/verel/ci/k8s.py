@@ -22,7 +22,7 @@ import os
 
 from ..verdict.models import Confidence, GraderKind, Issue, IssueKind, Report, Severity, Verdict
 from .graders import GraderSpec
-from .iac import _as_list, _load_json, parse_terraform_plan, safe_arg, safe_args
+from .iac import _as_list, _load_json, parse_terraform_plan, safe_path, safe_paths
 
 # Cap on a single IaC artifact we read off disk (plan / manifests) before parsing — a hostile repo
 # can't OOM us with a multi-GB file. 25 MiB is far above any real terraform plan / manifest set.
@@ -259,7 +259,7 @@ def parse_polaris(out: str, err: str = "") -> list[Issue]:
 def kubectl_dryrun_spec(repo: str, path: str = ".", covers: list[str] | None = None):
     """Validate + RBAC-scan manifests via client-side dry-run (no cluster needed)."""
     return GraderSpec(GraderKind.IAC,
-                      ["kubectl", "apply", "-f", safe_arg(path, "manifest path"),
+                      ["kubectl", "apply", "-f", safe_path(path, "manifest path"),
                        "--dry-run=client", "-o", "json"],
                       cwd=repo, covers=covers or [], parser=parse_kube_objects, lang="yaml")
 
@@ -268,8 +268,8 @@ def helm_template_spec(repo: str, chart: str, *, values: list[str] | None = None
                        covers: list[str] | None = None):
     # safe_arg on chart + values closes helm option-injection — notably `--post-renderer=<prog>`
     # (arbitrary code execution) and `--set`/`-f` smuggling — since a leading `-` is rejected.
-    cmd = ["helm", "template", safe_arg(chart, "helm chart")]
-    for v in safe_args(values or [], "helm values"):
+    cmd = ["helm", "template", safe_path(chart, "helm chart")]
+    for v in safe_paths(values or [], "helm values"):
         cmd += ["-f", v]
     return GraderSpec(GraderKind.IAC, cmd, cwd=repo, covers=covers or [],
                       parser=parse_helm_template, lang="yaml")
@@ -278,20 +278,20 @@ def helm_template_spec(repo: str, chart: str, *, values: list[str] | None = None
 def kube_score_spec(repo: str, paths: list[str], covers: list[str] | None = None):
     return GraderSpec(GraderKind.SECURITY,
                       ["kube-score", "score", "--output-format", "json",
-                       *safe_args(paths, "kube-score path")],
+                       *safe_paths(paths, "kube-score path")],
                       cwd=repo, covers=covers or [], parser=parse_kube_score, lang="yaml")
 
 
 def kube_linter_spec(repo: str, paths: list[str] | None = None, covers: list[str] | None = None):
     return GraderSpec(GraderKind.SECURITY,
                       ["kube-linter", "lint", "--format", "json",
-                       *safe_args(paths or ["."], "kube-linter path")],
+                       *safe_paths(paths or ["."], "kube-linter path")],
                       cwd=repo, covers=covers or [], parser=parse_kube_linter, lang="yaml")
 
 
 def polaris_spec(repo: str, audit_path: str = ".", covers: list[str] | None = None):
     return GraderSpec(GraderKind.SECURITY,
-                      ["polaris", "audit", "--audit-path", safe_arg(audit_path, "audit path"),
+                      ["polaris", "audit", "--audit-path", safe_path(audit_path, "audit path"),
                        "--format", "json"],
                       cwd=repo, covers=covers or [], parser=parse_polaris, lang="yaml")
 
