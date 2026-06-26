@@ -452,6 +452,27 @@ def test_ordinary_role_trust_policy_is_clean():
     assert _rules(_rc("aws_iam_role.app", "aws_iam_role", after)) == {}
 
 
+def test_cross_account_trust_advisory_not_gating():
+    # Round-13 F13-1: trust to a CONCRETE external account is a confused-deputy advisory (WARNING),
+    # not a hard gate (re-gating would resurrect the round-12 service-trust false positive).
+    after = {"assume_role_policy": _doc({"Effect": "Allow", "Action": "sts:AssumeRole",
+                                         "Principal": {"AWS": "arn:aws:iam::999999999999:root"}})}
+    rules = _rules(_rc("aws_iam_role.app", "aws_iam_role", after))
+    assert rules.get("CROSS_ACCOUNT_TRUST") == Severity.WARNING
+    # WARNING only — no gating issue, so grade_iac would WARN not FAIL
+    assert all(sev not in (Severity.ERROR, Severity.CRITICAL) for sev in rules.values())
+    # a plain Service trust must NOT trip the cross-account advisory
+    svc = {"assume_role_policy": _doc({"Effect": "Allow", "Action": "sts:AssumeRole",
+                                       "Principal": {"Service": "ec2.amazonaws.com"}})}
+    assert _rules(_rc("aws_iam_role.app", "aws_iam_role", svc)) == {}
+
+
+def test_publicly_accessible_string_true_gates():
+    # Round-13 F13-2: a hostile-plan string "true" for publicly_accessible must still gate.
+    assert _rules(_rc("aws_db_instance.d", "aws_db_instance",
+                      {"publicly_accessible": "true"}))["PUBLIC_DB_ENDPOINT"] == Severity.ERROR
+
+
 def test_wildcard_principal_trust_policy_still_flagged():
     # ...but a role ANYONE may assume (wildcard principal) is still CRITICAL via PUBLIC_PRINCIPAL.
     after = {"assume_role_policy": _doc({"Effect": "Allow", "Action": "sts:AssumeRole",
