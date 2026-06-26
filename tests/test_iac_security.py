@@ -99,6 +99,49 @@ def test_terraform_rbac_path_has_parity():
     assert _rules(_rc("kubernetes_cluster_role.x", "kubernetes_cluster_role", after))["PRIVILEGE_ESCALATION"] == Severity.CRITICAL
 
 
+# === Round 2: bypasses of the round-1 fixes ===
+def test_gcp_iam_policy_policy_data_bindings_flagged():
+    # google_project_iam_policy carries bindings in a policy_data JSON string (no Statement key).
+    after = {"policy_data": json.dumps({"bindings": [{"role": "roles/owner", "members": ["allUsers"]}]})}
+    rules = _rules(_rc("google_project_iam_policy.p", "google_project_iam_policy", after))
+    assert rules["ADMIN_GRANT"] == Severity.ERROR and rules["PUBLIC_PRINCIPAL"] == Severity.CRITICAL
+
+
+def test_azure_custom_role_wildcard_action_flagged():
+    after = {"name": "superrole", "permissions": [{"actions": ["*"], "not_actions": []}]}
+    assert "ADMIN_GRANT" in _rules(_rc("azurerm_role_definition.r", "azurerm_role_definition", after))
+
+
+def test_mid_string_wildcard_action_flagged():
+    after = {"policy": _doc({"Effect": "Allow", "Action": "iam:*Policy", "Resource": "*"})}
+    rules = _rules(_rc("aws_iam_policy.x", "aws_iam_policy", after))
+    assert rules["WILDCARD_ACTION"] == Severity.ERROR
+    assert rules["PRIVILEGE_ESCALATION"] == Severity.CRITICAL  # iam:*Policy covers PutRolePolicy etc.
+
+
+def test_power_user_and_iam_full_access_flagged():
+    for arn in ("arn:aws:iam::aws:policy/PowerUserAccess", "arn:aws:iam::aws:policy/IAMFullAccess"):
+        after = {"policy_arn": arn}
+        assert "ADMIN_GRANT" in _rules(_rc("aws_iam_role_policy_attachment.a",
+                                           "aws_iam_role_policy_attachment", after))
+
+
+def test_url_path_rejected_ssrf():
+    # safe_path must reject remote URLs (kubectl -f / helm template FETCH them) — red-team R2-F1.
+    from verel.ci import helm_template_spec, kubectl_dryrun_spec
+    with pytest.raises(ValueError):
+        kubectl_dryrun_spec(".", path="https://attacker.example/x.yaml")
+    with pytest.raises(ValueError):
+        helm_template_spec(".", "oci://attacker/chart")
+
+
+def test_path_traversal_rejected():
+    with pytest.raises(ValueError):
+        trivy_config_spec(".", paths=["../../../../etc"])
+    with pytest.raises(ValueError):
+        checkov_spec(".", directory="../../secrets")
+
+
 # === Cluster 2: argv option-injection (incl. helm --post-renderer RCE) ===
 def test_helm_post_renderer_rejected():
     with pytest.raises(ValueError):

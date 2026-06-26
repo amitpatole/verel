@@ -32,20 +32,19 @@ def _secure_cred_read(path: Path) -> str | None:
     verel._secrets. Returns the text, or None (⇒ caller treats creds as absent / fail closed).
     NOTE: file *mode* (group/world-readable) is surfaced as a warning by the caller, not hard-failed,
     so a pre-existing 0644 cred file keeps working — the symlink/owner checks are the real defense."""
-    try:
-        st = path.lstat()
-    except OSError:
-        return None
-    if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode):
-        return None
-    if hasattr(os, "getuid") and st.st_uid != os.getuid():
-        return None
+    # O_NOFOLLOW rejects a symlinked FINAL component (→ ELOOP); then fstat the OPEN fd (not a prior
+    # lstat) so the regular-file + owner checks apply to the exact bytes we'll read — no lstat→open race.
     try:
         fd = os.open(str(path), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
     except OSError:
         return None
     try:
-        with os.fdopen(fd, encoding="utf-8-sig") as f:  # utf-8-sig strips the BOM in the AWS export
+        with os.fdopen(fd, encoding="utf-8-sig") as f:  # closes fd on every exit, incl. early return
+            st = os.fstat(f.fileno())
+            if not stat.S_ISREG(st.st_mode):
+                return None
+            if hasattr(os, "getuid") and st.st_uid != os.getuid():
+                return None
             return f.read(_MAX_CRED_BYTES)
     except OSError:
         return None
