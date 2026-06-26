@@ -68,6 +68,19 @@ from .iac import (
     tflint_spec,
     trivy_config_spec,
 )
+from .k8s import (
+    extract_rbac_risks,
+    helm_template_spec,
+    kube_linter_spec,
+    kube_score_spec,
+    kubectl_dryrun_spec,
+    parse_helm_template,
+    parse_kube_linter,
+    parse_kube_objects,
+    parse_kube_score,
+    parse_polaris,
+    polaris_spec,
+)
 from .medic import Action, Diagnosis, classify_issue, enrich_diagnoses, quarantine_severity, triage
 from .pipeline import (
     Stage,
@@ -102,6 +115,10 @@ __all__ = [
     "parliament_spec", "cloudsplaining_spec",
     "parse_tflint", "parse_checkov", "parse_conftest", "parse_infracost",
     "parse_parliament", "parse_cloudsplaining",
+    "extract_rbac_risks", "parse_kube_objects", "parse_helm_template",
+    "parse_kube_score", "parse_kube_linter", "parse_polaris",
+    "kubectl_dryrun_spec", "helm_template_spec", "kube_score_spec",
+    "kube_linter_spec", "polaris_spec",
     "Stage", "StageResult", "run_stage", "inner_loop_stage", "precommit_stage", "premerge_stage",
     "postmerge_stage",
     "Action", "Diagnosis", "classify_issue", "triage", "quarantine_severity", "enrich_diagnoses",
