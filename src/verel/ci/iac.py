@@ -262,7 +262,9 @@ def _principals(p: object) -> list[str]:
 _PRIVESC_ACTIONS = {
     "iam:passrole", "iam:createpolicyversion", "iam:setdefaultpolicyversion",
     "iam:attachrolepolicy", "iam:attachuserpolicy", "iam:attachgrouppolicy",
-    "iam:putrolepolicy", "iam:putuserpolicy", "iam:createaccesskey", "sts:assumerole",
+    "iam:putrolepolicy", "iam:putuserpolicy", "iam:putgrouppolicy", "iam:createaccesskey",
+    "iam:createloginprofile", "iam:updateloginprofile", "iam:updateassumerolepolicy",
+    "iam:createuser", "sts:assumerole",
 }
 _ADMIN_GCP_ROLES = {"roles/owner", "roles/editor", "roles/iam.securityadmin",
                     "roles/resourcemanager.organizationadmin"}
