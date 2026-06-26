@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 
 from ..verdict.models import Confidence, GraderKind, Issue, IssueKind, Report, Severity, Verdict
 from .graders import GraderSpec
@@ -34,6 +35,9 @@ _MAX_ARTIFACT_BYTES = 25 * 1024 * 1024
 _RBAC_KINDS = {"Role", "ClusterRole", "RoleBinding", "ClusterRoleBinding"}
 _PRIVESC_VERBS = {"escalate", "bind", "impersonate"}  # k8s RBAC privilege-escalation primitives
 _SECRET_READ_VERBS = {"get", "list", "watch", "*"}
+# create on these = escalation even without `*`: mint SA tokens / exec into pods (kept at parity with
+# the terraform-provider path in iac.py::_RBAC_DANGEROUS_RESOURCES).
+_DANGEROUS_RBAC_RESOURCES = {"serviceaccounts/token", "pods/exec", "pods/attach"}
 _ANON_SUBJECTS = {"system:anonymous", "system:unauthenticated"}
 _ANON_GROUPS = {"system:unauthenticated", "system:authenticated"}  # binding to these = effectively public
 
@@ -63,9 +67,14 @@ def _role_risks(obj: dict, locus: str, cluster: bool) -> list[Issue]:
             continue
         verbs = {str(v).lower() for v in _as_list(rule.get("verbs"))}
         res = {str(r).lower() for r in _as_list(rule.get("resources"))}
-        if "*" in verbs and "*" in res:
+        nonres = {str(u) for u in _as_list(rule.get("nonResourceURLs"))}
+        if "*" in verbs and ("*" in res or "*" in nonres):
             out.append(_rbac_issue("WILDCARD_RBAC", Severity.ERROR,
                                    f"RBAC rule grants */* at {locus}", locus, kind))
+        if (verbs & {"create", "*"}) and (res & _DANGEROUS_RBAC_RESOURCES):
+            out.append(_rbac_issue("PRIVILEGE_ESCALATION", Severity.CRITICAL,
+                                   f"RBAC grants create on {sorted(res & _DANGEROUS_RBAC_RESOURCES)} "
+                                   f"at {locus}", locus, kind))
         if verbs & _PRIVESC_VERBS:
             out.append(_rbac_issue("PRIVILEGE_ESCALATION", Severity.CRITICAL,
                                    f"RBAC grants {sorted(verbs & _PRIVESC_VERBS)} at {locus}", locus, kind))
@@ -300,16 +309,24 @@ def polaris_spec(repo: str, audit_path: str = ".", covers: list[str] | None = No
 # One offline entry point for the MCP tool + the `verel-ci iac` CLI.
 # ---------------------------------------------------------------------------
 def _read_in_repo(repo: str, rel: str) -> str:
-    """Read a file that MUST live inside `repo` (charset-validate the path against traversal)."""
+    """Read a file that MUST live inside `repo`. realpath-contains against traversal, then open with
+    O_NONBLOCK (a planted FIFO can't hang us) and fstat the fd for regular-file + size — race-free
+    even against a same-uid swap between the check and the open (defense-in-depth, R-007 residual)."""
     path = rel if os.path.isabs(rel) else os.path.join(repo, rel)
     rp = os.path.realpath(path)
     if rp != os.path.realpath(repo) and not rp.startswith(os.path.realpath(repo) + os.sep):
         raise ValueError(f"path escapes the repo: {rel!r}")
-    if not os.path.isfile(rp):
-        raise FileNotFoundError(rel)
-    if os.path.getsize(rp) > _MAX_ARTIFACT_BYTES:
-        raise ValueError(f"artifact too large (> {_MAX_ARTIFACT_BYTES} bytes): {rel!r}")
-    with open(rp, encoding="utf-8") as f:
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
+    try:
+        fd = os.open(rp, flags)
+    except OSError as e:
+        raise FileNotFoundError(rel) from e
+    with os.fdopen(fd, encoding="utf-8") as f:
+        st = os.fstat(f.fileno())
+        if not stat.S_ISREG(st.st_mode):
+            raise FileNotFoundError(rel)
+        if st.st_size > _MAX_ARTIFACT_BYTES:
+            raise ValueError(f"artifact too large (> {_MAX_ARTIFACT_BYTES} bytes): {rel!r}")
         return f.read(_MAX_ARTIFACT_BYTES + 1)
 
 
