@@ -376,6 +376,27 @@ def test_all_tool_parsers_tolerate_nondict_shapes():
             assert isinstance(parser(json.dumps(payload)), list), (parser.__name__, payload)
 
 
+def test_parsers_tolerate_noniterable_and_nonstr_leaves():
+    # Round-17 R17-1/R17-2: a present-but-NON-ITERABLE scalar field (int/null/bool — the `.get("F",[])`
+    # default only fires when ABSENT) and a non-string LEAF reaching Issue()/.strip() must not crash.
+    from verel.actuators.terraform import escalate, escalation_override
+    from verel.ci import parse_terraform_plan
+    from verel.ci.iac import parse_terraform_validate
+    from verel.ci.k8s import parse_kube_score
+    for scalar in (1, None, True):
+        assert isinstance(parse_terraform_plan(json.dumps({"resource_changes": scalar})), list)
+    escalate({"resource_changes": 1})            # must not raise (TypeError on non-iterable)
+    escalation_override({"resource_changes": 1})
+    # R17-2: non-string leaves → coerced, no pydantic ValidationError / AttributeError
+    assert isinstance(parse_terraform_plan(json.dumps(
+        {"resource_changes": [{"type": "aws_iam_policy", "address": 5,
+         "change": {"actions": ["create"],
+                    "after": {"policy": _doc({"Effect": "Allow", "Action": "*", "Resource": "*"})}}}]})), list)
+    assert isinstance(parse_terraform_validate(json.dumps({"diagnostics": [{"summary": 5}]})), list)
+    assert isinstance(parse_kube_score(json.dumps([{"object_name": 5, "checks": [
+        {"grade": 1, "check": {"name": "x"}}]}])), list)
+
+
 def test_malformed_nondict_fields_do_not_crash():
     # Round-14 R14-1: a hostile truthy NON-dict `change`/`metadata`/`roleRef` must not crash the
     # grader (the `x or {}` idiom only guards None/falsy) — skip it and return a verdict.

@@ -79,7 +79,7 @@ def escalate(plan_json: dict, *, base: ActionClass = ActionClass.CONSEQUENTIAL
     dz = destructive_changes(plan_json)
     if dz:
         reasons.append(f"{len(dz)} destroy/replace ({', '.join(dz[:5])})")
-    widenings = [c.address for c in extract_iam_changes(plan_json)
+    widenings = [str(c.address) for c in extract_iam_changes(plan_json)
                  if c.change_type in ("grant", "widen", "replace")]
     if widenings:
         reasons.append(f"{len(widenings)} IAM widening ({', '.join(widenings[:5])})")
@@ -117,7 +117,7 @@ _IAM_MUTATING = (
 
 def iam_action_class(tool: str) -> ActionClass | None:
     """IRREVERSIBLE for an IAM-widening tool name (Capture C), else None (defer to verb heuristics)."""
-    t = (tool or "").lower().replace("-", "_")
+    t = str(tool or "").lower().replace("-", "_")
     return ActionClass.IRREVERSIBLE if any(p in t for p in _IAM_MUTATING) else None
 
 
