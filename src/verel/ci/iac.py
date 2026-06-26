@@ -234,7 +234,7 @@ def extract_iam_changes(plan: dict) -> list[IamChange]:
         # public-exposure clause makes the generic PUBLIC_DB_ENDPOINT rule reachable for ANY routable
         # resource type, not just the curated db/redshift list (round-12 F12-1, e.g. DMS/ElastiCache).
         if (not is_iam_resource(rtype) and not _statements(after) and not _unknown_iam_fields(unknown)
-                and after.get("publicly_accessible") is not True):
+                and not _truthy_flag(after.get("publicly_accessible"))):
             continue
         ct = _change_type(change.get("actions", []))
         if ct is None:
@@ -387,6 +387,22 @@ def _is_public_principal(p: str) -> bool:
     return p in _PUBLIC_PRINCIPALS or "*" in p
 
 
+_AWS_ACCOUNT_PRINCIPAL = re.compile(r"^(arn:aws[\w-]*:iam::\d{6,}:|\d{12}$)")
+
+
+def _is_account_principal(p: str) -> bool:
+    """A CONCRETE AWS account principal — `arn:aws:iam::<acct>:...` or a bare 12-digit account id (but
+    NOT the wildcard `::*:` form, which `_is_public_principal` already flags as public)."""
+    p = p.strip()
+    return "*" not in p and bool(_AWS_ACCOUNT_PRINCIPAL.match(p))
+
+
+def _truthy_flag(v: object) -> bool:
+    """A boolean-ish exposure flag that is dangerously ON. Accepts the JSON bool True and the
+    string/number forms a hostile (non-terraform) plan might use ("true"/"1")."""
+    return str(v).strip().lower() in ("true", "1")
+
+
 def _evaluate(ch: IamChange) -> list[tuple[str, Severity, str]]:
     """Deterministic IAM risk rules over a single change → (rule_id, severity, message) hits."""
     hits: list[tuple[str, Severity, str]] = []
@@ -423,6 +439,15 @@ def _evaluate(ch: IamChange) -> list[tuple[str, Severity, str]]:
             scoped = bool(s["resources"]) and "*" not in s["resources"]
             hits.append(("PRIVILEGE_ESCALATION", Severity.ERROR if scoped else Severity.CRITICAL,
                          f"privilege-escalation action ({priv[0]}) granted at {ch.address}"))
+        # Cross-account trust: a trust statement (sts:Assume*) letting a CONCRETE external AWS account
+        # assume this role. Legit + common, but a confused-deputy risk without an ExternalId /
+        # aws:PrincipalOrgID condition (which we don't parse) → advisory WARNING, never a hard gate
+        # (re-gating would resurrect the round-12 service-trust false positive). Round-13 F13-1.
+        if (s["principals"] and any("assumerole" in a.lower() for a in s["actions"])
+                and any(_is_account_principal(p) for p in s["principals"])):
+            hits.append(("CROSS_ACCOUNT_TRUST", Severity.WARNING,
+                         f"trust policy lets a specific AWS account assume this role — verify the "
+                         f"account and an ExternalId/PrincipalOrgID condition at {ch.address}"))
         if any(_is_wildcard_action(a) for a in s["actions"]):
             hits.append(("WILDCARD_ACTION", Severity.ERROR,
                          f"wildcard action granted at {ch.address}"))
@@ -504,15 +529,15 @@ def _evaluate(ch: IamChange) -> list[tuple[str, Severity, str]]:
                     hits.append(("PUBLIC_ACL", Severity.ERROR,
                                  f"S3 ACL grant to a public grantee ({uri}) at {ch.address}"))
 
-    # --- Publicly-routable DB endpoint (RDS / Redshift — round-9 F4) ---
-    if after.get("publicly_accessible") is True:
+    # --- Publicly-routable endpoint (RDS / Redshift / DMS / any routable type — round-9 F4, round-12) ---
+    if _truthy_flag(after.get("publicly_accessible")):
         hits.append(("PUBLIC_DB_ENDPOINT", Severity.ERROR,
-                     f"database has a public endpoint (publicly_accessible=true) at {ch.address}"))
+                     f"resource has a public endpoint (publicly_accessible=true) at {ch.address}"))
 
     # --- Azure storage account anonymous public-blob access (round-10 F10-1, the public-exposure
     # triad's Azure leg). `allow_nested_items_to_be_public` is the azurerm ≥3.0 rename. ---
-    if "storage_account" in ch.rtype and (after.get("allow_blob_public_access") is True
-                                          or after.get("allow_nested_items_to_be_public") is True):
+    if "storage_account" in ch.rtype and (_truthy_flag(after.get("allow_blob_public_access"))
+                                          or _truthy_flag(after.get("allow_nested_items_to_be_public"))):
         hits.append(("PUBLIC_BLOB_ACCESS", Severity.ERROR,
                      f"storage account permits anonymous public blob access at {ch.address}"))
 
