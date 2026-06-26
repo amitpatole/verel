@@ -25,6 +25,8 @@ from ..ci.iac import (
     _PRIVESC_ACTIONS,
     _PRIVESC_AZURE_GUIDS,
     _PRIVESC_GCP_ROLES,
+    _as_dict,
+    _as_list,
     safe_arg,
     safe_args,
 )
@@ -119,7 +121,7 @@ def parse_aws_simulate(out: str, err: str = "", sensitive: set[str] | None = Non
                                      f"principal is effectively allowed {action} on {res}", action))
         # Per-resource results can ALLOW a specific resource even when the top-level decision is a
         # generic implicitDeny — that allow is the real grant and must not be missed (E2).
-        for rsr in r.get("ResourceSpecificResults", []) if isinstance(r, dict) else []:
+        for rsr in _as_list(r.get("ResourceSpecificResults")):
             if isinstance(rsr, dict) and rsr.get("EvalResourceDecision") == "allowed":
                 res = rsr.get("EvalResourceName", "*")
                 issues.append(_iam_issue("EFFECTIVE_ALLOW", Severity.ERROR,
@@ -139,9 +141,9 @@ def parse_gcp_analyze_iam(out: str, err: str = "") -> list[Issue]:
     results = main.get("analysisResults", []) if isinstance(main, dict) else []
     issues = []
     for r in results:
-        b = (r or {}).get("iamBinding", {}) if isinstance(r, dict) else {}
+        b = _as_dict(_as_dict(r).get("iamBinding"))
         role = str(b.get("role", "")).lower()
-        members = [str(m).lower() for m in b.get("members", []) or []]
+        members = [str(m).lower() for m in _as_list(b.get("members"))]
         if role in _GCP_GATING_ROLES:
             issues.append(_iam_issue("ADMIN_GRANT", Severity.ERROR,
                                      f"effective admin/privesc role {role}", role))

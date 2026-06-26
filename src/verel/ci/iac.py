@@ -107,10 +107,12 @@ def parse_terraform_validate(out: str, err: str = "") -> list[Issue]:
     data = _load_json(out)
     issues: list[Issue] = []
     for d in data.get("diagnostics", []) if isinstance(data, dict) else []:
+        if not isinstance(d, dict):
+            continue
         sev = Severity.ERROR if (d.get("severity") == "error") else Severity.WARNING
-        rng = d.get("range") or {}
+        rng = _as_dict(d.get("range"))
         fn = rng.get("filename", "")
-        line = (rng.get("start") or {}).get("line", "")
+        line = _as_dict(rng.get("start")).get("line", "")
         loc = f"{fn}:{line}" if fn else None
         issues.append(Issue(
             kind=IssueKind.OTHER, severity=sev, source=GraderKind.IAC,
@@ -904,9 +906,13 @@ def parse_trivy_config(out: str, err: str = "") -> list[Issue]:
     data = _load_json(out)
     issues: list[Issue] = []
     for res in data.get("Results", []) if isinstance(data, dict) else []:
+        if not isinstance(res, dict):
+            continue
         target = res.get("Target", "")
-        for m in res.get("Misconfigurations", []) or []:
-            line = (m.get("CauseMetadata") or {}).get("StartLine", "")
+        for m in _as_list(res.get("Misconfigurations")):
+            if not isinstance(m, dict):
+                continue
+            line = _as_dict(m.get("CauseMetadata")).get("StartLine", "")
             mid = m.get("ID", "")
             issues.append(Issue(
                 kind=IssueKind.MISCONFIG, severity=_scan_severity(m.get("Severity", "low")),
@@ -963,10 +969,12 @@ def parse_tflint(out: str, err: str = "") -> list[Issue]:
     data = _load_json(out)
     issues: list[Issue] = []
     for it in data.get("issues", []) if isinstance(data, dict) else []:
-        rule = it.get("rule") or {}
-        rng = it.get("range") or {}
+        if not isinstance(it, dict):
+            continue
+        rule = _as_dict(it.get("rule"))
+        rng = _as_dict(it.get("range"))
         fn = rng.get("filename", "")
-        line = (rng.get("start") or {}).get("line", "")
+        line = _as_dict(rng.get("start")).get("line", "")
         name = rule.get("name", "tflint")
         issues.append(Issue(
             kind=IssueKind.OTHER, severity=_TFLINT_SEV.get(rule.get("severity", "warning"), Severity.WARNING),
@@ -990,7 +998,7 @@ def _checkov_results(data: object):
     """checkov `-o json` is a dict for one framework, or a LIST of such dicts across frameworks."""
     for d in (data if isinstance(data, list) else [data]):
         if isinstance(d, dict):
-            yield (d.get("results") or {})
+            yield _as_dict(d.get("results"))
 
 
 def parse_checkov(out: str, err: str = "") -> list[Issue]:
@@ -1002,9 +1010,11 @@ def parse_checkov(out: str, err: str = "") -> list[Issue]:
         return []
     issues: list[Issue] = []
     for results in _checkov_results(data):
-        for c in results.get("failed_checks", []) or []:
+        for c in _as_list(results.get("failed_checks")):
+            if not isinstance(c, dict):
+                continue
             cid = c.get("check_id", "")
-            rng = c.get("file_line_range") or []
+            rng = _as_list(c.get("file_line_range"))
             start = rng[0] if rng else ""
             # checkov severity is often null on the community ruleset → default WARNING (gates? no:
             # WARNING < GATING_SEVERITY, so unrated findings advise; rated HIGH/CRITICAL gate).
@@ -1109,7 +1119,7 @@ def parse_parliament(out: str, err: str = "") -> list[Issue]:
     for f in data if isinstance(data, list) else []:
         if not isinstance(f, dict):
             continue
-        loc = f.get("location") or {}
+        loc = _as_dict(f.get("location"))
         where = loc.get("filepath") or loc.get("string") or ""
         issues.append(Issue(
             kind=IssueKind.IAM_RISK, severity=_scan_severity(f.get("severity", "low")),

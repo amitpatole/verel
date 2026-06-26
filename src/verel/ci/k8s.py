@@ -244,14 +244,18 @@ def parse_kube_score(out: str, err: str = "") -> list[Issue]:
         return []
     issues: list[Issue] = []
     for obj in data if isinstance(data, list) else []:
+        if not isinstance(obj, dict):
+            continue
         name = obj.get("object_name", "")
-        for chk in obj.get("checks", []) or []:
+        for chk in _as_list(obj.get("checks")):
+            if not isinstance(chk, dict):
+                continue
             grade = chk.get("grade", 10)
             if isinstance(grade, (int, float)) and grade >= 10:
                 continue
             sev = Severity.ERROR if (isinstance(grade, (int, float)) and grade <= 1) else Severity.WARNING
-            c = chk.get("check") or {}
-            comments = chk.get("comments") or []
+            c = _as_dict(chk.get("check"))
+            comments = _as_list(chk.get("comments"))
             summ = comments[0].get("summary", "") if comments and isinstance(comments[0], dict) else ""
             issues.append(Issue(
                 kind=IssueKind.MISCONFIG, severity=sev, source=GraderKind.SECURITY,
@@ -267,9 +271,11 @@ def parse_kube_linter(out: str, err: str = "") -> list[Issue]:
     data = _load_json(out)
     issues: list[Issue] = []
     for r in data.get("Reports", []) if isinstance(data, dict) else []:
-        diag = r.get("Diagnostic") or {}
-        o = (r.get("Object") or {}).get("K8sObject") or {}
-        gvk = o.get("GroupVersionKind") or {}
+        if not isinstance(r, dict):
+            continue
+        diag = _as_dict(r.get("Diagnostic"))
+        o = _as_dict(_as_dict(r.get("Object")).get("K8sObject"))
+        gvk = _as_dict(o.get("GroupVersionKind"))
         locus = f"{gvk.get('Kind', '')}/{o.get('Namespace', '')}/{o.get('Name', '')}"
         check = r.get("Check", "kube-linter")
         issues.append(Issue(
@@ -308,6 +314,8 @@ def parse_polaris(out: str, err: str = "") -> list[Issue]:
     data = _load_json(out)
     issues: list[Issue] = []
     for res in data.get("Results", []) if isinstance(data, dict) else []:
+        if not isinstance(res, dict):
+            continue
         locus = f"{res.get('Kind', '')}/{res.get('Namespace', '')}/{res.get('Name', '')}"
         for chk in _polaris_failed(res):
             sev = Severity.ERROR if str(chk.get("Severity", "")).lower() == "danger" else Severity.WARNING

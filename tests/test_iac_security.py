@@ -344,6 +344,38 @@ def test_data_http_advisory():
     assert len(http) == 1 and http[0].severity == Severity.WARNING
 
 
+def test_all_tool_parsers_tolerate_nondict_shapes():
+    # Round-16: every tool/scanner parser must FAIL CLOSED (return a list, never crash) on a hostile
+    # non-dict element or nested field — parity with the untrusted-sensor R14-1/R15-1 contract.
+    from verel.ci.iac import (
+        parse_checkov,
+        parse_parliament,
+        parse_terraform_validate,
+        parse_tflint,
+        parse_trivy_config,
+    )
+    from verel.ci.k8s import parse_kube_linter, parse_kube_score, parse_polaris
+    cases = [
+        (parse_terraform_validate, [
+            {"diagnostics": ["x"]}, {"diagnostics": [{"range": "x"}]},
+            {"diagnostics": [{"range": {"start": "x"}}]}]),
+        (parse_trivy_config, [
+            {"Results": ["x"]}, {"Results": [{"Misconfigurations": ["x"]}]},
+            {"Results": [{"Misconfigurations": [{"CauseMetadata": "x"}]}]}]),
+        (parse_tflint, [{"issues": ["x"]}, {"issues": [{"rule": "x", "range": "x"}]}]),
+        (parse_checkov, [{"results": {"failed_checks": ["x"]}}, {"results": "x"}]),
+        (parse_parliament, [[{"location": "x"}]]),
+        (parse_kube_score, [["x"], [{"checks": ["x"]}], [{"checks": "x"}]]),
+        (parse_kube_linter, [
+            {"Reports": ["x"]}, {"Reports": [{"Object": "x"}]},
+            {"Reports": [{"Object": {"K8sObject": "x"}}]}]),
+        (parse_polaris, [{"Results": ["x"]}]),
+    ]
+    for parser, payloads in cases:
+        for payload in payloads:
+            assert isinstance(parser(json.dumps(payload)), list), (parser.__name__, payload)
+
+
 def test_malformed_nondict_fields_do_not_crash():
     # Round-14 R14-1: a hostile truthy NON-dict `change`/`metadata`/`roleRef` must not crash the
     # grader (the `x or {}` idiom only guards None/falsy) — skip it and return a verdict.
