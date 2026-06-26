@@ -24,7 +24,9 @@ import stat
 from ..verdict.models import Confidence, GraderKind, Issue, IssueKind, Report, Severity, Verdict
 from .graders import GraderSpec
 from .iac import (
+    _PRIVILEGED_NAMESPACES,
     _RBAC_BUILTIN_ADMIN_ROLES,
+    _RBAC_WRITE_VERBS,
     _as_list,
     _load_json,
     _rbac_resource_privesc,
@@ -70,6 +72,10 @@ def _rbac_issue(rule_id: str, sev: Severity, msg: str, locus: str, kind: str) ->
 def _role_risks(obj: dict, locus: str, cluster: bool) -> list[Issue]:
     kind = obj.get("kind", "")
     out: list[Issue] = []
+    # A Role in kube-system/kube-public is cluster-admin-EQUIVALENT (bootstrap/controller tokens live
+    # in its secrets), so its secret/read-all reach gates at the elevated severity (round-7 F4).
+    ns = (obj.get("metadata") or {}).get("namespace", "")
+    elevated = cluster or ns in _PRIVILEGED_NAMESPACES
     # A ClusterRole that AGGREGATES other roles grows silently to whatever the label-selected roles
     # grant — surface an advisory rather than green-lighting an (often empty) `rules` (round-6 R5).
     if obj.get("aggregationRule"):
@@ -97,16 +103,23 @@ def _role_risks(obj: dict, locus: str, cluster: bool) -> list[Issue]:
             out.append(_rbac_issue("PRIVILEGE_ESCALATION", Severity.CRITICAL,
                                    f"RBAC grants an escalation primitive on {escres} at {locus}",
                                    locus, kind))
+        # Write to ALL resources (`*`) = create rolebindings/webhooks → takeover (round-7 F1).
+        if "*" in res and (verbs & _RBAC_WRITE_VERBS):
+            sev = Severity.CRITICAL if elevated else Severity.ERROR
+            scope = "cluster-wide " if cluster else ""
+            out.append(_rbac_issue("PRIVILEGE_ESCALATION", sev,
+                                   f"grants {scope}write to all resources "
+                                   f"(incl. rolebindings/webhooks) at {locus}", locus, kind))
         reads = verbs & _SECRET_READ_VERBS
         if "secrets" in res and reads:
-            sev = Severity.ERROR if cluster else Severity.WARNING
+            sev = Severity.ERROR if elevated else Severity.WARNING
             scope = "cluster-wide " if cluster else ""
             out.append(_rbac_issue("SECRETS_ACCESS", sev,
                                    f"grants {scope}read of secrets at {locus}", locus, kind))
         elif "*" in res and (verbs & {"get", "list", "watch"}):
-            # read-all over `*` resources includes secrets — cluster-wide on a ClusterRole (ERROR), or
-            # all secrets in one namespace on a Role (WARNING). The `*` verb is already WILDCARD_RBAC.
-            sev = Severity.ERROR if cluster else Severity.WARNING
+            # read-all over `*` resources includes secrets — cluster-wide / privileged-namespace gates
+            # (ERROR); an ordinary namespace advises (WARNING). The `*` verb is already WILDCARD_RBAC.
+            sev = Severity.ERROR if elevated else Severity.WARNING
             scope = "cluster-wide" if cluster else "namespace-wide"
             out.append(_rbac_issue("SECRETS_ACCESS", sev,
                                    f"grants {scope} read of all resources (incl. secrets) at {locus}",
@@ -119,9 +132,12 @@ def _binding_risks(obj: dict, locus: str) -> list[Issue]:
     out: list[Issue] = []
     ref = obj.get("roleRef") or {}
     ref_name = str(ref.get("name", "")).lower()
-    if ref_name in _RBAC_BUILTIN_ADMIN_ROLES:
+    # Only a CLUSTERROLE reference to the built-in name is the dangerous aggregated role; a user's own
+    # namespaced Role happening to be named `edit`/`admin` is harmless (round-7 F6, false-positive).
+    if ref_name in _RBAC_BUILTIN_ADMIN_ROLES and str(ref.get("kind", "")) == "ClusterRole":
         out.append(_rbac_issue("ADMIN_GRANT", Severity.ERROR,
-                               f"binding to built-in admin role {ref_name!r} at {locus}", locus, kind))
+                               f"binding to built-in admin ClusterRole {ref_name!r} at {locus}",
+                               locus, kind))
     for s in _as_list(obj.get("subjects")):
         if not isinstance(s, dict):
             continue

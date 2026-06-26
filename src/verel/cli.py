@@ -208,10 +208,17 @@ def _verify_access(args) -> int:
     v = EffectiveAccessVerifier()
     try:
         if args.cloud == "aws":
-            if not args.policy_file:
-                print("verify-access: --policy-file is required for aws", file=sys.stderr)
+            if args.principal_arn:
+                # Effective-access: ask the account what the principal is ACTUALLY allowed (round-7).
+                from .ci.iac import _PRIVESC_ACTIONS
+                actions = args.action or sorted(_PRIVESC_ACTIONS)
+                rep = v.aws_simulate_principal(args.principal_arn, actions, creds)
+            elif args.policy_file:
+                rep = v.aws_validate_policy(args.policy_file, creds)
+            else:
+                print("verify-access: aws needs --principal-arn (effective access) or --policy-file "
+                      "(static validation)", file=sys.stderr)
                 return 2
-            rep = v.aws_validate_policy(args.policy_file, creds)
         elif args.cloud == "gcp":
             if not args.scope:
                 print("verify-access: --scope is required for gcp (e.g. projects/<id>)", file=sys.stderr)
@@ -286,6 +293,10 @@ def main(argv=None) -> int:
                              "makes live provider calls — not an offline gate)")
     va.add_argument("--cloud", required=True, choices=("aws", "gcp", "azure"))
     va.add_argument("--policy-file", help="aws: an IAM policy JSON to validate (IAM Access Analyzer)")
+    va.add_argument("--principal-arn",
+                    help="aws: a role/user ARN to test EFFECTIVE access for (simulate-principal-policy)")
+    va.add_argument("--action", nargs="+",
+                    help="aws: action names to simulate (default: the privilege-escalation primitives)")
     va.add_argument("--scope", help="gcp: the analyze-iam-policy scope, e.g. projects/<id>")
 
     args = p.parse_args(argv)

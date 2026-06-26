@@ -49,7 +49,8 @@ def test_plan_summary_and_destructive():
         {"address": "aws_s3_bucket.b", "type": "aws_s3_bucket", "change": {"actions": ["delete"]}},
         {"address": "aws_instance.c", "type": "aws_instance", "change": {"actions": ["create", "delete"]}},
         {"address": "aws_instance.d", "type": "aws_instance", "change": {"actions": ["no-op"]}}))
-    assert plan_summary(plan) == {"create": 1, "update": 0, "delete": 1, "replace": 1, "no-op": 1}
+    assert plan_summary(plan) == {"create": 1, "update": 0, "delete": 1, "replace": 1,
+                                  "forget": 0, "no-op": 1}
     # destroy + replace are both destructive (both contain "delete")
     assert set(destructive_changes(plan)) == {"aws_s3_bucket.b", "aws_instance.c"}
 

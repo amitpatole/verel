@@ -130,6 +130,14 @@ def resolve_gcp(config_home: Path | None = None) -> CloudCreds:
                     and all(d.get(k) for k in _GCP_SA_REQUIRED):
                 sa_path = f
                 project = str(d.get("project_id", ""))
+                # A valid SA key may omit project_id; derive it from the client_email
+                # (svc@<project>.iam.gserviceaccount.com) so the verifier's cred↔scope binding stays
+                # active rather than silently disabling itself (round-7 R7-2).
+                if not project:
+                    m = re.search(r"@([a-z0-9-]+)\.iam\.gserviceaccount\.com",
+                                  str(d.get("client_email", "")))
+                    if m:
+                        project = m.group(1)
                 if _world_or_group_readable(f):
                     warn = f"{f.name} is group/world-readable — `chmod 600`"
                 break
@@ -144,8 +152,9 @@ def resolve_gcp(config_home: Path | None = None) -> CloudCreds:
                       project=project, warning=warn, env=env)
 
 
-_AZURE_TOKEN_FILES = ("msal_token_cache.json", "msal_token_cache.bin", "accessTokens.json",
-                      "azureProfile.json")
+# Only actual TOKEN material — NOT azureProfile.json, which is a subscription list that PERSISTS
+# after `az logout` and would falsely report creds-present when logged out (round-7 R7-5).
+_AZURE_TOKEN_FILES = ("msal_token_cache.json", "msal_token_cache.bin", "accessTokens.json")
 
 
 def resolve_azure(config_home: Path | None = None, home: Path | None = None) -> CloudCreds:
