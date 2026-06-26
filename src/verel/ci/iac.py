@@ -405,3 +405,215 @@ def trivy_config_spec(repo: str, covers: list[str] | None = None, *, paths: list
     return GraderSpec(GraderKind.SECURITY, ["trivy", "config", "--quiet", "--format", "json",
                                             *(paths or ["."])],
                       cwd=repo, covers=covers or [], parser=parse_trivy_config, lang="hcl")
+
+
+# ===========================================================================
+# Phase 2 — broaden coverage: tflint (LINT), checkov (SECURITY), conftest/OPA
+# (POLICY), infracost (COST vs budget), Parliament / Cloudsplaining (IAM).
+# All parsers stay pure over canned tool output; the Runner is injected.
+# ===========================================================================
+def _to_float(x: object) -> float | None:
+    try:
+        return float(x)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
+# --- tflint --------------------------------------------------------------
+_TFLINT_SEV = {"error": Severity.ERROR, "warning": Severity.WARNING, "notice": Severity.INFO}
+
+
+def parse_tflint(out: str, err: str = "") -> list[Issue]:
+    """`tflint --format json`: {"issues":[{rule:{name,severity},message,range:{filename,start:{line}}}],
+    "errors":[...]}. tflint internal errors (bad config) are surfaced as ERROR — a grader that could
+    not actually lint is not a clean pass."""
+    data = _load_json(out)
+    issues: list[Issue] = []
+    for it in data.get("issues", []) if isinstance(data, dict) else []:
+        rule = it.get("rule") or {}
+        rng = it.get("range") or {}
+        fn = rng.get("filename", "")
+        line = (rng.get("start") or {}).get("line", "")
+        name = rule.get("name", "tflint")
+        issues.append(Issue(
+            kind=IssueKind.OTHER, severity=_TFLINT_SEV.get(rule.get("severity", "warning"), Severity.WARNING),
+            source=GraderKind.LINT, message=f"{name} {it.get('message', '')}".strip(),
+            locator=f"{fn}:{line}" if fn else None, detail_json=json.dumps({"rule_id": name}),
+        ))
+    for e in data.get("errors", []) if isinstance(data, dict) else []:
+        msg = e.get("message", "tflint error") if isinstance(e, dict) else str(e)
+        issues.append(Issue(kind=IssueKind.OTHER, severity=Severity.ERROR, source=GraderKind.LINT,
+                            message=f"tflint: {msg}", detail_json=json.dumps({"rule_id": "tflint-error"})))
+    return issues
+
+
+def tflint_spec(repo: str, covers: list[str] | None = None):
+    return GraderSpec(GraderKind.LINT, ["tflint", "--format", "json"], cwd=repo,
+                      covers=covers or [], parser=parse_tflint, lang="hcl")
+
+
+# --- checkov -------------------------------------------------------------
+def _checkov_results(data: object):
+    """checkov `-o json` is a dict for one framework, or a LIST of such dicts across frameworks."""
+    for d in (data if isinstance(data, list) else [data]):
+        if isinstance(d, dict):
+            yield (d.get("results") or {})
+
+
+def parse_checkov(out: str, err: str = "") -> list[Issue]:
+    """checkov `-o json`: {"results":{"failed_checks":[{check_id,check_name,file_path,
+    file_line_range:[start,end],severity,resource}]}} (or a list across frameworks). Only failures."""
+    try:
+        data = json.loads(out or "{}")
+    except json.JSONDecodeError:
+        return []
+    issues: list[Issue] = []
+    for results in _checkov_results(data):
+        for c in results.get("failed_checks", []) or []:
+            cid = c.get("check_id", "")
+            rng = c.get("file_line_range") or []
+            start = rng[0] if rng else ""
+            # checkov severity is often null on the community ruleset → default WARNING (gates? no:
+            # WARNING < GATING_SEVERITY, so unrated findings advise; rated HIGH/CRITICAL gate).
+            sev = _scan_severity(c.get("severity") or "medium")
+            issues.append(Issue(
+                kind=IssueKind.MISCONFIG, severity=sev, source=GraderKind.SECURITY,
+                message=f"{cid} {c.get('check_name', '')}".strip(),
+                locator=f"{c.get('file_path', '')}:{start}".lstrip(":"),
+                detail_json=json.dumps({"rule_id": cid, "resource": c.get("resource", "")}),
+            ))
+    return issues
+
+
+def checkov_spec(repo: str, covers: list[str] | None = None, *, directory: str = "."):
+    return GraderSpec(GraderKind.SECURITY, ["checkov", "-d", directory, "-o", "json", "--compact"],
+                      cwd=repo, covers=covers or [], parser=parse_checkov, lang="hcl")
+
+
+# --- conftest / OPA (policy-as-code) -------------------------------------
+def parse_conftest(out: str, err: str = "") -> list[Issue]:
+    """conftest `-o json`: [{filename,namespace,failures:[{msg}],warnings:[{msg}],successes:int}].
+    failures gate (ERROR); warnings advise (WARNING)."""
+    try:
+        data = json.loads(out or "[]")
+    except json.JSONDecodeError:
+        return []
+    issues: list[Issue] = []
+    for r in data if isinstance(data, list) else []:
+        fn = r.get("filename", "") if isinstance(r, dict) else ""
+        for sev, key in ((Severity.ERROR, "failures"), (Severity.WARNING, "warnings")):
+            for f in (r.get(key, []) or []) if isinstance(r, dict) else []:
+                msg = f.get("msg", "policy violation") if isinstance(f, dict) else str(f)
+                issues.append(Issue(
+                    kind=IssueKind.OTHER, severity=sev, source=GraderKind.POLICY,
+                    message=msg, locator=fn or None,
+                    detail_json=json.dumps({"rule_id": "conftest", "namespace": r.get("namespace", "")
+                                            if isinstance(r, dict) else ""}),
+                ))
+    return issues
+
+
+def conftest_spec(repo: str, paths: list[str], *, policy_dir: str = "policy",
+                  covers: list[str] | None = None):
+    """Policy-as-code gate. Convention (the "policy bundle"): rego policies live in `policy_dir` in the
+    repo, versioned alongside the IaC they govern; signing/distribution of shared bundles is a later
+    item (IAC-KICKOFF.md §open-risks)."""
+    return GraderSpec(GraderKind.POLICY, ["conftest", "test", "--policy", policy_dir, "-o", "json",
+                                          *paths],
+                      cwd=repo, covers=covers or [], parser=parse_conftest, lang="rego")
+
+
+# --- infracost (COST vs an EXPLICIT budget, never inferred — like PERF) ---
+def parse_infracost(out: str, err: str = "", budgets: dict[str, float] | None = None) -> list[Issue]:
+    """infracost `--format json`: {totalMonthlyCost, diffTotalMonthlyCost, currency}. Gates only when a
+    declared budget is exceeded — `budgets={"monthly": 1000}` and/or `{"diff": 200}`."""
+    budgets = budgets or {}
+    data = _load_json(out)
+    cur = data.get("currency", "USD")
+    issues: list[Issue] = []
+    for key, field_name in (("monthly", "totalMonthlyCost"), ("diff", "diffTotalMonthlyCost")):
+        if key not in budgets:
+            continue
+        val = _to_float(data.get(field_name))
+        if val is not None and val > budgets[key]:
+            issues.append(Issue(
+                kind=IssueKind.OTHER, severity=Severity.ERROR, source=GraderKind.COST,
+                message=f"{field_name} {val} {cur} exceeds budget {budgets[key]} {cur}",
+                locator=field_name,
+                detail_json=json.dumps({"metric": field_name, "value": val, "budget": budgets[key]}),
+            ))
+    return issues
+
+
+def infracost_spec(repo: str, budgets: dict[str, float], command: list[str] | None = None,
+                   covers: list[str] | None = None):
+    def parse(out: str, err: str = "") -> list[Issue]:
+        return parse_infracost(out, err, budgets)
+
+    return GraderSpec(GraderKind.COST,
+                      command or ["infracost", "breakdown", "--path", ".", "--format", "json"],
+                      cwd=repo, covers=covers or [], parser=parse, lang="hcl")
+
+
+# --- Parliament (AWS IAM policy linter) — least-privilege findings -------
+def parse_parliament(out: str, err: str = "") -> list[Issue]:
+    """`parliament --json`: a list of findings [{issue,title,severity,detail,location}]. Severity
+    HIGH/CRITICAL gate; MEDIUM/LOW advise (same severity floor as the other security graders)."""
+    try:
+        data = json.loads(out or "[]")
+    except json.JSONDecodeError:
+        return []
+    issues: list[Issue] = []
+    for f in data if isinstance(data, list) else []:
+        if not isinstance(f, dict):
+            continue
+        loc = f.get("location") or {}
+        where = loc.get("filepath") or loc.get("string") or ""
+        issues.append(Issue(
+            kind=IssueKind.IAM_RISK, severity=_scan_severity(f.get("severity", "low")),
+            source=GraderKind.IAM, message=f"{f.get('issue', '')} {f.get('title', '')}".strip(),
+            locator=where or None, detail_json=json.dumps({"rule_id": f.get("issue", "parliament")}),
+        ))
+    return issues
+
+
+def parliament_spec(repo: str, policy_file: str, covers: list[str] | None = None):
+    return GraderSpec(GraderKind.IAM, ["parliament", "--json", "--file", policy_file],
+                      cwd=repo, covers=covers or [policy_file], parser=parse_parliament, lang="json")
+
+
+# --- Cloudsplaining (least-privilege risk categories) --------------------
+# The four risk buckets Cloudsplaining reports per policy/role; each entry is a least-privilege risk.
+_CLOUDSPLAINING_RISKS = {
+    "PrivilegeEscalation": Severity.CRITICAL,
+    "DataExfiltration": Severity.ERROR,
+    "ResourceExposure": Severity.ERROR,
+    "CredentialsExposure": Severity.ERROR,
+}
+
+
+def parse_cloudsplaining(out: str, err: str = "") -> list[Issue]:
+    """Cloudsplaining scan JSON: {policy_or_role_name: {PrivilegeEscalation:[...], ResourceExposure:[...],
+    DataExfiltration:[...], CredentialsExposure:[...], ...}}. Each non-empty risk bucket → an IAM issue
+    grounded on the policy name."""
+    data = _load_json(out)
+    issues: list[Issue] = []
+    for name, report in data.items():
+        if not isinstance(report, dict):
+            continue
+        for bucket, sev in _CLOUDSPLAINING_RISKS.items():
+            findings = report.get(bucket)
+            if findings:  # non-empty list → at least one risk in this category
+                n = len(findings) if isinstance(findings, list) else 1
+                issues.append(Issue(
+                    kind=IssueKind.IAM_RISK, severity=sev, source=GraderKind.IAM,
+                    message=f"{bucket}: {n} finding(s) in {name}", locator=name,
+                    detail_json=json.dumps({"rule_id": bucket, "policy": name}),
+                ))
+    return issues
+
+
+def cloudsplaining_spec(repo: str, account_file: str, covers: list[str] | None = None):
+    return GraderSpec(GraderKind.IAM, ["cloudsplaining", "scan", "--input-file", account_file,
+                                       "--output-format", "json"],
+                      cwd=repo, covers=covers or [], parser=parse_cloudsplaining, lang="json")

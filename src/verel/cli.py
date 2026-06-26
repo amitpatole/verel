@@ -47,7 +47,9 @@ def _doctor() -> int:
                          ("tflint", "tflint (IaC lint grader)"),
                          ("checkov", "checkov (IaC security grader)"),
                          ("conftest", "conftest/OPA (policy grader)"),
-                         ("infracost", "infracost (cost grader)")):
+                         ("infracost", "infracost (cost grader)"),
+                         ("parliament", "parliament (IAM least-priv grader)"),
+                         ("cloudsplaining", "cloudsplaining (IAM least-priv grader)")):
         print(f"  {ok(shutil.which(_bin))}{_label}")
     try:
         import mem0  # noqa: F401
