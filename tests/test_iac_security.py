@@ -321,6 +321,58 @@ def test_s3_public_access_block_delete_gates():
     assert _rules(rc)["PUBLIC_ACCESS_BLOCK_DISABLED"] == Severity.ERROR
 
 
+def test_pab_absent_flags_gates():
+    # Round-8 F1: a PAB create/update where the four flags are ABSENT (each defaults to false) gives
+    # zero protection — must gate exactly like an explicit-false flag.
+    rc = {"address": "aws_s3_bucket_public_access_block.b", "type": "aws_s3_bucket_public_access_block",
+          "change": {"actions": ["create"], "after": {"bucket": "b"}}}
+    assert _rules(rc)["PUBLIC_ACCESS_BLOCK_DISABLED"] == Severity.ERROR
+    # all four True → clean (false-positive guard)
+    ok = {"address": "aws_s3_bucket_public_access_block.b", "type": "aws_s3_bucket_public_access_block",
+          "change": {"actions": ["create"], "after": {"block_public_acls": True, "block_public_policy": True,
+                     "ignore_public_acls": True, "restrict_public_buckets": True}}}
+    assert "PUBLIC_ACCESS_BLOCK_DISABLED" not in _rules(ok)
+
+
+def test_data_http_advisory():
+    # Round-8 F2: a data.http fetches a URL every refresh (exfil/SSRF) — advisory WARNING.
+    from verel.ci import parse_terraform_plan
+    plan = {"configuration": {"root_module": {"resources": [
+        {"address": "data.http.x", "mode": "data", "type": "http"}]}}}
+    issues = parse_terraform_plan(json.dumps(plan))
+    http = [i for i in issues if json.loads(i.detail_json)["rule_id"] == "HTTP_DATA_SOURCE"]
+    assert len(http) == 1 and http[0].severity == Severity.WARNING
+
+
+def test_malformed_resource_drift_does_not_crash():
+    # Round-8 F3: a hostile `resource_drift: [null]` / non-list must not crash the grader.
+    from verel.ci import parse_terraform_plan
+    assert isinstance(parse_terraform_plan(json.dumps(
+        {"resource_changes": [None, "x"], "resource_drift": [None]})), list)
+    assert isinstance(parse_terraform_plan(json.dumps({"resource_drift": "x"})), list)
+
+
+def test_clusterrole_ref_case_insensitive_kind():
+    # Round-8 (lens 1 hardening): a lowercase `clusterrole` roleRef kind is still the built-in admin.
+    from verel.ci import extract_rbac_risks
+    rb = {"kind": "ClusterRoleBinding", "metadata": {"name": "x"},
+          "roleRef": {"kind": "clusterrole", "name": "cluster-admin"},
+          "subjects": [{"kind": "User", "name": "m"}]}
+    assert "ADMIN_GRANT" in {json.loads(i.detail_json)["rule_id"] for i in extract_rbac_risks([rb])}
+
+
+def test_gcp_project_derived_from_appspot_email(tmp_path):
+    # Round-8 lens 3 F1: a project_id-less SA key with an appspot client_email must still derive the
+    # project so the cred↔scope binding stays active.
+    from verel.actuators.cloudcreds import resolve_gcp
+    gcp = tmp_path / "gcp"
+    gcp.mkdir()
+    (gcp / "sa.json").write_text(json.dumps({
+        "type": "service_account", "private_key": "k", "private_key_id": "id",
+        "client_email": "myproj@appspot.gserviceaccount.com", "token_uri": "https://x"}))
+    assert resolve_gcp(config_home=tmp_path).project == "myproj"
+
+
 def test_data_external_gated_as_unauditable():
     # Round-7 F5: a data.external source runs an arbitrary program at refresh — gate like a provisioner.
     from verel.ci import parse_terraform_plan
@@ -331,15 +383,36 @@ def test_data_external_gated_as_unauditable():
     assert "UNAUDITABLE_PROVISIONER" in rules
 
 
-def test_resource_drift_iam_risk_surfaced_as_advisory():
-    # Round-7 F2: an out-of-band admin grant recorded in resource_drift must surface (WARNING), not be
-    # silently clean because it produced no resource_change.
+def _drift_plan(changes, drift):
+    return json.dumps({"resource_changes": changes, "resource_drift": drift})
+
+
+_DRIFT_ADMIN = {"address": "aws_iam_role_policy.x", "type": "aws_iam_role_policy",
+                "change": {"actions": ["update"]}}
+
+
+def test_resource_drift_persistent_admin_gates():
+    # Round-8 F4: an out-of-band admin grant in resource_drift with NO planned change → config matches
+    # reality, the apply won't revert it → it GATES at real severity (the thunderstorm scenario).
     from verel.ci import parse_terraform_plan
-    plan = {"resource_changes": [], "resource_drift": [
-        {"address": "aws_iam_role_policy.x", "type": "aws_iam_role_policy",
-         "change": {"actions": ["update"],
-                    "after": {"policy": _doc({"Effect": "Allow", "Action": "*", "Resource": "*"})}}}]}
-    issues = parse_terraform_plan(json.dumps(plan))
+    d = dict(_DRIFT_ADMIN, change={"actions": ["update"],
+             "after": {"policy": _doc({"Effect": "Allow", "Action": "*", "Resource": "*"})}})
+    issues = parse_terraform_plan(_drift_plan([], [d]))
+    drift = [i for i in issues if json.loads(i.detail_json).get("drift")]
+    assert drift and any(i.severity == Severity.CRITICAL and json.loads(i.detail_json)["persists"]
+                         for i in drift)
+
+
+def test_resource_drift_revertable_is_advisory():
+    # Round-7/8: the SAME grant when the resource also has a planned change (apply may revert it) stays
+    # advisory (WARNING) — only the persistent case gates.
+    from verel.ci import parse_terraform_plan
+    d = dict(_DRIFT_ADMIN, change={"actions": ["update"],
+             "after": {"policy": _doc({"Effect": "Allow", "Action": "*", "Resource": "*"})}})
+    planned = {"address": "aws_iam_role_policy.x", "type": "aws_iam_role_policy",
+               "change": {"actions": ["update"], "after": {"policy": _doc(
+                   {"Effect": "Allow", "Action": "s3:GetObject", "Resource": "arn:x"})}}}
+    issues = parse_terraform_plan(_drift_plan([planned], [d]))
     drift = [i for i in issues if json.loads(i.detail_json).get("drift")]
     assert drift and all(i.severity == Severity.WARNING for i in drift)
 

