@@ -23,7 +23,15 @@ import stat
 
 from ..verdict.models import Confidence, GraderKind, Issue, IssueKind, Report, Severity, Verdict
 from .graders import GraderSpec
-from .iac import _as_list, _load_json, parse_terraform_plan, safe_path, safe_paths
+from .iac import (
+    _RBAC_BUILTIN_ADMIN_ROLES,
+    _as_list,
+    _load_json,
+    _rbac_resource_privesc,
+    parse_terraform_plan,
+    safe_path,
+    safe_paths,
+)
 
 # Cap on a single IaC artifact we read off disk (plan / manifests) before parsing — a hostile repo
 # can't OOM us with a multi-GB file. 25 MiB is far above any real terraform plan / manifest set.
@@ -62,6 +70,12 @@ def _rbac_issue(rule_id: str, sev: Severity, msg: str, locus: str, kind: str) ->
 def _role_risks(obj: dict, locus: str, cluster: bool) -> list[Issue]:
     kind = obj.get("kind", "")
     out: list[Issue] = []
+    # A ClusterRole that AGGREGATES other roles grows silently to whatever the label-selected roles
+    # grant — surface an advisory rather than green-lighting an (often empty) `rules` (round-6 R5).
+    if obj.get("aggregationRule"):
+        out.append(_rbac_issue("AGGREGATION_RULE", Severity.WARNING,
+                               f"ClusterRole aggregates other roles (aggregationRule) at {locus}",
+                               locus, kind))
     for rule in _as_list(obj.get("rules")):
         if not isinstance(rule, dict):
             continue
@@ -78,11 +92,25 @@ def _role_risks(obj: dict, locus: str, cluster: bool) -> list[Issue]:
         if verbs & _PRIVESC_VERBS:
             out.append(_rbac_issue("PRIVILEGE_ESCALATION", Severity.CRITICAL,
                                    f"RBAC grants {sorted(verbs & _PRIVESC_VERBS)} at {locus}", locus, kind))
-        if "secrets" in res and (verbs & _SECRET_READ_VERBS):
+        escres = _rbac_resource_privesc(verbs, res)
+        if escres:
+            out.append(_rbac_issue("PRIVILEGE_ESCALATION", Severity.CRITICAL,
+                                   f"RBAC grants an escalation primitive on {escres} at {locus}",
+                                   locus, kind))
+        reads = verbs & _SECRET_READ_VERBS
+        if "secrets" in res and reads:
             sev = Severity.ERROR if cluster else Severity.WARNING
             scope = "cluster-wide " if cluster else ""
             out.append(_rbac_issue("SECRETS_ACCESS", sev,
                                    f"grants {scope}read of secrets at {locus}", locus, kind))
+        elif "*" in res and (verbs & {"get", "list", "watch"}):
+            # read-all over `*` resources includes secrets — cluster-wide on a ClusterRole (ERROR), or
+            # all secrets in one namespace on a Role (WARNING). The `*` verb is already WILDCARD_RBAC.
+            sev = Severity.ERROR if cluster else Severity.WARNING
+            scope = "cluster-wide" if cluster else "namespace-wide"
+            out.append(_rbac_issue("SECRETS_ACCESS", sev,
+                                   f"grants {scope} read of all resources (incl. secrets) at {locus}",
+                                   locus, kind))
     return out
 
 
@@ -90,9 +118,10 @@ def _binding_risks(obj: dict, locus: str) -> list[Issue]:
     kind = obj.get("kind", "")
     out: list[Issue] = []
     ref = obj.get("roleRef") or {}
-    if str(ref.get("name", "")).lower() == "cluster-admin":
+    ref_name = str(ref.get("name", "")).lower()
+    if ref_name in _RBAC_BUILTIN_ADMIN_ROLES:
         out.append(_rbac_issue("ADMIN_GRANT", Severity.ERROR,
-                               f"binding to cluster-admin at {locus}", locus, kind))
+                               f"binding to built-in admin role {ref_name!r} at {locus}", locus, kind))
     for s in _as_list(obj.get("subjects")):
         if not isinstance(s, dict):
             continue

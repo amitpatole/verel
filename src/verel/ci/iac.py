@@ -173,6 +173,38 @@ class IamChange:
     after: dict = field(default_factory=dict)
     source_locus: str = ""
     rtype: str = ""
+    # `change.after_unknown` — terraform marks fields "(known after apply)" here (True / nested True).
+    # An unknown IAM-relevant field is invisible in `after`; the risk rules must fail CLOSED on it.
+    after_unknown: dict = field(default_factory=dict)
+
+
+# IAM-relevant `after`/`after_unknown` keys. A computed (unknown-at-plan) value for any of these
+# means the change's blast radius is invisible in `after` — the grader must fail CLOSED, not pass.
+_UNKNOWN_IAM_KEYS = {
+    "policy", "policy_data", "assume_role_policy", "inline_policy", "managed_policy_arns",
+    "members", "member", "role", "policy_arn", "role_definition_id", "role_definition_name",
+    "rule", "permissions", "ingress", "cidr_blocks", "cidr_ipv4", "cidr_ipv6",
+    "block_public_acls", "block_public_policy", "ignore_public_acls", "restrict_public_buckets",
+}
+
+
+def _has_unknown(node: object, depth: int = 0) -> bool:
+    """True if `node` (a terraform after_unknown value) marks anything computed — a literal True, or
+    any True nested in a list/dict (a computed string is `true`; a computed object is `{k: true}`)."""
+    if depth > 8:
+        return False
+    if node is True:
+        return True
+    if isinstance(node, dict):
+        return any(_has_unknown(v, depth + 1) for v in node.values())
+    if isinstance(node, list):
+        return any(_has_unknown(v, depth + 1) for v in node)
+    return False
+
+
+def _unknown_iam_fields(after_unknown: dict) -> list[str]:
+    """The IAM-relevant fields that are computed (known after apply) in this change."""
+    return sorted(k for k in _UNKNOWN_IAM_KEYS if _has_unknown(after_unknown.get(k)))
 
 
 def extract_iam_changes(plan: dict) -> list[IamChange]:
@@ -182,17 +214,19 @@ def extract_iam_changes(plan: dict) -> list[IamChange]:
         rtype = rc.get("type", "")
         change = rc.get("change", {}) or {}
         after = (change.get("after") or {}) if isinstance(change.get("after"), dict) else {}
+        unknown = (change.get("after_unknown") or {}) if isinstance(change.get("after_unknown"), dict) else {}
         # Extract when the type is a known IAM type OR — generically — when `after` carries any policy
-        # document (a Statement). This catches inline-policy resources whose names miss the substring
-        # list (aws_api_gateway_rest_api, aws_opensearch_domain, legacy aws_s3_bucket policy, …).
-        if not is_iam_resource(rtype) and not _statements(after):
+        # document (a Statement) OR when an IAM-relevant field is computed (known after apply). The
+        # last clause catches a non-IAM-typed resource whose computed inline policy is invisible in
+        # `after` (round-6 finding P2: "the plan is not reality").
+        if not is_iam_resource(rtype) and not _statements(after) and not _unknown_iam_fields(unknown):
             continue
         ct = _change_type(change.get("actions", []))
         if ct is None:
             continue
         out.append(IamChange(
             cloud=_cloud_of(rtype), change_type=ct, address=rc.get("address", ""),
-            after=after, source_locus=rc.get("address", ""), rtype=rtype,
+            after=after, source_locus=rc.get("address", ""), rtype=rtype, after_unknown=unknown,
         ))
     return out
 
@@ -283,6 +317,9 @@ _PRIVESC_AZURE_ACTIONS = ("microsoft.authorization/roleassignments/write",
                           "microsoft.authorization/elevateaccess",
                           "microsoft.authorization/denyassignments")
 _PUBLIC_PRINCIPALS = {"*", "allusers", "allauthenticatedusers", "system:anonymous", "system:unauthenticated"}
+# Binding a role to either of these Groups grants it to EVERY (un)authenticated principal = public.
+# `system:authenticated` is the dangerous one a name-only check misses (it's not "anonymous").
+_K8S_PUBLIC_GROUPS = {"system:unauthenticated", "system:authenticated"}
 _ADMIN_MANAGED_POLICIES = ("administratoraccess", "poweruseraccess", "iamfullaccess")
 
 
@@ -334,6 +371,15 @@ def _evaluate(ch: IamChange) -> list[tuple[str, Severity, str]]:
     """Deterministic IAM risk rules over a single change → (rule_id, severity, message) hits."""
     hits: list[tuple[str, Severity, str]] = []
     after = ch.after
+
+    # --- Fail CLOSED on computed IAM content: a "(known after apply)" policy/role/member/rule is
+    # invisible in `after`, so we cannot rule out a wildcard/privesc/public grant. "Can't tell" must
+    # GATE, not pass (round-6 finding P2 — the clean plan that widens at apply time). ---
+    unknown = _unknown_iam_fields(ch.after_unknown)
+    if unknown:
+        hits.append(("UNKNOWN_IAM_CONTENT", Severity.ERROR,
+                     f"IAM-relevant field(s) {unknown} are computed (known after apply) — blast radius "
+                     f"cannot be verified at plan time at {ch.address}"))
 
     # --- AWS / generic policy-document statements ---
     for s in _statements(after):
@@ -450,6 +496,28 @@ _RBAC_PRIVESC_VERBS = {"escalate", "bind", "impersonate"}
 _RBAC_SECRET_VERBS = {"get", "list", "watch", "*"}
 # (resource, create) pairs that are escalation primitives even without `*`: minting SA tokens, exec.
 _RBAC_DANGEROUS_RESOURCES = {"serviceaccounts/token", "pods/exec", "pods/attach"}
+# Binding to ANY of these built-in cluster roles is an admin/secret-read grant — not just
+# `cluster-admin`: the aggregated `admin`/`edit` both read secrets, and `admin` can create
+# rolebindings in its namespace (in-namespace privilege escalation). Round-6 finding R1.
+_RBAC_BUILTIN_ADMIN_ROLES = {"cluster-admin", "admin", "edit"}
+# Resource-scoped RBAC privilege-escalation primitives — cluster-takeover even WITHOUT a wildcard:
+# admission webhooks (intercept/mutate every API write), CSR approval / signers (mint any identity's
+# client certs), node mutation (relabel/taint → schedule onto a controlled node → escape). Maps a
+# resource (incl. subresource form) to the verbs that escalate on it. Round-6 finding R3.
+_RBAC_RESOURCE_PRIVESC = {
+    "mutatingwebhookconfigurations": {"create", "update", "patch", "*"},
+    "validatingwebhookconfigurations": {"create", "update", "patch", "*"},
+    "certificatesigningrequests": {"update", "approve", "*"},
+    "certificatesigningrequests/approval": {"update", "approve", "*"},
+    "signers": {"approve", "sign", "*"},
+    "nodes": {"update", "patch", "*"},
+}
+
+
+def _rbac_resource_privesc(verbs: set[str], res: set[str]) -> list[str]:
+    """Resource-scoped privilege-escalation primitives present in (verbs × resources). Returns the
+    matched resource labels (empty ⇒ none)."""
+    return sorted(r for r in res if (verbs & _RBAC_RESOURCE_PRIVESC.get(r, set())))
 
 
 def _k8s_rbac(ch: IamChange) -> list[tuple[str, Severity, str]]:
@@ -459,6 +527,11 @@ def _k8s_rbac(ch: IamChange) -> list[tuple[str, Severity, str]]:
     hits: list[tuple[str, Severity, str]] = []
     after = ch.after
     cluster = "cluster" in ch.rtype.lower()
+    # A ClusterRole that AGGREGATES other roles (aggregation_rule) grows silently to whatever the
+    # label-selected roles grant — surface an advisory rather than green-lighting an empty `rule`.
+    if after.get("aggregation_rule"):
+        hits.append(("AGGREGATION_RULE", Severity.WARNING,
+                     f"ClusterRole aggregates other roles (aggregation_rule) at {ch.address}"))
     for rule in _as_list(after.get("rule")):
         if not isinstance(rule, dict):
             continue
@@ -473,17 +546,32 @@ def _k8s_rbac(ch: IamChange) -> list[tuple[str, Severity, str]]:
         if verbs & _RBAC_PRIVESC_VERBS:
             hits.append(("PRIVILEGE_ESCALATION", Severity.CRITICAL,
                          f"RBAC grants {sorted(verbs & _RBAC_PRIVESC_VERBS)} at {ch.address}"))
-        if "secrets" in res and (verbs & _RBAC_SECRET_VERBS):
+        escres = _rbac_resource_privesc(verbs, res)
+        if escres:
+            hits.append(("PRIVILEGE_ESCALATION", Severity.CRITICAL,
+                         f"RBAC grants an escalation primitive on {escres} at {ch.address}"))
+        reads = verbs & _RBAC_SECRET_VERBS
+        if "secrets" in res and reads:
             hits.append(("SECRETS_ACCESS", Severity.ERROR if cluster else Severity.WARNING,
                          f"grants {'cluster-wide ' if cluster else ''}read of secrets at {ch.address}"))
+        elif "*" in res and (verbs & {"get", "list", "watch"}):
+            # read-all over `*` resources includes secrets — cluster-wide on a ClusterRole (ERROR),
+            # or all secrets in one namespace on a Role (WARNING). The `*` verb is already WILDCARD_RBAC.
+            hits.append(("SECRETS_ACCESS", Severity.ERROR if cluster else Severity.WARNING,
+                         f"grants {'cluster-wide ' if cluster else 'namespace-wide '}"
+                         f"read of all resources (incl. secrets) at {ch.address}"))
     for ref in _as_list(after.get("role_ref")):
-        if isinstance(ref, dict) and str(ref.get("name", "")).lower() == "cluster-admin":
-            hits.append(("ADMIN_GRANT", Severity.ERROR, f"cluster-admin bound at {ch.address}"))
+        if isinstance(ref, dict) and str(ref.get("name", "")).lower() in _RBAC_BUILTIN_ADMIN_ROLES:
+            hits.append(("ADMIN_GRANT", Severity.ERROR,
+                         f"built-in admin role {ref.get('name')!r} bound at {ch.address}"))
     for subj in _as_list(after.get("subject")):
-        nm = str(subj.get("name", "")).lower() if isinstance(subj, dict) else ""
+        if not isinstance(subj, dict):
+            continue
+        nm = str(subj.get("name", "")).lower()
+        skind = str(subj.get("kind", ""))
         if nm == "system:masters":
             hits.append(("ADMIN_GRANT", Severity.ERROR, f"system:masters bound at {ch.address}"))
-        elif nm in _PUBLIC_PRINCIPALS:
+        elif nm in _PUBLIC_PRINCIPALS or (skind == "Group" and nm in _K8S_PUBLIC_GROUPS):
             hits.append(("PUBLIC_PRINCIPAL", Severity.CRITICAL,
                          f"RBAC bound to an anonymous/unauthenticated subject at {ch.address}"))
     return hits
@@ -536,6 +624,39 @@ def destructive_changes(plan: dict) -> list[str]:
     return out
 
 
+_EXEC_PROVISIONERS = {"local-exec", "remote-exec"}
+
+
+def provisioner_resources(plan: dict) -> list[str]:
+    """Addresses of resources carrying a local-exec/remote-exec provisioner. These run ARBITRARY
+    commands at apply time (e.g. `aws iam attach-role-policy …AdministratorAccess`) whose side effects
+    are INVISIBLE to `resource_changes`/`after` — the canonical "clean plan, dirty apply". Lives in the
+    plan's `configuration` block (not `resource_changes`), so it needs a separate walk; recurses module
+    calls. Round-6 finding P1."""
+    out: list[str] = []
+
+    def _walk(mod: object, prefix: str, depth: int) -> None:
+        if depth > 20 or not isinstance(mod, dict):
+            return
+        for r in (mod.get("resources") or []):
+            if not isinstance(r, dict):
+                continue
+            provs = r.get("provisioners") or []
+            if any(isinstance(p, dict) and str(p.get("type", "")).lower() in _EXEC_PROVISIONERS
+                   for p in provs):
+                out.append(f"{prefix}{r.get('address', '')}")
+        calls = mod.get("module_calls")
+        if isinstance(calls, dict):
+            for name, mc in calls.items():
+                sub = mc.get("module") if isinstance(mc, dict) else None
+                _walk(sub, f"{prefix}module.{name}.", depth + 1)
+
+    config = plan.get("configuration") if isinstance(plan, dict) else None
+    root = (config or {}).get("root_module") if isinstance(config, dict) else None
+    _walk(root, "", 0)
+    return out
+
+
 def parse_terraform_plan(out: str, err: str = "") -> list[Issue]:
     """A `terraform show -json` plan → IAC_DRIFT issues (destroy/replace, INFO: visibility, won't gate
     at the reducer) + IAM_RISK issues (gating). Note: planned destroy/replace is surfaced for review
@@ -547,6 +668,16 @@ def parse_terraform_plan(out: str, err: str = "") -> list[Issue]:
             kind=IssueKind.IAC_DRIFT, severity=Severity.INFO, source=GraderKind.IAC,
             message=f"planned destroy/replace of {addr}", locator=addr, locator_precise=True,
             detail_json=json.dumps({"rule_id": "DESTROY_OR_REPLACE", "address": addr}),
+        ))
+    # A local-exec/remote-exec provisioner runs unauditable commands at apply — GATE it (ERROR): the
+    # plan's clean diff says nothing about what the command does to IAM/the cloud (round-6 P1).
+    for addr in provisioner_resources(plan):
+        issues.append(Issue(
+            kind=IssueKind.MISCONFIG, severity=Severity.ERROR, source=GraderKind.IAC,
+            message=f"{addr} runs a local-exec/remote-exec provisioner — its side effects are not "
+                    f"auditable from the plan (apply may grant/destroy beyond the shown diff)",
+            locator=addr, locator_precise=True,
+            detail_json=json.dumps({"rule_id": "UNAUDITABLE_PROVISIONER", "address": addr}),
         ))
     issues.extend(iam_risk_issues(extract_iam_changes(plan)))
     return issues

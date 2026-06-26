@@ -39,6 +39,7 @@ from ..ci.graders import Runner, run_grader, subprocess_runner
 from ..ci.iac import (
     destructive_changes,
     extract_iam_changes,
+    provisioner_resources,
     terraform_plan_spec,
 )
 from ..gateway import ActionClass
@@ -82,6 +83,11 @@ def escalate(plan_json: dict, *, base: ActionClass = ActionClass.CONSEQUENTIAL
                  if c.change_type in ("grant", "widen", "replace")]
     if widenings:
         reasons.append(f"{len(widenings)} IAM widening ({', '.join(widenings[:5])})")
+    # A local-exec/remote-exec provisioner runs unauditable commands at apply — its blast radius can't
+    # be read from the plan, so it must get human approval, not the verdict-gated path (round-6 P1).
+    provs = provisioner_resources(plan_json)
+    if provs:
+        reasons.append(f"{len(provs)} unauditable provisioner(s) ({', '.join(provs[:5])})")
     return (ActionClass.IRREVERSIBLE if reasons else base), reasons
 
 
