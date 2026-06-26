@@ -88,6 +88,8 @@ def parse_aws_validate_policy(out: str, err: str = "") -> list[Issue]:
         return []
     issues = []
     for f in data.get("findings", []) if isinstance(data, dict) else []:
+        if not isinstance(f, dict):  # a non-dict element must not crash the parser (round-15 R15-1)
+            continue
         ft = f.get("findingType", "WARNING")
         issues.append(_iam_issue(f.get("issueCode", "VALIDATE"),
                                  _AWS_VALIDATE_SEV.get(ft, Severity.WARNING),
@@ -106,6 +108,8 @@ def parse_aws_simulate(out: str, err: str = "", sensitive: set[str] | None = Non
         return []
     issues = []
     for r in data.get("EvaluationResults", []) if isinstance(data, dict) else []:
+        if not isinstance(r, dict):  # round-15 R15-1
+            continue
         action = str(r.get("EvalActionName", ""))
         if action.lower() not in sensitive:
             continue
@@ -156,6 +160,8 @@ def parse_az_role_assignments(out: str, err: str = "") -> list[Issue]:
         return []
     issues = []
     for a in data if isinstance(data, list) else []:
+        if not isinstance(a, dict):  # round-15 R15-1
+            continue
         role = str(a.get("roleDefinitionName", "")).lower()
         # An assignment can surface only a roleDefinitionId GUID (empty/renamed name) — match the GUID
         # tail against the offline sensor's built-in admin/privesc GUIDs so it can't slip through (E4).
