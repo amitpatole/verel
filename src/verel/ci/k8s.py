@@ -134,7 +134,7 @@ def _binding_risks(obj: dict, locus: str) -> list[Issue]:
     ref_name = str(ref.get("name", "")).lower()
     # Only a CLUSTERROLE reference to the built-in name is the dangerous aggregated role; a user's own
     # namespaced Role happening to be named `edit`/`admin` is harmless (round-7 F6, false-positive).
-    if ref_name in _RBAC_BUILTIN_ADMIN_ROLES and str(ref.get("kind", "")) == "ClusterRole":
+    if ref_name in _RBAC_BUILTIN_ADMIN_ROLES and str(ref.get("kind", "")).lower() == "clusterrole":
         out.append(_rbac_issue("ADMIN_GRANT", Severity.ERROR,
                                f"binding to built-in admin ClusterRole {ref_name!r} at {locus}",
                                locus, kind))

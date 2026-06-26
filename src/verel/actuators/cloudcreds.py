@@ -134,8 +134,15 @@ def resolve_gcp(config_home: Path | None = None) -> CloudCreds:
                 # (svc@<project>.iam.gserviceaccount.com) so the verifier's cred↔scope binding stays
                 # active rather than silently disabling itself (round-7 R7-2).
                 if not project:
-                    m = re.search(r"@([a-z0-9-]+)\.iam\.gserviceaccount\.com",
-                                  str(d.get("client_email", "")))
+                    # Derive the project id from the SA email so the cred↔scope binding stays active
+                    # when the key omits project_id (round-7 R7-2, round-8 F1). Two forms:
+                    #   user-managed  name@<project>.iam.gserviceaccount.com  (project AFTER @)
+                    #   App Engine    <project>@appspot.gserviceaccount.com    (project is local-part)
+                    # NOT `<num>-compute@developer.gserviceaccount.com` — its local-part is the project
+                    # NUMBER, which would cause a FALSE mismatch, so it is deliberately left unmatched.
+                    email = str(d.get("client_email", ""))
+                    m = re.search(r"@([a-z0-9-]+)\.iam\.gserviceaccount\.com", email) \
+                        or re.match(r"([a-z0-9-]+)@appspot\.gserviceaccount\.com", email)
                     if m:
                         project = m.group(1)
                 if _world_or_group_readable(f):
