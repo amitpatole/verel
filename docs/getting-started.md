@@ -45,7 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: amitpatole/verel@v1.0.1
+      - uses: amitpatole/verel@v1.1.0
         with:
           repo: .                 # path to gate (default ".")
           install: "-e .[dev]"    # YOUR project's deps so its tests import
@@ -146,7 +146,7 @@ This repo ships `.pre-commit-hooks.yaml`:
 
 ```yaml
 - repo: https://github.com/amitpatole/verel
-  rev: v1.0.1
+  rev: v1.1.0
   hooks: [{ id: verel-precommit }]
 ```
 

@@ -58,6 +58,31 @@ smell, and the action gateway — all importable, all on the verdict bus.
 
 ::: verel.gateway
 
+## IaC / cloud-IAM graders & actuators
+
+The offline IaC/IAM change sensor (Terraform plan + cloud IAM across AWS/GCP/Azure), the native
+Kubernetes RBAC sensor, the plan-bound Terraform actuator, and the opt-in effective-access verifier.
+
+### IaC / cloud-IAM sensor
+
+::: verel.ci.iac
+
+### Kubernetes RBAC sensor
+
+::: verel.ci.k8s
+
+### Terraform actuator (act-then-verify)
+
+::: verel.actuators.terraform
+
+### Effective-access verifier
+
+::: verel.actuators.access_verify
+
+### Cloud credential resolution
+
+::: verel.actuators.cloudcreds
+
 ## Receipts & attestation
 
 Sign and verify run-receipts; the two-tier (`hmac-sha256` / `ed25519`) signing and the trusted-key

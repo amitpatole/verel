@@ -48,7 +48,7 @@ verel doctor
 A representative run:
 
 ```text
-verel 1.0.1
+verel 1.1.0
   OK python 3.11.9
   OK git
   -- ollama cloud key (~/.config/ollama/key)
@@ -89,11 +89,20 @@ verel ci iac --repo . --manifests rendered.json # K8s RBAC sensor (kubectl -o js
 
 ```bash
 # OPT-IN effective-access check — what does the cloud ACTUALLY grant? (online; reads creds from ~/.config)
-verel verify-access --cloud aws   --policy-file policy.json   # IAM Access Analyzer validate-policy
-verel verify-access --cloud gcp   --scope projects/my-proj    # analyze-iam-policy
-verel verify-access --cloud azure                             # role assignment list
+verel verify-access --cloud aws --policy-file policy.json                 # static: IAM Access Analyzer validate-policy
+verel verify-access --cloud aws --principal-arn arn:aws:iam::123456789012:role/app \
+                    --action iam:PassRole sts:AssumeRole                  # EFFECTIVE: simulate-principal-policy
+verel verify-access --cloud gcp   --scope projects/my-proj               # analyze-iam-policy
+verel verify-access --cloud azure                                        # role assignment list
 # Fails closed (exit 2) when the cloud's creds are absent; never runs in the offline gate.
 ```
+
+For AWS, `--policy-file` is **static validation** (does this policy *document* have findings?) while
+`--principal-arn` is **effective access** — it asks the account, via `simulate-principal-policy`, what a
+role/user is *actually* allowed across all attached/inline/SCP policies. `--action` defaults to the
+privilege-escalation primitives when omitted. GCP needs `--scope` (e.g. `projects/<id>`); Azure lists
+role assignments. The verifier never claims a cloud identity it didn't check, and reuses the offline
+sensor's privesc sets so the live check is never *blinder* than the plan grader.
 
 ### Verify a receipt (`verel verify`) — publicly verifiable "done"
 
