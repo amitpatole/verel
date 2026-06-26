@@ -15,7 +15,7 @@ webhook, an agent framework, or Kubernetes. Every channel returns the same thing
 | **REST gate** | Language-agnostic HTTP gate over one repo — any CI / script `POST`s, gets a verdict | `verel serve` | [↓](#rest-gate-any-language-any-ci) |
 | **GitHub PR webhook** | HMAC-verified `pull_request` events run the gate on the configured repo | `POST /github` | [↓](#github-pr-webhook) |
 | **Commit-status callback** | Posts a red/green check back onto the PR | `post_commit_status` / `on_event` | [↓](#post-a-check-back-to-the-pr) |
-| **GitHub Action** | Fails the build on a FAIL verdict | `amitpatole/verel@v1.0.1` | [↓](#ci-matrix) |
+| **GitHub Action** | Fails the build on a FAIL verdict | `amitpatole/verel@v1.1.0` | [↓](#ci-matrix) |
 | **pre-commit hook** | Gates the commit on the verdict bus | `.pre-commit-hooks.yaml` (`verel-precommit`) | [↓](#pre-commit) |
 | **Agent SDK shims** | The gate as a tool for OpenAI / Anthropic / LangChain / LangGraph / CrewAI / AutoGen / Claude Agent SDK | `verel.integrations.sdk` | [↓](#agent-sdk-shims) |
 | **Gate a PR vs. its ticket** | Pull a PR's acceptance criteria + diff from GitHub, grade intent | `grade_pr()` / `verel_spec` | [↓](#gate-a-pr-against-its-ticket) |
@@ -175,7 +175,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: amitpatole/verel@v1.0.1
+      - uses: amitpatole/verel@v1.1.0
         with:
           repo: .                 # path to gate (default ".")
           install: "-e .[dev]"    # YOUR project's deps so its tests import
@@ -214,7 +214,7 @@ For a build that has no Python — or where you'd rather not install Verel per-j
 ```yaml
 # .pre-commit-config.yaml
 - repo: https://github.com/amitpatole/verel
-  rev: v1.0.1
+  rev: v1.1.0
   hooks: [{ id: verel-precommit }]
 ```
 

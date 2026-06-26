@@ -25,8 +25,24 @@ or a failed audit. See [IAC-KICKOFF.md](https://github.com/amitpatole/verel/blob
 - **Effective-access verification** — `EffectiveAccessVerifier` confirms what the cloud *actually*
   grants (AWS IAM Access Analyzer / GCP Policy Analyzer / Azure role assignments) with read creds
   resolved from `~/.config` (never logged). Accurate, but not a pure offline gate.
-- **Security cadence** — argv-only + charset-validated args; fail-closed on every degraded path;
-  adversarial cases pinned as regression tests; residuals R-005..R-007 documented.
+- **Security cadence (audit → 14 adversarial red-team rounds, fixing between each, until a round came
+  back empty)** — the IaC/IAM sensor is the gate's whole point, so it was hardened against a hostile
+  repo's `terraform show -json` / manifests as untrusted input. Closed across the rounds: the
+  *"plan is not reality"* class — `local-exec`/`remote-exec` provisioners + `data.external` run
+  unauditable commands at apply (now gated + escalated to `IRREVERSIBLE`), computed
+  *(known after apply)* IAM content fails **closed** (`UNKNOWN_IAM_CONTENT`), and out-of-band
+  `resource_drift` that the apply won't revert gates as live; RBAC parity (write-all over `*`,
+  `admin`/`edit` ClusterRole bindings, proxy subresources, webhook/CSR/node escalation primitives,
+  privileged-namespace secret reads); cross-cloud open-ingress (`google_compute_firewall` /
+  `azurerm_network_security_rule`, incl. split-CIDR coverage via real `ipaddress` math) and non-policy
+  public exposure (`aws_s3_bucket_acl`, `publicly_accessible` DBs, Azure public-blob, public Lambda
+  invoke); and the live `EffectiveAccessVerifier` is held to a **superset** of the offline sensor's
+  privesc set (AWS now runs `simulate-principal-policy`, not just document validation). A
+  false-positive sweep fixed an over-gate on ordinary IAM-role trust policies, and an exhaustive
+  ~5,000-variant fuzz pass hardened every parser to fail closed on malformed input. argv-only +
+  charset-validated args throughout; **244 IaC/IAM regression pins**; residuals (R-007/R-010 same-uid
+  planfile TOCTOU, R-012 coverage denylist, R-018 egress, R-014..R-017) documented in
+  [`docs/SECURITY_RESIDUALS.md`](https://github.com/amitpatole/verel/blob/main/docs/SECURITY_RESIDUALS.md).
 - **Surfaces** — the offline sensor is wired to the **`verel_iac_check`** MCP tool and the
   **`verel-ci iac`** CLI (`--plan` / `--manifests`, exit 1 on FAIL). Effective-access is a separate
   **opt-in, online** `verel verify-access --cloud {aws,gcp,azure}` subcommand (fails closed without

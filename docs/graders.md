@@ -95,6 +95,44 @@ The same offline sensor is wired to two surfaces: the **`verel_iac_check`** MCP 
 and/or `manifests`) and the **`verel-ci iac --repo . --plan tfplan.json`** CLI (exit 1 on FAIL) — so an
 agent or a CI step catches a dangerous grant before apply with no cloud credentials.
 
+#### The IAM/IaC rule catalog
+
+Every `rule_id` the sensor can emit (a grounded `IAM_RISK` on a `GraderKind.IAM` report unless noted),
+grouped by what it catches:
+
+| `rule_id` | Severity | Catches | Clouds |
+|---|---|---|---|
+| `WILDCARD_ACTION` | ERROR | `*`/`?` anywhere in an action (`iam:*`, `s3:Get*`, `iam:*Policy`) | AWS + generic policy docs |
+| `WILDCARD_RESOURCE` | ERROR | wildcard action **on** a `*` resource | AWS + generic |
+| `PRIVILEGE_ESCALATION` | ERROR (scoped) / CRITICAL | `iam:PassRole`/`sts:AssumeRole*`/`lambda:AddPermission` primitives; GCP `serviceAccountTokenCreator`/`roleAdmin`/…; Azure User-Access-Administrator; K8s `escalate`/`bind`/`impersonate`, webhook/CSR/node/proxy primitives, `serviceaccounts/token`, `pods/exec` | AWS · GCP · Azure · K8s |
+| `PUBLIC_PRINCIPAL` | CRITICAL | `*`/`allUsers`/`allAuthenticatedUsers`/`system:anonymous`/`system:unauthenticated`/`system:authenticated`; Lambda public invoke; wildcard principal ARN | AWS · GCP · Azure · K8s |
+| `ADMIN_GRANT` | ERROR | `AdministratorAccess`/`PowerUserAccess`/`IAMFullAccess`; GCP `roles/owner`/`editor`/…; Azure Owner/Contributor (name or GUID); K8s built-in `cluster-admin`/`admin`/`edit` ClusterRole, `system:masters` | AWS · GCP · Azure · K8s |
+| `ALLOW_BY_EXCLUSION` | ERROR | `NotAction`/`NotResource` ("everything except" = presumptive admin) | AWS + generic |
+| `CROSS_ACCOUNT_TRUST` | WARNING (advisory) | trust policy lets a concrete external AWS account assume the role (confused-deputy without an ExternalId) | AWS |
+| `OPEN_INGRESS` | ERROR | `0.0.0.0/0`/`::/0` (incl. split-CIDR halves) ingress | AWS SG · GCP firewall · Azure NSG |
+| `PUBLIC_ACCESS_BLOCK_DISABLED` | ERROR | S3 public-access-block deleted, or any of the 4 flags false/absent | AWS |
+| `PUBLIC_ACL` | ERROR | S3 canned ACL (`public-read`…) or an AllUsers/AuthenticatedUsers grant | AWS |
+| `PUBLIC_DB_ENDPOINT` | ERROR | `publicly_accessible=true` on any routable resource (RDS/Redshift/DMS/…) | AWS |
+| `PUBLIC_BLOB_ACCESS` | ERROR | Azure storage account anonymous public-blob access | Azure |
+| `CREDENTIAL_EXPOSURE` | ERROR | GCP long-lived service-account **key** creation (exportable credential) | GCP |
+| `UNKNOWN_IAM_CONTENT` | ERROR | an IAM-relevant field is "(known after apply)" — blast radius invisible, **fails closed** | all |
+| `UNAUDITABLE_PROVISIONER` | ERROR (`IAC`) | `local-exec`/`remote-exec` provisioner or `external` data source — runs an unauditable program at apply/refresh | all |
+| `HTTP_DATA_SOURCE` | WARNING (advisory, `IAC`) | `data "http"` — fetches a URL every refresh (exfil/SSRF) | all |
+| `DESTROY_OR_REPLACE` | INFO (`IAC_DRIFT`) | a planned destroy/replace (visibility + gateway escalation; does not gate) | all |
+| `WILDCARD_RBAC` | ERROR | RBAC rule granting `*` verbs on `*` resources | K8s |
+| `SECRETS_ACCESS` | ERROR (cluster / privileged ns) / WARNING (ns) | read of `secrets`, or read-all over `*` | K8s |
+| `AGGREGATION_RULE` | WARNING (advisory) | a ClusterRole `aggregationRule` — grows silently to label-selected roles | K8s |
+
+**The plan is not reality.** Three guarantees stop a "clean diff, dirty apply": (1) **provisioners and
+side-effecting data sources are gated** — a `local-exec`/`remote-exec` provisioner, an `external` data
+source, or a `data "http"` runs code the plan's diff can't see (`UNAUDITABLE_PROVISIONER` gates,
+`HTTP_DATA_SOURCE` advises); (2) **computed IAM fails closed** — any IAM field marked "(known after
+apply)" gates as `UNKNOWN_IAM_CONTENT` rather than passing on an unverifiable blast radius;
+(3) **out-of-band drift is graded** — terraform's `resource_drift` is evaluated too, so a live,
+un-reverted manual grant (no planned change to overwrite it) gates at full severity, while a drift the
+apply *will* revert is advisory. The sensor was hardened against a hostile plan/manifest as untrusted
+input over a 14-round adversarial security cadence (every fix pinned as a regression test).
+
 Acting is gated, not just graded. The **terraform actuator** (`verel.actuators.TerraformActuator`)
 plans → grades the **bound** plan file → applies *exactly* that file (a digest mismatch from a re-plan
 between approval and apply is refused — the plan-binding / TOCTOU defense) → re-plans to confirm the

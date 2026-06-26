@@ -281,6 +281,17 @@ whole tree (signing keys, `brain.db`, the LanceDB dataset) in one move.
 | `~/.config/ollama/key` | Ollama Cloud (env alternative: `OLLAMA_API_KEY`). |
 | `~/.config/OpenAI/key` | OpenAI provider **and** the `openai` embedder (env alternative: `OPENAI_API_KEY`). |
 
+**Cloud read-credentials** — only for the opt-in [`verel verify-access`](cli.md) effective-access check;
+**never used by the offline gate, never logged**. Resolved from `~/.config` per the house rule:
+
+| Path | Cloud | Notes |
+|---|---|---|
+| `~/.config/AWS/rootkey.csv` | AWS | columns `Access key ID`,`Secret access key`; `chmod 600` (group/world-readable is warned; a symlink or foreign-owned file is refused). |
+| `~/.config/gcp/<sa>.json` | GCP | service-account key; `~/.config/gcloud` is exported as `CLOUDSDK_CONFIG` if present. |
+| `~/.azure/` | Azure | `az` CLI config dir (exported as `AZURE_CONFIG_DIR`); requires real token material, not just the directory. |
+
+`verel verify-access` fails closed (exit 2) when the selected cloud's creds are absent.
+
 **Per-installation signing keys** — every HMAC/ed25519 secret resolves as **env var > persisted
 per-install key file > ephemeral**. When the env var is unset, Verel reads (or atomically creates) a
 random key at `~/.config/verel/<name>.key`, mode `0600`, owner-only (a foreign-owned or
