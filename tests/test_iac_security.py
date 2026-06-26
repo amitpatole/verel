@@ -451,6 +451,16 @@ def test_computed_publicly_accessible_fails_closed():
     assert "UNKNOWN_IAM_CONTENT" in _rules(rc)
 
 
+def test_deeply_nested_unknown_fails_closed():
+    # Round-11 F1: a pathologically deep after_unknown must FAIL CLOSED (assume computed), not silently
+    # report 'known' past the recursion bound.
+    from verel.ci.iac import _has_unknown
+    node = True
+    for _ in range(40):
+        node = {"x": node}
+    assert _has_unknown(node) is True
+
+
 def test_data_external_gated_as_unauditable():
     # Round-7 F5: a data.external source runs an arbitrary program at refresh — gate like a provisioner.
     from verel.ci import parse_terraform_plan
