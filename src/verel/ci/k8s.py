@@ -108,12 +108,24 @@ def _binding_risks(obj: dict, locus: str) -> list[Issue]:
     return out
 
 
+def _unwrap_lists(objs: list, depth: int = 0) -> list:
+    """Recursively expand any `kind: List` wrapper into its `items` — `kubectl apply` honors a List, so
+    an RBAC object must not evade the sensor merely by being wrapped (red-team round 5, engine bypass)."""
+    out: list = []
+    if depth > 20:
+        return out
+    for o in objs:
+        if isinstance(o, dict) and o.get("kind") == "List" and isinstance(o.get("items"), list):
+            out.extend(_unwrap_lists(o["items"], depth + 1))
+        elif isinstance(o, dict):
+            out.append(o)
+    return out
+
+
 def extract_rbac_risks(manifests: list) -> list[Issue]:
     """Run the deterministic RBAC risk rules over native Kubernetes manifest dicts → IAM issues."""
     out: list[Issue] = []
-    for obj in manifests:
-        if not isinstance(obj, dict):
-            continue
+    for obj in _unwrap_lists(manifests):
         kind = obj.get("kind", "")
         if kind not in _RBAC_KINDS:
             continue

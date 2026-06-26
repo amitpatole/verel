@@ -215,6 +215,33 @@ def test_native_rbac_token_mint_and_nonresource_wildcard():
     assert "PRIVILEGE_ESCALATION" in rules and "WILDCARD_RBAC" in rules
 
 
+# === Round 5: engine bypass — kind: List wrapper must not hide RBAC ===
+def test_kind_list_wrapper_is_unwrapped():
+    from verel.ci import extract_rbac_risks
+    wrapped = {"kind": "List", "items": [
+        {"kind": "ClusterRoleBinding", "metadata": {"name": "pwn"},
+         "roleRef": {"kind": "ClusterRole", "name": "cluster-admin"},
+         "subjects": [{"kind": "Group", "name": "system:masters"}]}]}
+    rules = {json.loads(i.detail_json)["rule_id"] for i in extract_rbac_risks([wrapped])}
+    assert "ADMIN_GRANT" in rules  # cluster-admin binding inside a List must still be caught
+
+
+def test_nested_list_wrapper_unwrapped():
+    from verel.ci import extract_rbac_risks
+    nested = {"kind": "List", "items": [{"kind": "List", "items": [
+        {"kind": "ClusterRole", "metadata": {"name": "x"},
+         "rules": [{"verbs": ["*"], "resources": ["*"]}]}]}]}
+    assert any(json.loads(i.detail_json)["rule_id"] == "WILDCARD_RBAC"
+               for i in extract_rbac_risks([nested]))
+
+
+def test_least_privilege_inline_policy_is_clean():
+    # Round-4 generic extraction must NOT cry wolf on a scoped least-privilege policy (false-positive check).
+    after = {"policy": _doc({"Effect": "Allow", "Action": "s3:GetObject",
+                            "Resource": "arn:aws:s3:::mybucket/data.csv"})}
+    assert _rules(_rc("aws_iam_role_policy.lp", "aws_iam_role_policy", after)) == {}
+
+
 # === Cluster 2: argv option-injection (incl. helm --post-renderer RCE) ===
 def test_helm_post_renderer_rejected():
     with pytest.raises(ValueError):
