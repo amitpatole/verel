@@ -37,6 +37,7 @@ from .promotion import (
     evaluate_rule,
 )
 from .registry import known_backends, load_backend
+from .remember import RememberResult, remember_conversation
 from .replicated import (
     AntiEntropy,
     NotLeaderError,
@@ -65,6 +66,8 @@ from .view import (
 __all__ = [
     "extract_facts",
     "parse_extracted_facts",
+    "remember_conversation",
+    "RememberResult",
     "consolidate_failures",
     "induce_schemas",
     "induce_hierarchy",

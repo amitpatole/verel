@@ -78,8 +78,9 @@ def parse_extracted_facts(out: str, *, scope: str, now: float = 0.0) -> list[Mem
         if not (subject and predicate and obj):
             continue
         key = make_key(subject, predicate, scope)
-        if key in out_records:
-            continue
+        # LAST statement wins on a (subject,predicate,scope) collision — an in-conversation correction
+        # ("actually, light mode") must supersede the earlier value, not be dropped. Cross-conversation
+        # supersession against the STORE is Phase 2's job (revise.contradicts); this is within-batch.
         # keep a self-reported salience hint, but NEVER let it move belief (epistemic_confidence)
         hint = item.get("confidence")
         detail: dict[str, object] = {"extracted": True}

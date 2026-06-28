@@ -44,14 +44,15 @@ def test_string_transcript_also_works():
     assert len(recs) == 1 and recs[0].text == "Postgres"
 
 
-def test_dedup_by_subj_pred_key():
-    # the same fact restated across turns collapses to one identity (first wins)
+def test_dedup_by_subj_pred_key_last_wins():
+    # the same (subject,predicate,scope) collapses to one identity; an in-conversation CORRECTION
+    # supersedes (last statement wins) rather than being dropped.
     payload = [
         {"subject": "Dana", "predicate": "prefers", "object": "dark mode"},
-        {"subject": "dana", "predicate": "Prefers", "object": "dark mode (again)"},  # same key, diff case
+        {"subject": "dana", "predicate": "Prefers", "object": "light mode"},  # same key, a correction
     ]
     recs = parse_extracted_facts(json.dumps(payload), scope="user:dana")
-    assert len(recs) == 1 and recs[0].text == "dark mode"
+    assert len(recs) == 1 and recs[0].text == "light mode"  # the correction wins
 
 
 def test_salience_hint_kept_but_does_not_move_belief():
