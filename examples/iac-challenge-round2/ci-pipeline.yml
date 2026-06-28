@@ -1,0 +1,11 @@
+# acme-platform CI — plan + gate. Policy/network values come from the secret store;
+# they are not committed to the repo.
+plan:
+  env:
+    TF_VAR_ci_policy_json: ${{ secrets.PLATFORM_CI_POLICY }}
+    TF_VAR_allowed_cidrs:  ${{ secrets.OPS_ALLOWED_CIDRS }}
+  script:
+    - terraform init                                   # pulls the shared platform module
+    - terraform plan -out tfplan.bin
+    - terraform show -json tfplan.bin > plan.json
+    - verel-ci iac --repo . --plan plan.json           # the gate

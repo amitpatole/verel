@@ -1,0 +1,5 @@
+# the pipeline-supplied values are never committed — that's the whole point
+*.auto.tfvars
+*.tfvars
+tfplan.bin
+.terraform/
