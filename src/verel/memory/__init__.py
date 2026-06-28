@@ -15,6 +15,7 @@ from .consolidate import (
     induce_schemas,
 )
 from .embed import Embedder, HashEmbedder, OpenAIEmbedder, cosine, embedder_from_env
+from .extract import extract_facts, parse_extracted_facts
 from .failure_ledger import FailureLedger, regression_report
 from .hosted import MemoryServer, RemoteMemory, ReplicaClient
 from .lattice import ScopeLattice, graduate, lattice_recall
@@ -62,6 +63,8 @@ from .view import (
 )
 
 __all__ = [
+    "extract_facts",
+    "parse_extracted_facts",
     "consolidate_failures",
     "induce_schemas",
     "induce_hierarchy",
