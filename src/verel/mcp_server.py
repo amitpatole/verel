@@ -7,8 +7,9 @@ The tool DISPATCH layer (`TOOLS`, `dispatch`) is pure and testable without the `
   verel_gate         RUN the graders on a repo → attested verdict + a verifiable receipt (§3/§4)
   verel_sight        render a URL → attested percept (bboxes + image_ref + receipt) — the eyes
   verel_verify       verify a receipt with NO trust in its producer (ed25519 = public; §11)
-  verel_recall       read the shared verified brain (resolves DOWN the scope lattice)
+  verel_recall       read the shared verified brain (scope lattice; set token_budget for graded-first recall)
   verel_remember     write to the shared brain — trust does NOT travel (candidate until attested)
+  verel_remember_conversation  extract facts from a conversation → only GRADED facts compound (LLM key)
   verel_ci_check     run the inner-loop CI stage on a repo → verdict + issues
   verel_iac_check    grade a terraform plan / K8s manifests offline → IaC drift + cloud-IAM risks
   verel_build_tool   detect→scaffold→test→register a tool (needs an LLM key)
@@ -449,6 +450,9 @@ def _tool_recall(args: dict) -> dict:
     if not isinstance(k, int) or isinstance(k, bool) or k <= 0:
         return _err("k must be a positive integer")
     k = min(k, 100)   # bound the result set
+    budget = args.get("token_budget")
+    if budget is not None and (not isinstance(budget, int) or isinstance(budget, bool) or budget <= 0):
+        return _err("token_budget must be a positive integer")
     kind = None
     kraw = args.get("kind")
     if kraw is not None:
@@ -465,17 +469,24 @@ def _tool_recall(args: dict) -> dict:
         return _err(str(e))
     import urllib.error
     try:
+        if budget:   # graded-first, token-budgeted recall (verified beats candidate at the margin)
+            from .memory import recall_budgeted
+            br = recall_budgeted(mem, query, scope=scope, token_budget=min(budget, 100_000), kind=kind, k=k)
+            return {"records": [_recall_brief(h) for h in br.records], "used_tokens": br.used_tokens,
+                    "dropped": br.dropped, "context": br.text}
         hits = (lattice_recall(mem, query, scope=scope, kind=kind, k=k) if scope
                 else mem.recall(query, kind=kind, k=k))
     except urllib.error.HTTPError as e:   # remote brain: bad bearer (401) etc. — subclass of URLError
         return _err(f"remote brain rejected the request: HTTP {e.code}")
     except urllib.error.URLError as e:
         return _err(f"remote brain unreachable: {e.reason}")
-    return {"records": [
-        {"text": h.text, "subject": h.subject, "predicate": h.predicate, "scope": h.scope,
-         "trust": h.trust.value, "confidence": round(h.epistemic_confidence, 3),
-         "support_count": h.support_count, "provenance": h.provenance, "fingerprint": h.id}
-        for h in hits]}
+    return {"records": [_recall_brief(h) for h in hits]}
+
+
+def _recall_brief(h) -> dict:
+    return {"text": h.text, "subject": h.subject, "predicate": h.predicate, "scope": h.scope,
+            "trust": h.trust.value, "confidence": round(h.epistemic_confidence, 3),
+            "support_count": h.support_count, "provenance": h.provenance, "fingerprint": h.id}
 
 
 def _tool_remember(args: dict) -> dict:
@@ -659,6 +670,35 @@ _VERIFY_SCHEMA = {
     },
     "required": ["receipt"],
 }
+def _tool_remember_conversation(args: dict) -> dict:
+    """Extract durable facts from a CONVERSATION and let only GRADED ones compound (needs an LLM key
+    for the extraction step). A one-off / hallucinated fact stays CANDIDATE — it never silently becomes
+    trusted; a fact corroborated across sessions (or attested) graduates to VERIFIED. This is the
+    'extracted, but verified before trusted' path — the others extract-and-believe."""
+    transcript = args.get("transcript")
+    if not (isinstance(transcript, (str, list)) and transcript):
+        return _err("transcript (a string or a list of {role, content} turns) is required")
+    if isinstance(transcript, str) and len(transcript) > _MAX_TEXT:
+        return _err(f"transcript too long (max {_MAX_TEXT} chars)")
+    sc = args.get("scope")
+    scope = sc if isinstance(sc, str) else "team"
+    try:
+        mem = _brain()
+    except (ValueError, RuntimeError) as e:
+        return _err(str(e))
+    try:
+        from .ci.spec import default_chat
+        chat = default_chat()   # provider from env; fails closed without an LLM key
+    except Exception as e:   # noqa: BLE001 — surface the install/key hint, never a bare traceback
+        return _err(f"conversational extraction needs an LLM key (Ollama/OpenAI): {e}")
+    from .memory import remember_conversation
+    res = remember_conversation(mem, transcript, scope=scope, chat=chat)
+    return {"promoted": [_recall_brief(r) for r in res.promoted],
+            "candidate_count": len(res.candidate),
+            "superseded": [r.text for r in res.superseded],
+            "summary": res.summary}
+
+
 _RECALL_SCHEMA = {
     "type": "object",
     "properties": {
@@ -666,8 +706,19 @@ _RECALL_SCHEMA = {
         "scope": {"type": "string", "description": "resolve down from this scope (repo:x, team, global)"},
         "kind": {"type": "string", "enum": ["fact", "design_rule", "schema", "failure", "skill"]},
         "k": {"type": "integer", "default": 5},
+        "token_budget": {"type": "integer", "description": "if set, return the highest-value memories "
+                         "that fit this many tokens (graded-first: VERIFIED beats CANDIDATE at the "
+                         "margin); response adds used_tokens, dropped, and a prompt-ready context block"},
     },
     "required": ["query"],
+}
+_REMEMBER_CONVERSATION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "transcript": {"description": "a conversation: a string, or a list of {role, content} turns"},
+        "scope": {"type": "string", "default": "team"},
+    },
+    "required": ["transcript"],
 }
 _REMEMBER_SCHEMA = {
     "type": "object",
@@ -733,6 +784,12 @@ TOOLS: dict[str, dict[str, Any]] = {
     "verel_remember": {"fn": _tool_remember, "schema": _REMEMBER_SCHEMA,
                        "description": "Write to the shared brain — trust does not travel; a fact is "
                                       "candidate until backed by a verifiable receipt."},
+    "verel_remember_conversation": {"fn": _tool_remember_conversation,
+                                    "schema": _REMEMBER_CONVERSATION_SCHEMA,
+                                    "description": "Extract durable facts from a conversation and let "
+                                                   "only GRADED ones compound (needs LLM key). A "
+                                                   "one-off fact stays candidate; corroborated/attested "
+                                                   "→ verified. Extracted, but verified before trusted."},
     "verel_build_tool": {"fn": _tool_build_tool, "schema": _OBJ,
                          "description": "Build+verify+register a tool (needs LLM key)."},
 }

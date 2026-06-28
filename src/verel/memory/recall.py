@@ -46,7 +46,7 @@ class BudgetedRecall:
         return "\n".join(lines)
 
 
-def recall_budgeted(mem: MemoryView, query: str, *, scope: str, token_budget: int,
+def recall_budgeted(mem: MemoryView, query: str, *, token_budget: int, scope: str | None = None,
                     kind: MemoryKind | None = None, k: int = 50,
                     token_count: TokenCount | None = None, now: float = 0.0) -> BudgetedRecall:
     """Return the best scoped memories for `query` that fit `token_budget`, verified-first, plus the

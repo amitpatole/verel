@@ -125,6 +125,18 @@ The `MemoryView` Protocol and the lattice recall/graduation that compounds only 
 
 ::: verel.memory.view
 
+### Conversational memory — extract → grade → budgeted recall
+
+Extract durable facts from a conversation, let only **graded** facts compound (corroborated or
+attested — never a one-off say-so), and recall them token-budgeted and verified-first. See
+[Memory backends → Conversational memory](memory-backends.md#conversational-memory).
+
+::: verel.memory.extract
+
+::: verel.memory.remember
+
+::: verel.memory.recall
+
 ### Backends — local & hosted
 
 The default zero-dependency SQLite store, plus the hosted brain: a `MemoryServer` over HTTP and a

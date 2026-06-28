@@ -383,6 +383,54 @@ export OPENAI_API_KEY=sk-…
 
 ---
 
+## Conversational memory — extract → grade → budgeted recall {#conversational-memory}
+
+Other memory systems extract facts from a conversation and **believe** them. Verel extracts, then
+**verifies before it trusts** — so your memory can't confidently remember something wrong. Three steps,
+each on the same `MemoryView` (so it works on every backend above):
+
+- **Extract** (`extract_facts`) — turn a transcript into candidate SPO facts. The LLM only *proposes*;
+  everything enters as `Trust.CANDIDATE`.
+- **Grade** (`remember_conversation`) — a fact compounds only when **corroborated** across
+  sessions/sources (belief rises with each confirmation) **or** backed by an **attestation**. A one-off
+  or hallucinated fact stays `CANDIDATE` forever; a changed value **supersedes** the old one with a
+  queryable correction chain.
+- **Recall, budgeted & graded-first** (`recall_budgeted`) — return the highest-value memories that fit
+  a token budget; at the margin a `VERIFIED` fact beats an equally-relevant `CANDIDATE`, and a poisoned
+  candidate can't crowd out a verified one.
+
+```python
+from verel.memory import LocalMemory, remember_conversation, recall_budgeted
+
+mem = LocalMemory()
+remember_conversation(mem, "I'm Dana and I prefer dark mode", scope="user:dana", chat=my_llm)
+# → Dana/prefers = CANDIDATE (a single say-so is not trusted)
+# …confirmed in two later sessions → promotes to VERIFIED; "actually, light mode" supersedes it.
+
+ctx = recall_budgeted(mem, "Dana preferences", scope="user:dana", token_budget=200)
+print(ctx.text, "|", ctx.used_tokens, "tokens,", ctx.dropped, "dropped")
+```
+
+Run it offline (no API key — a fake extractor) with **`python examples/demo_memory.py`**:
+
+```text
+== 1) extract from a conversation — facts enter as CANDIDATE (not trusted) ==
+   remember: 0 verified, 2 candidate, 0 superseded
+== 2) a hallucinated one-off NEVER silently becomes trusted ==
+   ci-role/is -> trust=candidate  (stays candidate — no corroboration)
+== 3) corroboration across sessions GRADES it -> VERIFIED ==
+   Dana/prefers -> trust=verified  (confirmed enough to trust)
+== 4) a correction SUPERSEDES the old value ==
+   superseded: ['dark mode'] -> current: light mode
+== 5) token-budgeted, graded-first recall ==
+   budget=12 tokens -> used=8, dropped=2
+```
+
+From an MCP host: **`verel_remember_conversation`** (extract+grade a transcript, needs an LLM key) and
+**`verel_recall`** with a `token_budget` (graded-first budgeted recall, no key).
+
+---
+
 ## Trust-layer features (the same on every backend)
 
 Whichever store you select, the cognition is Verel's and is identical. The pieces:

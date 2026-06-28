@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased — graded conversational memory (v1.2.0 track)
+
+Closes the two most-felt agent-memory gaps (conversational fact extraction + prompt-size
+minimization) **without diluting the moat**: a fact is extracted like Mem0/Engram, but it only
+compounds after it's **graded**. See
+[MEMORY-EXTRACTION-KICKOFF.md](https://github.com/amitpatole/verel/blob/main/MEMORY-EXTRACTION-KICKOFF.md).
+
+- **`extract_facts`** — turn a conversation (string or `[{role,content}]`) into candidate SPO `FACT`
+  records (`Trust.CANDIDATE`, content-addressed, deduped last-wins so an in-conversation correction
+  supersedes). Extraction only *proposes*; the LLM `ChatFn` is injected (offline-tested, no key); the
+  parser fails closed on hostile/garbage output (the transcript is untrusted input).
+- **`remember_conversation`** — the grade gate: only **verified** facts compound. A fact graduates
+  `CANDIDATE → VERIFIED` when **corroborated** past a threshold (belief rises with each confirmation)
+  or backed by an **attestation**; a one-off / hallucinated fact stays candidate forever; a changed
+  value **supersedes** with a queryable correction chain. Pure composition over the existing
+  `MemoryView.write`/`promote` — no bypass of the trust model.
+- **`recall_budgeted`** — token-budgeted, **graded-first** recall (`view.rank`: relevance + confidence
+  + a trust term), so under prompt pressure a `VERIFIED` fact beats an equally-relevant `CANDIDATE` and
+  a poisoned candidate can't crowd out a verified one. Dependency-free token estimate (injectable).
+- **Surfaces** — MCP `verel_remember_conversation` (extract+grade, needs an LLM key) and `verel_recall`
+  gains a `token_budget` (graded-first budgeted recall, no key). New `examples/demo_memory.py` (offline,
+  no key). Docs: a *Conversational memory* section + `api.md` autodoc.
+
 ## 1.1.0 — IaC / DevOps graders, the cloud-IAM change sensor, and act-then-verify
 
 A feature release that brings **Infrastructure-as-Code, the DevOps toolchain, and cloud IAM** onto the
