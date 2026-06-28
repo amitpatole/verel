@@ -36,6 +36,7 @@ from .promotion import (
     PromotionResult,
     evaluate_rule,
 )
+from .recall import BudgetedRecall, recall_budgeted
 from .registry import known_backends, load_backend
 from .remember import RememberResult, remember_conversation
 from .replicated import (
@@ -68,6 +69,8 @@ __all__ = [
     "parse_extracted_facts",
     "remember_conversation",
     "RememberResult",
+    "recall_budgeted",
+    "BudgetedRecall",
     "consolidate_failures",
     "induce_schemas",
     "induce_hierarchy",
