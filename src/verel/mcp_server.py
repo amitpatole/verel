@@ -672,16 +672,32 @@ _VERIFY_SCHEMA = {
 }
 def _tool_remember_conversation(args: dict) -> dict:
     """Extract durable facts from a CONVERSATION and let only GRADED ones compound (needs an LLM key
-    for the extraction step). A one-off / hallucinated fact stays CANDIDATE — it never silently becomes
-    trusted; a fact corroborated across sessions (or attested) graduates to VERIFIED. This is the
-    'extracted, but verified before trusted' path — the others extract-and-believe."""
+    for the extraction step). Every extracted fact enters as CANDIDATE and stays candidate here — over
+    MCP there is no authenticator/attestor wired, so an untrusted transcript can NEVER mint a VERIFIED
+    fact (trust is earned by attestation or authenticated-principal corroboration, supplied in-process).
+    This is the 'extracted, but verified before trusted' path — the others extract-and-believe."""
     transcript = args.get("transcript")
     if not (isinstance(transcript, (str, list)) and transcript):
         return _err("transcript (a string or a list of {role, content} turns) is required")
-    if isinstance(transcript, str) and len(transcript) > _MAX_TEXT:
+    # size cap BOTH shapes (round-5 lens-3 F3: a list transcript was uncapped → host alloc + LLM-cost DoS)
+    if isinstance(transcript, list):
+        if len(transcript) > 1000:
+            return _err("transcript too long (max 1000 turns)")
+        if sum(len(str(t.get("content", ""))) for t in transcript if isinstance(t, dict)) > _MAX_TEXT:
+            return _err(f"transcript too long (max {_MAX_TEXT} chars of content)")
+    elif len(transcript) > _MAX_TEXT:
         return _err(f"transcript too long (max {_MAX_TEXT} chars)")
     sc = args.get("scope")
     scope = sc if isinstance(sc, str) else "team"
+    # an untrusted transcript must not author into shared/global or reserved scopes (round-5 lens-3 F2)
+    if scope.strip().lower() in ("global", "meta:authors") or scope.startswith("user:"):
+        return _err("verel_remember_conversation cannot write to a global/shared/other-user scope; "
+                    "use a repo:/team/session scope")
+    # the conversation tool has no signed-principal branch yet — refuse on a remote/shared brain rather
+    # than write UNAUTHENTICATED (round-5 lens-3 F2). Use verel_remember (per-fact, signed) for a remote.
+    if os.environ.get("VEREL_BRAIN_URL"):
+        return _err("verel_remember_conversation is local-brain only; a remote brain needs signed "
+                    "per-fact writes — use verel_remember instead")
     try:
         mem = _brain()
     except (ValueError, RuntimeError) as e:

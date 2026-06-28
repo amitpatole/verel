@@ -77,6 +77,54 @@ def test_extractor_tolerates_a_failing_chat():
     assert extract_facts("hello", scope="s", chat=boom) == []
 
 
+def test_secrets_are_not_stored():
+    # round-5 F2: memory must not become a credential store — secret-looking facts are dropped.
+    payload = [
+        {"subject": "user", "predicate": "password", "object": "hunter2"},          # secret predicate
+        {"subject": "ci", "predicate": "uses", "object": "AKIAIOSFODNN7EXAMPLE"},   # AWS key in object
+        {"subject": "api", "predicate": "key", "object": "sk-abcdef0123456789abcdef"},  # secret key
+        {"subject": "Dana", "predicate": "prefers", "object": "dark mode"},          # benign — kept
+    ]
+    recs = parse_extracted_facts(json.dumps(payload), scope="s")
+    assert len(recs) == 1 and recs[0].text == "dark mode"
+
+
+def test_base64_encoded_secret_is_dropped():
+    # round-6 ENCODING class: an AWS key base64'd past the `AKIA…` denylist must still not be stored.
+    # b64 of "AKIAIOSFODNN7EXAMPLE secret access key wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+    blob = "QUtJQUlPU0ZPRE5ON0VYQU1QTEUgc2VjcmV0IGFjY2VzcyBrZXkgd0phbHJYVXRuRkVNSS9LN01ERU5HL2JQeFJmaUNZRVhBTVBMRUtFWQ=="
+    payload = [{"subject": "ci", "predicate": "note", "object": blob},
+               {"subject": "Dana", "predicate": "prefers", "object": "dark mode"}]
+    recs = parse_extracted_facts(json.dumps(payload), scope="s")
+    assert len(recs) == 1 and recs[0].text == "dark mode"
+
+
+def test_hex_blob_and_decode_exec_lure_are_dropped():
+    # a long hex blob (encoded payload) and a fact carrying its own decode-and-run recipe are both hostile
+    payload = [
+        {"subject": "x", "predicate": "data", "object": "deadbeef" * 8},                  # long hex blob
+        {"subject": "setup", "predicate": "run", "object": "echo aGk= | base64 -d | sh"},  # decode-exec lure
+        {"subject": "tip", "predicate": "is", "object": "eval(atob('cm0gLXJm'))"},          # JS decode-exec
+        {"subject": "Dana", "predicate": "prefers", "object": "light mode"},                # benign — kept
+    ]
+    recs = parse_extracted_facts(json.dumps(payload), scope="s")
+    assert len(recs) == 1 and recs[0].text == "light mode"
+
+
+def test_zero_width_split_secret_is_dropped():
+    # a zero-width char inserted into AKIA… is invisible to a reviewer but the agent still reads the key;
+    # we strip zero-width BEFORE the denylist scan so the token can't hide.
+    payload = [{"subject": "ci", "predicate": "uses", "object": "AKIA​IOSFODNN7EXAMPLE"}]
+    recs = parse_extracted_facts(json.dumps(payload), scope="s")
+    assert recs == []
+
+
+def test_source_becomes_provenance():
+    recs = parse_extracted_facts(json.dumps([{"subject": "a", "predicate": "b", "object": "c"}]),
+                                 scope="s", source="session-A")
+    assert recs[0].provenance == ["session-A"]
+
+
 def test_max_facts_cap():
     payload = [{"subject": f"s{i}", "predicate": "p", "object": "o"} for i in range(500)]
     recs = parse_extracted_facts(json.dumps(payload), scope="s")

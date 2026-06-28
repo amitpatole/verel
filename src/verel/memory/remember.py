@@ -5,12 +5,13 @@ This is where the moat lives. Extraction (Phase 1) only *proposes* `Trust.CANDID
 
   * a re-stated fact is **corroborated** (`MemoryView.write` raises belief + support),
   * a changed value **supersedes** the old one (a queryable correction chain, not a silent overwrite),
-  * a fact graduates `CANDIDATE → VERIFIED` only when it is **corroborated past a threshold** OR a
-    supplied **attestation** verifies it.
+  * a fact graduates `CANDIDATE → VERIFIED` only when **independent sources** corroborate it (≥
+    `min_sources` distinct provenance) OR a supplied **attestation** verifies it.
 
-So a one-off, uncorroborated, unattested fact stays `CANDIDATE` forever — it never silently becomes
-trusted. That's the difference from extract-and-believe memory: extracted, but **verified before
-trusted**.
+So a one-off fact — and, crucially, a fact a single attacker *repeats* — stays `CANDIDATE`: trust
+requires INDEPENDENT corroboration, not raw confidence, so one author can't promote a lie by saying it
+N times (round-5 security cadence, finding F1). That's the difference from extract-and-believe memory:
+extracted, but **verified before trusted**.
 """
 
 from __future__ import annotations
@@ -19,16 +20,27 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from .extract import ChatFn, extract_facts
-from .view import MemoryRecord, MemoryView, Trust
+from .principal import is_reserved_key
+from .view import MemoryKind, MemoryRecord, MemoryView, Trust
 
-# Belief starts at the 0.5 prior and rises +0.1 per corroboration. 0.7 ⇒ confirmed ~twice (≈3 mentions
-# across turns/sessions/sources) before a fact is trusted. Configurable; a stricter deployment can
-# raise it or require an attestation via `attest`.
-PROMOTE_EC = 0.7
+# Distinct AUTHENTICATED principals required to promote a fact by corroboration. ≥2 means one principal
+# repeating a claim never reaches VERIFIED. Configurable upward; never below 2 for the corroboration path.
+MIN_SOURCES = 2
 
-# Returns True if a fact carries valid out-of-band attestation (e.g. verify_fact_attestation over a
-# signed GateReceipt). Lets a deployment demand cryptographic proof, not just repetition.
+# True if a fact carries valid out-of-band attestation (e.g. verify_fact_attestation over a signed
+# GateReceipt). The PRIMARY promotion path — a deployment proves a fact cryptographically.
 Attestor = Callable[[MemoryRecord], bool]
+
+# Maps a raw `source` string to an AUTHENTICATED principal id (or None if it can't be verified). The
+# corroboration path counts only DISTINCT authenticated principals — because raw `source` strings are
+# self-asserted by the caller, two of them are NOT independent corroboration (round-5 F1, CRITICAL).
+# Without an authenticator, corroboration NEVER promotes the trust tier (only `attest` does).
+Authenticator = Callable[[str], "str | None"]
+
+
+def _distinct_principals(provenance: list[str], authenticate: Authenticator) -> int:
+    ids = {pid for p in provenance if (pid := authenticate(p))}
+    return len(ids)
 
 
 @dataclass
@@ -36,33 +48,49 @@ class RememberResult:
     promoted: list[MemoryRecord] = field(default_factory=list)   # CANDIDATE → VERIFIED on this pass
     candidate: list[MemoryRecord] = field(default_factory=list)  # written, not yet trusted
     superseded: list[MemoryRecord] = field(default_factory=list)  # an old value a correction replaced
+    refused: list[str] = field(default_factory=list)  # dropped — reserved key / would clobber non-FACT
 
     @property
     def summary(self) -> str:
         return (f"remember: {len(self.promoted)} verified, {len(self.candidate)} candidate, "
-                f"{len(self.superseded)} superseded")
+                f"{len(self.superseded)} superseded, {len(self.refused)} refused")
 
 
 def remember_conversation(mem: MemoryView, transcript: object, *, scope: str, chat: ChatFn,
-                          now: float = 0.0, promote_at: float = PROMOTE_EC,
-                          attest: Attestor | None = None) -> RememberResult:
+                          source: str = "", now: float = 0.0, min_sources: int = MIN_SOURCES,
+                          attest: Attestor | None = None,
+                          authenticate: Authenticator | None = None) -> RememberResult:
     """Extract candidate facts from a conversation and let only GRADED facts compound into `mem`.
 
-    Each extracted fact is written (which corroborates a re-statement or supersedes a changed value),
-    then graduates `CANDIDATE → VERIFIED` iff it is corroborated to `promote_at` OR `attest` verifies
-    it. Returns what was promoted, what stays candidate, and what was superseded — never trusting a
-    fact on a single say-so."""
+    A fact graduates `CANDIDATE → VERIFIED` ONLY when:
+      * `attest` verifies it (a signed receipt / held-out eval — the primary path), OR
+      * `authenticate` is supplied AND ≥ `min_sources` **distinct authenticated principals** corroborate
+        it. Raw `source` strings are self-asserted, so without an authenticator corroboration NEVER
+        promotes — a single caller can't forge `VERIFIED` by minting two source labels (round-5 F1).
+
+    Corroboration still raises *confidence* (a ranking signal) via `write`; it just doesn't grant the
+    trust tier on its own. A reserved key (`is_reserved_key`) or a collision with a server-managed
+    non-FACT record (a SKILL/AuthorTrust/rule) is **refused** — an untrusted transcript can't touch
+    control state (round-5 lens-3 F1). A `REJECTED` fact is not re-promotable by corroboration."""
     res = RememberResult()
-    for fact in extract_facts(transcript, scope=scope, chat=chat, now=now):
+    for fact in extract_facts(transcript, scope=scope, chat=chat, now=now, source=source):
+        if is_reserved_key(fact.predicate, fact.scope):
+            res.refused.append(fact.text)
+            continue
         before = mem.get(fact.id)
+        if before is not None and before.kind != MemoryKind.FACT:
+            res.refused.append(fact.text)   # would clobber a server-managed non-FACT record
+            continue
         if before is not None and before.text.strip().lower() != fact.text.strip().lower():
             res.superseded.append(before)  # the new value will supersede this one (write keeps the chain)
         rec = mem.write(fact, ts=now)
         if rec.trust == Trust.VERIFIED:
-            continue  # already trusted from earlier corroboration — don't double-count
+            continue  # already trusted — don't double-count
         attested = bool(attest and attest(rec))
-        if attested or rec.epistemic_confidence >= promote_at:
+        independent = (rec.trust != Trust.REJECTED and authenticate is not None
+                       and _distinct_principals(rec.provenance, authenticate) >= max(2, min_sources))
+        if attested or independent:
             res.promoted.append(mem.promote(rec.id) or rec)
         else:
-            res.candidate.append(rec)  # not enough evidence yet — stays a candidate, uncompounded
+            res.candidate.append(rec)  # confidence may rise, but not the trust tier — stays candidate
     return res
