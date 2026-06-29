@@ -49,12 +49,16 @@ def main() -> None:
 
     print("\n== 3) corroboration by AUTHENTICATED principals GRADES it -> VERIFIED ==")
     # a self-asserted `source` string is NOT proof of independence — one caller could mint two labels.
-    # promotion counts only DISTINCT principals an AUTHENTICATOR vouches for (here: identity, for the demo).
-    authenticate = lambda s: s  # noqa: E731 — in prod: map a signed session token -> a verified principal id
-    for src, t in (("session-A", 3.0), ("session-B", 4.0)):   # two DISTINCT authenticated principals
+    # promotion counts only DISTINCT principals an AUTHENTICATOR vouches for. The authenticator MUST
+    # VERIFY an unforgeable credential (a signed session token, an mTLS identity) and return a principal
+    # id — NEVER echo its input. Here `verify_token` stands in for that: only two pre-issued tokens map
+    # to real principals; an attacker-chosen label authenticates to None and does not count.
+    issued = {"tokenA": "alice", "tokenB": "bob"}
+    verify_token = issued.get          # in prod: validate a signature / introspect the token, don't echo
+    for src, t in (("tokenA", 3.0), ("tokenB", 4.0)):   # two DISTINCT authenticated principals
         r = remember_conversation(mem, "(later) Dana: still on dark mode", scope=scope, source=src,
                                   chat=fake_chat([("Dana", "prefers", "dark mode")]), now=t,
-                                  authenticate=authenticate)
+                                  authenticate=verify_token)
     print(f"   {r.summary}")
     print(f"   Dana/prefers -> trust={trust_of(mem, 'Dana', 'prefers', scope)}  (two principals → trusted)")
     print("   (one attacker repeating a claim — or minting two source LABELS — would NOT promote;")

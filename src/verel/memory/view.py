@@ -36,8 +36,9 @@ def tokens(s: str) -> set[str]:
 W_REL = 0.5  # lexical relevance to the query
 W_REC = 0.2  # retrieval_strength (recency/use)
 W_CONF = 0.3  # epistemic_confidence (belief in truth)
-W_TRUST = 0.15  # trust tier — a VERIFIED memory edges out an equally-relevant CANDIDATE (small, so
-#                 relevance still dominates; closes the trust-blind-ranking gap from the brain audit)
+W_TRUST = 0.35  # trust tier — sized ≥ W_CONF so raw repetition can't lift a candidate past a verified
+#                 fact at equal relevance (round-6 H1), yet < W_REL so a much-more-relevant candidate
+#                 still wins (relevance dominates); closes the trust-blind-ranking gap from the brain audit
 
 # Prune thresholds (§5).
 PRUNE_RS = 0.15
@@ -133,10 +134,17 @@ _TRUST_RANK = {Trust.VERIFIED: 1.0, Trust.CANDIDATE: 0.0, Trust.REJECTED: -1.0}
 
 def rank(record: MemoryRecord, relevance: float) -> float:
     """The DOCUMENTED ranking rule. Combines the orthogonal signals + relevance + trust tier; it
-    never multiplies confidence into strength or vice-versa. The trust term is small, so a much more
-    relevant candidate still beats a barely-relevant verified one — but at equal relevance/confidence,
-    verified wins (so a poisoned candidate can't outrank a verified fact)."""
-    return (W_REL * relevance + W_REC * record.retrieval_strength
+    never multiplies confidence into strength or vice-versa. A much more relevant candidate still beats
+    a barely-relevant verified one (relevance dominates) — but at COMPARABLE relevance, verified wins,
+    so a poisoned candidate can't outrank a verified fact.
+
+    Two properties make that hold against an attacker who repeats a lie to inflate a CANDIDATE (round-6
+    H1): (1) a VERIFIED fact does not decay OUT of ranking — its retrieval_strength is floored, because
+    trusted knowledge shouldn't be forgotten beneath a fresh candidate; (2) the trust term is sized to
+    cover the largest recency+confidence swing a candidate can manufacture (W_REC + W_CONF), so raw
+    repetition can't lift a candidate past a verified fact at equal relevance."""
+    rs = 1.0 if record.trust == Trust.VERIFIED else record.retrieval_strength
+    return (W_REL * relevance + W_REC * rs
             + W_CONF * record.epistemic_confidence + W_TRUST * _TRUST_RANK.get(record.trust, 0.0))
 
 

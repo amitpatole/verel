@@ -95,6 +95,10 @@ def test_rejected_fact_is_not_repromotable_by_corroboration():
     for _ in range(6):
         mem.contradict(rid)  # graded down to REJECTED (confidence driven below the floor)
     assert mem.get(rid).trust == Trust.REJECTED
+    # and re-asserting the rejected claim must NOT inflate it (round-6 M2): no confidence/support bump
+    ec0, sup0 = mem.get(rid).epistemic_confidence, mem.get(rid).support_count
+    remember_conversation(mem, "x", scope="s", chat=chat, source="D", now=4.0)
+    assert mem.get(rid).epistemic_confidence == ec0 and mem.get(rid).support_count == sup0
     auth = lambda s: s  # noqa: E731
     remember_conversation(mem, "x", scope="s", chat=chat, source="B", now=2.0, authenticate=auth)
     remember_conversation(mem, "x", scope="s", chat=chat, source="C", now=3.0, authenticate=auth)
@@ -120,6 +124,36 @@ def test_attestation_promotes_immediately():
                                 attest=lambda _r: True)  # a verified attestation short-circuits corroboration
     assert len(res.promoted) == 1
     assert mem.get(_fact_id("a", "b", "s")).trust == Trust.VERIFIED
+
+
+def test_rejected_resurrection_via_value_change_is_blocked():
+    # round-6 C1 (the surprise): a value change SUPERSEDES (write rebuilds as CANDIDATE), which erased
+    # the REJECTED verdict — so a one-char change + attestation laundered a rejected lie to VERIFIED.
+    # The gate now binds to the PRE-write tier, so a previously-rejected key isn't promotable this pass.
+    mem = LocalMemory()
+    remember_conversation(mem, "x", scope="s", chat=_chat(("user", "role", "admin")),
+                          source="A", now=1.0)
+    rid = _fact_id("user", "role", "s")
+    for _ in range(6):
+        mem.contradict(rid)
+    assert mem.get(rid).trust == Trust.REJECTED
+    # change the value (admin -> root) AND attest — must NOT promote
+    res = remember_conversation(mem, "x", scope="s", chat=_chat(("user", "role", "root")),
+                                source="B", now=2.0, attest=lambda _r: True)
+    assert res.promoted == []
+    assert mem.get(rid).trust != Trust.VERIFIED
+
+
+def test_nonstring_authenticator_returns_do_not_count_as_principals():
+    # round-6 M1: an authenticator that returns a truthy NON-string (True, an object) must not inflate
+    # the distinct-principal count — {True, "bob"} is one real principal, not two.
+    mem = LocalMemory()
+    chat = _chat(("billing", "status", "disabled"))
+    auth = lambda s: True if s == "A" else "bob"  # noqa: E731 — one bool + one id == one real principal
+    remember_conversation(mem, "x", scope="s", chat=chat, source="A", now=1.0, authenticate=auth)
+    r = remember_conversation(mem, "x", scope="s", chat=chat, source="B", now=2.0, authenticate=auth)
+    assert r.promoted == []
+    assert mem.get(_fact_id("billing", "status", "s")).trust == Trust.CANDIDATE
 
 
 def test_hallucination_never_silently_trusted():

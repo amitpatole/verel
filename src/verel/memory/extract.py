@@ -20,7 +20,10 @@ House rules honored:
 from __future__ import annotations
 
 import json
+import math
 import re
+import unicodedata
+from collections import Counter
 from collections.abc import Callable
 
 from .view import MemoryKind, MemoryRecord, Trust, make_id, make_key
@@ -41,15 +44,26 @@ _SECRET_PREDICATES = (
     "password", "passwd", "secret", "apikey", "token", "accesskey", "privatekey", "credential",
     "connectionstring", "connstr", "dsn", "bearer", "authorization", "authheader", "envvar",
     "environmentvariable", "ssn", "socialsecurity", "creditcard", "cardnumber", "cvv", "pincode",
+    # round-6 F5: predicate synonyms an attacker reaches for when the obvious ones are denied
+    "keypair", "passphrase", "mnemonic", "recoverykey", "clientsecret", "signingkey", "privkey",
+    "secretkey", "refreshtoken", "sessiontoken", "sshkey", "seedphrase",
 )
 _SECRET_TEXT = re.compile(
     r"AKIA[0-9A-Z]{12,}"                          # AWS access key id
     r"|AIza[0-9A-Za-z_-]{30,}"                    # Google API key
+    r"|ya29\.[0-9A-Za-z_-]{20,}"                  # Google OAuth access token
     r"|-----BEGIN [A-Z ]*PRIVATE KEY-----"        # PEM private key
     r"|\bsk-[A-Za-z0-9]{20,}\b"                   # OpenAI-style secret key
+    r"|\bsk_(?:live|test)_[A-Za-z0-9]{16,}\b"    # Stripe secret key (round-6 F4)
+    r"|\brk_(?:live|test)_[A-Za-z0-9]{16,}\b"    # Stripe restricted key
     r"|\bgh[pousr]_[A-Za-z0-9]{20,}\b"           # GitHub token
+    r"|\bglpat-[A-Za-z0-9_-]{16,}\b"             # GitLab PAT (round-6 F4)
+    r"|\bshpat_[A-Za-z0-9]{16,}\b"               # Shopify token
+    r"|\bSG\.[\w-]{16,}\.[\w-]{16,}\b"           # SendGrid key (round-6 F4)
+    r"|AGE-SECRET-KEY-1[A-Z0-9]{20,}"            # age secret key (round-6 F4)
     r"|\bxox[baprs]-[A-Za-z0-9-]{10,}\b"         # Slack token
     r"|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.",  # JWT
+    re.IGNORECASE,   # round-6 F7: a fullwidth/uppercased key (NFKC→'SK-…') must match too
 )
 _SECRET_TEXT_I = re.compile(
     r"[a-z][a-z0-9+.\-]*://[^/\s:@]+:[^/\s@]+@"   # URI with user:pass@ (postgres://u:p@host, …)
@@ -79,13 +93,34 @@ _ENCODED_RUN = re.compile(
     r"|(?:\\x[0-9a-fA-F]{2}){6,}"        # \xNN escape run
     r"|(?:\\u[0-9a-fA-F]{4}){4,}"        # \uNNNN escape run
     r"|&#x?[0-9a-fA-F]+;(?:&#x?[0-9a-fA-F]+;){4,}"  # HTML entity run
+    r"|(?:\b\d{1,3}[,\s]+){6,}\d{1,3}\b"  # decimal char-code run, e.g. 114,109,32,45 → 'rm -' (round-6 F8)
 )
 # A fact that ships its own decode-and-execute recipe is hostile on its face — drop regardless of length.
+# round-6 F9: cover the long-form / language-specific decode-and-run idioms the short list missed.
 _DECODE_EXEC = re.compile(
-    r"base64\s+-d|b64decode|atob\s*\(|fromCharCode|\beval\s*\(|\bexec\s*\(|\bsystem\s*\("
-    r"|Invoke-Expression|\biex\b|\$\(.*\)|`[^`]+`",
+    r"base64\s+--?d(?:ecode)?|b64decode|bytes\.fromhex|atob\s*\(|fromCharCode"
+    r"|\beval\s*\(|\bexec(?:Sync|File)?\s*\(|\bsystem\s*[(\"']|os\.(?:system|popen|exec)"
+    r"|\bpopen\s*\(|subprocess|child_process|pty\.spawn|spawn\w*\s*\("
+    r"|Invoke-Expression|\biex\b|-enc(?:odedcommand)?\b|\bperl\s+-e\b|\bnode\s+-e\b|\bpython3?\s+-c\b"
+    r"|\|\s*(?:ba)?sh\b|\$\(.*\)|`[^`]+`",
     re.IGNORECASE,
 )
+# Common homoglyphs (Cyrillic / Greek lookalikes) folded to ASCII before scanning, so 'АKIA…' (Cyrillic
+# А) can't dodge the denylist while a downstream LLM still reads it as 'AKIA…' (round-6 F6). NFKC handles
+# fullwidth/compatibility forms (F7); homoglyphs are DISTINCT codepoints NFKC won't touch, hence this map.
+_HOMOGLYPHS = str.maketrans({
+    "А": "A", "В": "B", "Е": "E", "К": "K", "М": "M", "Н": "H", "О": "O", "Р": "P", "С": "C",
+    "Т": "T", "Х": "X", "У": "Y", "І": "I", "Ј": "J", "Ѕ": "S", "а": "a", "е": "e", "о": "o",
+    "р": "p", "с": "c", "у": "y", "х": "x", "к": "k", "м": "m", "ѕ": "s", "і": "i", "ј": "j",
+    "Α": "A", "Β": "B", "Ε": "E", "Ζ": "Z", "Η": "H", "Ι": "I", "Κ": "K", "Μ": "M", "Ν": "N",
+    "Ο": "O", "Ρ": "P", "Τ": "T", "Υ": "Y", "Χ": "X", "ο": "o", "ν": "v",
+})
+# A durable FACT value is short readable text; an opaque, high-entropy, mixed-class token is an encoded
+# blob (base64/base32/base85/…) regardless of how it's chunked — entropy survives whitespace-splitting,
+# so this catches what the contiguous-run regex misses (round-6 F1/F2/F3). All-lowercase prose stays
+# single-class and is spared; the class+entropy gate is what separates a blob from a long word/sentence.
+_BLOB_MIN = 24            # below this, a short blob is a documented residual (R-020)
+_BLOB_ENTROPY = 4.0       # bits/char; base32≈4.5, base64≈5, base85≈5.5, English-no-spaces≈3.5–4.0
 
 
 def _strip_zero_width(s: str) -> str:
@@ -93,23 +128,96 @@ def _strip_zero_width(s: str) -> str:
     return _ZERO_WIDTH.sub("", s)
 
 
+def _fold(s: str) -> str:
+    """Normalize for SCANNING ONLY (the stored value keeps its original bytes): strip zero-width, NFKC
+    (fullwidth→ASCII), then fold common homoglyphs — so a token can't hide from the denylist behind a
+    visually-identical codepoint that an LLM still reads as the ASCII form."""
+    return unicodedata.normalize("NFKC", _strip_zero_width(s)).translate(_HOMOGLYPHS)
+
+
+def _shannon(s: str) -> float:
+    n = len(s)
+    if n <= 1:
+        return 0.0
+    return -sum((c / n) * math.log2(c / n) for c in Counter(s).values())
+
+
 def _norm_pred(predicate: str) -> str:
     """Lowercase + strip separators so `pass word` / `a p i_key` can't dodge the predicate denylist."""
-    return re.sub(r"[\s_\-]+", "", _strip_zero_width(predicate).lower())
+    return re.sub(r"[\s_\-]+", "", _fold(predicate).lower())
+
+
+def _case_mixed(t: str) -> bool:
+    """INTRA-token case-mixing: a lowercase plus an uppercase that is NOT just a leading capital. This
+    is the STRONG 'random encoded token' tell ('QUtJQUlP'); a Capitalized word ('Python') lacks it."""
+    return bool(re.search(r"[a-z]", t) and re.search(r"(?<=.)[A-Z]", t))
+
+
+def _b64ish(tok: str) -> str | None:
+    """If `tok` is a random-looking encoded chunk (pure base64/base64url alphabet with a 'not-a-word'
+    tell — a digit, a base64 special, or intra-token case-mixing), return its stripped core, else None.
+    A normal word ('Python','and') has no such tell; 'QUtJQUlP'/'U0ZPRE5O' do."""
+    t = tok.strip("\"'`.,;:()[]{}<>")
+    if len(t) < 4 or not re.fullmatch(r"[A-Za-z0-9+/=_-]+", t):
+        return None
+    if re.search(r"\d", t) or re.search(r"[+/=]", t) or _case_mixed(t):
+        return t
+    return None
+
+
+def _url_like(tok: str) -> bool:
+    """A URL/path/dotted-identifier — structured, not an opaque blob (any embedded credential is caught
+    separately by `_SECRET_TEXT_I`). Excluding these is what keeps the single-token blob test from
+    false-positiving on a legitimate `https://…` or `/usr/local/…` fact value."""
+    return "://" in tok or bool(re.search(r"/[^/]+/", tok)) or tok.count(".") >= 2
+
+
+def _is_opaque_blob(field: str) -> bool:
+    """True if a field is an encoded blob: either ≥3 consecutive random-looking base64 chunks (chunked
+    encoding, round-6 F1), or a single long high-entropy multi-class token that isn't a URL/path. Works
+    on the ORIGINAL tokens — never the whitespace-compacted string — so a sentence with proper nouns
+    can't fabricate the mixed-class signal."""
+    toks = field.split()
+    run = acc = 0
+    strong = False
+    for t in toks:
+        core = _b64ish(t)
+        if core is not None:
+            run += 1
+            acc += len(core)
+            strong = strong or _case_mixed(core)
+            # ≥3 chunks in a row is unmistakable chunked encoding; ≥2 also counts when the run is
+            # blob-sized AND includes a case-mixed (random-looking) chunk, catching a newline-split
+            # base64 of a secret (round-6 F3) without flagging legit 'word2024 word5678' pairs.
+            if run >= 3 or (run >= 2 and acc >= _BLOB_MIN and strong):
+                return True
+        else:
+            run = acc = 0
+            strong = False
+    for t in toks:
+        core = t.strip("\"'`.,;:()[]{}<>")
+        if len(core) >= _BLOB_MIN and not _url_like(core):
+            classes = sum(bool(re.search(p, core)) for p in
+                          (r"[a-z]", r"[A-Z]", r"[0-9]", r"[^A-Za-z0-9]"))
+            if classes >= 2 and _shannon(core) >= _BLOB_ENTROPY:
+                return True
+    return False
 
 
 def _looks_encoded(subject: str, predicate: str, obj: str) -> bool:
     """True if any field is an opaque encoded blob or carries a decode-and-execute lure. Memory stores
     FACTS (short readable text), never blobs — so this drops the whole encoding-evasion class."""
-    triple = _strip_zero_width(f"{subject}\n{predicate}\n{obj}")
-    return bool(_ENCODED_RUN.search(triple) or _DECODE_EXEC.search(triple))
+    triple = _fold(f"{subject}\n{predicate}\n{obj}")
+    if _ENCODED_RUN.search(triple) or _DECODE_EXEC.search(triple):
+        return True
+    return any(_is_opaque_blob(_fold(f)) for f in (subject, predicate, obj))
 
 
 def _looks_secret(subject: str, predicate: str, obj: str) -> bool:
     if any(s in _norm_pred(predicate) for s in _SECRET_PREDICATES):
         return True
-    # scan EVERY field, with zero-width/bidi stripped so a token can't be hidden from the regex
-    triple = _strip_zero_width(f"{subject}\n{predicate}\n{obj}")
+    # scan EVERY field, folded (zero-width/NFKC/homoglyph) so a token can't be hidden from the regex
+    triple = _fold(f"{subject}\n{predicate}\n{obj}")
     return bool(_SECRET_TEXT.search(triple) or _SECRET_TEXT_I.search(triple) or _PII_TEXT.search(triple))
 
 _SYSTEM = (

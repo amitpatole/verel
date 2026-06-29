@@ -689,10 +689,14 @@ def _tool_remember_conversation(args: dict) -> dict:
         return _err(f"transcript too long (max {_MAX_TEXT} chars)")
     sc = args.get("scope")
     scope = sc if isinstance(sc, str) else "team"
-    # an untrusted transcript must not author into shared/global or reserved scopes (round-5 lens-3 F2)
-    if scope.strip().lower() in ("global", "meta:authors") or scope.startswith("user:"):
-        return _err("verel_remember_conversation cannot write to a global/shared/other-user scope; "
-                    "use a repo:/team/session scope")
+    # An untrusted transcript must not author into global / org-shared / another user's / reserved scopes.
+    # ALLOWLIST (not a denylist) on the NORMALIZED scope — make_key normalizes with strip().lower(), so we
+    # match against the same normalized form, closing the round-6 bypass where 'User:bob' / ' user:bob'
+    # dodged a raw startswith and 'org' was never listed. Only team / repo:* / session:* may be written.
+    norm_scope = scope.strip().lower()
+    if not (norm_scope == "team" or norm_scope.startswith(("repo:", "session:"))):
+        return _err("verel_remember_conversation may only write to 'team', 'repo:<x>' or 'session:<x>' "
+                    "scopes; global/org/user:/meta: scopes need a signed per-fact write (verel_remember)")
     # the conversation tool has no signed-principal branch yet — refuse on a remote/shared brain rather
     # than write UNAUTHENTICATED (round-5 lens-3 F2). Use verel_remember (per-fact, signed) for a remote.
     if os.environ.get("VEREL_BRAIN_URL"):
@@ -708,7 +712,7 @@ def _tool_remember_conversation(args: dict) -> dict:
     except Exception as e:   # noqa: BLE001 — surface the install/key hint, never a bare traceback
         return _err(f"conversational extraction needs an LLM key (Ollama/OpenAI): {e}")
     from .memory import remember_conversation
-    res = remember_conversation(mem, transcript, scope=scope, chat=chat)
+    res = remember_conversation(mem, transcript, scope=norm_scope, chat=chat)
     return {"promoted": [_recall_brief(r) for r in res.promoted],
             "candidate_count": len(res.candidate),
             "superseded": [r.text for r in res.superseded],

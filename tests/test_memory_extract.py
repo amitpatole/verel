@@ -119,6 +119,41 @@ def test_zero_width_split_secret_is_dropped():
     assert recs == []
 
 
+def test_round6_encoding_evasions_are_dropped():
+    # round-6: encodings that slipped the contiguous-run regex (chunked/split base32/base85), homoglyph
+    # and fullwidth secrets, decimal char-codes, and decode-and-run idioms outside the short list.
+    evasions = [
+        ("aws", "note", "QUtJQUlP U0ZPRE5O N0VYQU1Q TEU="),         # F1 whitespace-chunked base64
+        ("x", "note", "QUtJQUlPU0\nZPRE5ON0VYQU1QTEU="),            # F3 newline-split base64
+        ("x", "note", "IFFUSQKJJ5JUMT2EJZHDORKYIFGVATCF"),          # F2 base32
+        ("x", "note", "glpat-ABCDEFGHIJKLMNOP1234"),                # F4 GitLab PAT
+        ("x", "note", "sk_live_SCRUBBED_TEST_FIXTURE"),          # F4 Stripe key
+        ("user", "keypair", "wJalrXUtnFEMI"),                       # F5 predicate synonym
+        ("x", "note", "АKIAIOSFODNN7EXAMPLE"),                      # F6 Cyrillic-А homoglyph
+        ("x", "note", "ＳＫ－ABCDEFGHIJKLMNOPQRST"),                  # F7 fullwidth NFKC -> SK-
+        ("x", "note", "114,109,32,45,114,102,32,47"),              # F8 decimal char-codes
+        ("x", "note", "echo cm0gLXJm | base64 --decode | sh"),     # F9 decode-and-run idiom
+    ]
+    for s, p, o in evasions:
+        recs = parse_extracted_facts(json.dumps([{"subject": s, "predicate": p, "object": o}]), scope="s")
+        assert recs == [], f"should drop encoded/secret: {(s, p, o)!r}"
+
+
+def test_round6_benign_facts_are_not_false_positives():
+    # the encoding guard must NOT drop ordinary fact values (URLs, paths, semvers, prose, camelCase)
+    benign = [
+        ("Dana", "prefers", "dark mode"),
+        ("runbook", "at", "https://docs.example.com/team/runbook"),
+        ("venv", "at", "/usr/local/lib/python3.12/site-packages"),
+        ("release", "is", "v1.2.0-rc1+build.20260628"),
+        ("config", "key", "enableDarkModeForAllUsers"),
+        ("note", "says", "the quick brown fox jumps over the lazy dog today"),
+    ]
+    for s, p, o in benign:
+        recs = parse_extracted_facts(json.dumps([{"subject": s, "predicate": p, "object": o}]), scope="s")
+        assert len(recs) == 1, f"should KEEP benign fact: {(s, p, o)!r}"
+
+
 def test_source_becomes_provenance():
     recs = parse_extracted_facts(json.dumps([{"subject": "a", "predicate": "b", "object": "c"}]),
                                  scope="s", source="session-A")

@@ -31,15 +31,25 @@ MIN_SOURCES = 2
 # GateReceipt). The PRIMARY promotion path — a deployment proves a fact cryptographically.
 Attestor = Callable[[MemoryRecord], bool]
 
-# Maps a raw `source` string to an AUTHENTICATED principal id (or None if it can't be verified). The
-# corroboration path counts only DISTINCT authenticated principals — because raw `source` strings are
-# self-asserted by the caller, two of them are NOT independent corroboration (round-5 F1, CRITICAL).
-# Without an authenticator, corroboration NEVER promotes the trust tier (only `attest` does).
+# Maps a `source` to an AUTHENTICATED principal id (or None if it can't be verified). The corroboration
+# path counts only DISTINCT authenticated principals — because raw `source` strings are self-asserted by
+# the caller, two of them are NOT independent corroboration (round-5 F1, CRITICAL). Without an
+# authenticator, corroboration NEVER promotes the trust tier (only `attest` does).
+#
+# CONTRACT (round-6 C2): the authenticator MUST validate an UNFORGEABLE credential — verify a signature,
+# introspect a session token, read an mTLS identity — and return the resolved principal id. It must
+# NEVER echo its input (`lambda s: s` is INSECURE: `source` is attacker-chosen, so an echo lets one
+# caller forge N "distinct principals" by passing N labels). The gate counts only non-empty *string*
+# returns, but it cannot tell a real id from an echoed one — that guarantee is the authenticator's job.
 Authenticator = Callable[[str], "str | None"]
 
 
 def _distinct_principals(provenance: list[str], authenticate: Authenticator) -> int:
-    ids = {pid for p in provenance if (pid := authenticate(p))}
+    # Count ONLY non-empty *string* ids. A buggy authenticator that returns a truthy non-string (True,
+    # an object) must not inflate the distinct-principal count — `{True, "bob"}` is one real principal,
+    # not two (round-6 M1). The authenticator's contract is "verified-credential → principal-id string".
+    ids = {pid for p in provenance
+           if isinstance((pid := authenticate(p)), str) and pid.strip()}
     return len(ids)
 
 
@@ -81,13 +91,18 @@ def remember_conversation(mem: MemoryView, transcript: object, *, scope: str, ch
         if before is not None and before.kind != MemoryKind.FACT:
             res.refused.append(fact.text)   # would clobber a server-managed non-FACT record
             continue
+        # Capture the trust tier BEFORE write. A different value SUPERSEDES (write rebuilds the record as
+        # CANDIDATE), which would silently erase a prior REJECTED verdict — so a one-char value change
+        # could launder a rejected lie back to promotable. Bind to the pre-write tier instead (round-6
+        # C1): a key that was REJECTED is not re-promotable in this pass, value-change or not.
+        was_rejected = before is not None and before.trust == Trust.REJECTED
         if before is not None and before.text.strip().lower() != fact.text.strip().lower():
             res.superseded.append(before)  # the new value will supersede this one (write keeps the chain)
         rec = mem.write(fact, ts=now)
         if rec.trust == Trust.VERIFIED:
             continue  # already trusted — don't double-count
-        attested = bool(attest and attest(rec))
-        independent = (rec.trust != Trust.REJECTED and authenticate is not None
+        attested = (not was_rejected) and bool(attest and attest(rec))
+        independent = (not was_rejected and rec.trust != Trust.REJECTED and authenticate is not None
                        and _distinct_principals(rec.provenance, authenticate) >= max(2, min_sources))
         if attested or independent:
             res.promoted.append(mem.promote(rec.id) or rec)

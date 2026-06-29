@@ -141,6 +141,12 @@ class LocalMemory(MemoryView):
         existing = self.get(record.id)
         if existing is not None:
             if existing.text.strip().lower() == record.text.strip().lower():
+                if existing.trust == Trust.REJECTED:
+                    # a REJECTED claim re-asserted is STILL rejected — re-stating a lie must not raise
+                    # its confidence/support or reset its decay (that would pin it un-prunable and prime
+                    # a resurrection). Refresh metadata only, never belief (round-6 M2).
+                    self._upsert(existing)
+                    return existing
                 # same claim again -> corroboration (raises confidence + support, resets strength)
                 existing.support_count += 1
                 existing.epistemic_confidence = min(1.0, existing.epistemic_confidence + 0.1)
