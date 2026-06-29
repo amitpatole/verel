@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — graded conversational memory (v1.2.0 track)
+## 1.2.0 — graded conversational memory
 
 Closes the two most-felt agent-memory gaps (conversational fact extraction + prompt-size
 minimization) **without diluting the moat**: a fact is extracted like Mem0/Engram, but it only
@@ -12,16 +12,27 @@ compounds after it's **graded**. See
   supersedes). Extraction only *proposes*; the LLM `ChatFn` is injected (offline-tested, no key); the
   parser fails closed on hostile/garbage output (the transcript is untrusted input).
 - **`remember_conversation`** — the grade gate: only **verified** facts compound. A fact graduates
-  `CANDIDATE → VERIFIED` when **corroborated** past a threshold (belief rises with each confirmation)
-  or backed by an **attestation**; a one-off / hallucinated fact stays candidate forever; a changed
-  value **supersedes** with a queryable correction chain. Pure composition over the existing
-  `MemoryView.write`/`promote` — no bypass of the trust model.
+  `CANDIDATE → VERIFIED` **only** when it is **attested** (a signed receipt) or corroborated by **≥2
+  distinct *authenticated* principals** (a caller-supplied `authenticate` resolves a source to a verified
+  identity). Raw repetition never promotes — one author (or one attacker) repeating a claim N times, or
+  minting N self-asserted source labels, stays `CANDIDATE`; a one-off / hallucinated fact stays candidate
+  forever; a changed value **supersedes** with a queryable correction chain, and a value that was ever
+  **rejected stays un-promotable**. Pure composition over the existing `MemoryView.write`/`promote` — no
+  bypass of the trust model.
 - **`recall_budgeted`** — token-budgeted, **graded-first** recall (`view.rank`: relevance + confidence
-  + a trust term), so under prompt pressure a `VERIFIED` fact beats an equally-relevant `CANDIDATE` and
-  a poisoned candidate can't crowd out a verified one. Dependency-free token estimate (injectable).
+  + a trust term, with a verified-strength floor), so under prompt pressure a `VERIFIED` fact beats an
+  equally-relevant `CANDIDATE` and a poisoned candidate can't crowd out a verified one. Dependency-free
+  token estimate (injectable). Recalled memories render inside an untrusted-DATA fence (one inert line
+  per record, control/zero-width/whitespace neutralized, angle brackets defanged) so a stored fact can't
+  forge an instruction line — a second-order prompt-injection defense.
 - **Surfaces** — MCP `verel_remember_conversation` (extract+grade, needs an LLM key) and `verel_recall`
   gains a `token_budget` (graded-first budgeted recall, no key). New `examples/demo_memory.py` (offline,
   no key). Docs: a *Conversational memory* section + `api.md` autodoc.
+- **Security** — the untrusted-transcript surface was hardened through a multi-round red-team cadence:
+  credentials/PII and encoded/obfuscated payloads are dropped at extraction (a *decode-and-rescan*
+  layer, not just a surface denylist); memory never becomes a secret store and never reaches a
+  decode-then-execute sink; and the trust gate, recall renderer, and rejection ledger share one
+  canonical text form so confusable/whitespace variants can't launder a rejected value.
 
 ## 1.1.0 — IaC / DevOps graders, the cloud-IAM change sensor, and act-then-verify
 

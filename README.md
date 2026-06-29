@@ -8,7 +8,7 @@
   <a href="https://pypi.org/project/verel/"><img src="https://img.shields.io/pypi/v/verel?color=8b7cff&label=pip%20install%20verel&cacheSeconds=1800" alt="PyPI"></a>
   <a href="https://pepy.tech/projects/verel"><img src="https://static.pepy.tech/personalized-badge/verel?period=total&units=international_system&left_color=black&right_color=green&left_text=downloads" alt="PyPI Downloads"></a>
   <a href="https://amitpatole.github.io/verel/"><img src="https://img.shields.io/badge/docs-amitpatole.github.io-5ad1e6" alt="Docs"></a>
-  <img src="https://img.shields.io/badge/tests-1006%20passing-46d39a" alt="tests">
+  <img src="https://img.shields.io/badge/tests-1014%20passing-46d39a" alt="tests">
   <img src="https://img.shields.io/badge/ruff%20%2B%20mypy-clean-5ad1e6" alt="lint">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT">
   <img src="https://img.shields.io/badge/LLM-Ollama%20Cloud%20%C2%B7%20OpenAI-8b7cff" alt="LLM">
@@ -132,7 +132,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: amitpatole/verel@v1.1.0
+      - uses: amitpatole/verel@v1.2.0
         with:
           repo: .
           install: "-e .[dev]"     # your project deps so its tests import
@@ -142,7 +142,7 @@ jobs:
 
 ```yaml
 - repo: https://github.com/amitpatole/verel
-  rev: v1.1.0
+  rev: v1.2.0
   hooks: [{ id: verel-precommit }]
 ```
 
@@ -159,7 +159,7 @@ verel-ci install --repo .     # wire a native pre-commit hook
 
 ## Real-world scenarios
 
-Six situations a team actually hits — each a **runnable script** whose output below is **real, not
+Seven situations a team actually hits — each a **runnable script** whose output below is **real, not
 mocked**. Full write-ups with captured output: **[Real-world scenarios →](docs/examples.md)**.
 
 | # | The situation | What Verel does | Run it |
@@ -170,6 +170,7 @@ mocked**. Full write-ups with captured output: **[Real-world scenarios →](docs
 | 4 | **A polyglot monorepo** | `pytest` + `jest` + `go test` + lint + types + **perf budget** + **security scan** all map to **one verdict schema, one gate**. | `demo_polyglot_ci.py` |
 | 5 | **An agent builds its own tool** | detect → scaffold → test → register on a passing held-out eval, then **jailed to the syscalls it earned** — a socket/subprocess it never exercised is refused at the kernel. | `demo_capability_jail.py` |
 | 6 | **A shared team brain** | Recall *down* a `self→team→org→global` lattice, graduate verified beliefs *up*; a peer's claim **re-verifies before it's trusted**; the store is **leader-fenced HA** with **quorum reads** that survive the leader being down. | `demo_shared_brain.py` |
+| 7 | **Memory that can't remember wrong** | Extract facts from a conversation like Mem0/Engram — but a fact only compounds after it's **graded**: it stays `CANDIDATE` until **attested** or corroborated by **≥2 authenticated principals**, so a one-off (or an attacker repeating a lie) is never trusted. Recall is **token-budgeted, graded-first**, and fenced as untrusted DATA. | `demo_memory.py` |
 
 ```bash
 pip install verel
@@ -179,6 +180,7 @@ python examples/demo_distributed_fleet.py # 3 · fenced concurrent managers + at
 python examples/demo_polyglot_ci.py       # 4 · Python/JS/Go + perf + security on one gate
 python examples/demo_capability_jail.py   # 5 · a tool jailed to the syscalls it earned
 python examples/demo_shared_brain.py      # 6 · shared brain — un-poisonable, HA, crash-tolerant
+python examples/demo_memory.py            # 7 · graded conversational memory (offline, no API key)
 ```
 
 <details><summary>More feature-level demos</summary>
