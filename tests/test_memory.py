@@ -10,7 +10,15 @@ from verel.memory import (
     regression_report,
     should_prune,
 )
-from verel.memory.view import rank
+from verel.memory.view import make_key, rank
+
+
+def test_make_key_is_injective_over_delimiter():
+    # round-12 Finding 2: a `|` in a field must not collide distinct tuples onto one identity (it would
+    # let a partially-known tuple address another record). Normal fields stay byte-stable (no migration).
+    assert make_key("a|b", "c", "team") != make_key("a", "b|c", "team")
+    assert make_key("a%b", "c", "team") != make_key("a", "%b|c", "team")
+    assert make_key("dana", "prefers", "user:dana") == "dana|prefers|user:dana"  # unchanged
 from verel.verdict import GraderKind, Issue, IssueKind, Report, Severity, Verdict, assign
 
 

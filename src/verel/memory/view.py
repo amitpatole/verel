@@ -108,8 +108,16 @@ class MemoryRecord(BaseModel):
         return self
 
 
+def _esc_field(f: str) -> str:
+    # Percent-escape the delimiter (and `%` itself) so identity is INJECTIVE: without this a `|` in a
+    # field collides distinct tuples (`a|b`,`c` vs `a`,`b|c`) onto one id (round-12 Finding 2, low/
+    # contained — server/verified state is unforgeable, but injective keys close candidate-displacement).
+    # Normal fields (no `|`/`%`) are unchanged, so existing record ids are stable.
+    return f.strip().lower().replace("%", "%25").replace("|", "%7C")
+
+
 def make_key(subject: str, predicate: str, scope: str) -> str:
-    return f"{subject.strip().lower()}|{predicate.strip().lower()}|{scope.strip().lower()}"
+    return f"{_esc_field(subject)}|{_esc_field(predicate)}|{_esc_field(scope)}"
 
 
 def make_id(subj_pred_key: str) -> str:
@@ -144,6 +152,14 @@ def canon_value(text: str) -> str:
     renderer byte-for-byte) plus casefold, so case- and invisible-variant restates of a REJECTED value
     can't diverge the gate from what's actually shown to the LLM (rounds 9/10/11)."""
     return canonical_text(text).casefold()
+
+
+def rejected_key(text: str) -> str:
+    """The BOUNDED key under which a REJECTED value is remembered: `canon_value` truncated, so the
+    `rejected_values` ledger entries stay small (detail_json size decoupled from attacker value length,
+    round-12) while the storage and gate sides share ONE function and can't drift. Two values sharing a
+    200-char canonical prefix collide → both blocked (fail-safe over-block, never a launder)."""
+    return canon_value(text)[:200]
 
 
 def relevance(query: str, record: MemoryRecord) -> float:

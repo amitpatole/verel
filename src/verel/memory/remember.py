@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 
 from .extract import ChatFn, extract_facts
 from .principal import is_reserved_key
-from .view import MemoryKind, MemoryRecord, MemoryView, Trust, canon_value
+from .view import MemoryKind, MemoryRecord, MemoryView, Trust, rejected_key
 
 # Distinct AUTHENTICATED principals required to promote a fact by corroboration. ≥2 means one principal
 # repeating a claim never reaches VERIFIED. Configurable upward; never below 2 for the corroboration path.
@@ -105,7 +105,7 @@ def remember_conversation(mem: MemoryView, transcript: object, *, scope: str, ch
         # A value that was EVER rejected for this key is not promotable, even after a supersede-then-
         # restate laundering chain (round-7 C1): `write` carries a durable `rejected_values` set forward
         # across supersessions, so a once-rejected value can't be re-minted as a fresh promotable CANDIDATE.
-        value_rejected = canon_value(fact.text) in set(rec.detail.get("rejected_values", ()))
+        value_rejected = rejected_key(fact.text) in set(rec.detail.get("rejected_values", ()))
         blocked = was_rejected or value_rejected
         attested = (not blocked) and bool(attest and attest(rec))
         independent = (not blocked and rec.trust != Trust.REJECTED and authenticate is not None
