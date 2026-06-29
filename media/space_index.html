@@ -226,7 +226,7 @@ quorum read, leader DOWN → still returns
     </div>
     <div class="scn">
       <div class="top"><span class="num">07</span><h3>Memory that can’t remember wrong</h3></div>
-      <p>Extract facts from a conversation like Mem0/Engram — but a fact only compounds after it’s <b>graded</b>: it stays <code>CANDIDATE</code> until <b>attested</b> or corroborated by <b>≥2 authenticated principals</b>, so a one-off (or an attacker repeating a lie) is never trusted. Recall is <b>token-budgeted, graded-first</b>, and fenced as untrusted data.</p>
+      <p>Extract facts from a conversation like Mem0/Engram — but a fact only compounds after it’s <b>graded</b>: it stays <code>CANDIDATE</code> until <b>attested</b> or corroborated by <b>≥2 authenticated principals</b>, so a one-off (or an attacker repeating a lie) is never trusted. Recall is <b>BM25, token-budgeted, graded-first</b>, and fenced as untrusted data.</p>
       <pre>single say-so → trust=<b>CANDIDATE</b> (not trusted)
 2 authenticated principals → trust=<b>VERIFIED</b>
 attacker repeating it N× → stays <b>CANDIDATE</b>
