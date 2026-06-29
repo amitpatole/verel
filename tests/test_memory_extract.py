@@ -194,6 +194,19 @@ def test_source_becomes_provenance():
     assert recs[0].provenance == ["session-A"]
 
 
+def test_no_redos_on_blob_shaped_fields():
+    # round-10: the secret/PII regexes must be linear on a long alnum run (the blob shape this module
+    # receives), not O(n²) — a max-size hostile payload must not become a CPU-exhaustion DoS. The
+    # threshold is generous (quadratic was ~21s; linear is ~2s) so it isn't flaky but still catches a
+    # reintroduced catastrophic-backtracking quantifier.
+    import time
+    payload = [{"subject": "a" * 2000, "predicate": "b" * 2000, "object": "c" * 2000} for _ in range(200)]
+    blob = json.dumps(payload)
+    t = time.perf_counter()
+    parse_extracted_facts(blob, scope="s")
+    assert time.perf_counter() - t < 8.0   # linear ~2s; quadratic was ~21s
+
+
 def test_max_facts_cap():
     payload = [{"subject": f"s{i}", "predicate": "p", "object": "o"} for i in range(500)]
     recs = parse_extracted_facts(json.dumps(payload), scope="s")

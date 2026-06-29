@@ -68,14 +68,19 @@ _SECRET_TEXT = re.compile(
     re.IGNORECASE,   # round-6 F7: a fullwidth/uppercased key (NFKC→'SK-…') must match too
 )
 _SECRET_TEXT_I = re.compile(
-    r"[a-z][a-z0-9+.\-]*://[^/\s:@]+:[^/\s@]+@"   # URI with user:pass@ (postgres://u:p@host, …)
-    r"|bearer\s+[A-Za-z0-9._\-]{16,}"            # bearer token
+    # URI with user:pass@ (postgres://u:p@host, …). All quantifiers are BOUNDED so a long alnum run
+    # (the blob shape this module receives) can't trigger O(n²) backtracking on the `://`/`@` anchors
+    # (round-10 ReDoS): a real scheme is short and userinfo is not megabytes.
+    r"[a-z][a-z0-9+.\-]{0,30}://[^/\s:@]{1,256}:[^/\s@]{1,256}@"
+    r"|bearer\s+[A-Za-z0-9._\-]{16,256}"         # bearer token
     r"|\b[0-9a-f]{32,64}\b",                     # generic hex API key / token (best-effort)
     re.IGNORECASE,
 )
-# PII the module promises not to retain durably (email + E.164-ish phone). Best-effort.
-_PII_TEXT = re.compile(r"[\w.+\-]+@[\w\-]+\.[\w.\-]+"          # email
-                       r"|\+\d[\d\s().\-]{7,}\d")              # international phone
+# PII the module promises not to retain durably (email + E.164-ish phone). Best-effort. Quantifiers are
+# BOUNDED (local-part ≤64, domain ≤255 per RFC; phone ≤32) so a long alnum run can't backtrack the `@`
+# anchor into O(n²) (round-10 ReDoS — the email alt was the dominant cost on a blob-shaped field).
+_PII_TEXT = re.compile(r"[\w.+\-]{1,64}@[\w\-]{1,255}\.[\w.\-]{1,255}"   # email
+                       r"|\+\d[\d\s().\-]{7,32}\d")                     # international phone
 
 
 # Encoded/opaque-blob guard (round-6 security cadence — the ENCODING bypass class). A denylist scans the

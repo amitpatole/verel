@@ -195,6 +195,25 @@ def test_rejected_value_not_launderable_via_nfkc_confusable():
     assert mem.get(rid).trust != Trust.VERIFIED
 
 
+def test_rejected_value_not_launderable_via_whitespace_variant():
+    # round-10: canon_value must collapse internal whitespace the SAME way recall._neutralize does, else
+    # a rejected 'dark mode' relaunched as 'dark  mode' / 'dark\tmode' slips the gate but renders identically.
+    auth = {"a": "alice", "b": "bob"}.get
+    for variant in ("dark  mode", "dark\tmode", "dark\nmode", "dark\x0bmode", "dark\x0cmode"):
+        mem = LocalMemory()
+        remember_conversation(mem, "x", scope="repo:d", chat=_chat(("dana", "prefers", "dark mode")),
+                              source="a", now=1.0)
+        rid = _fact_id("dana", "prefers", "repo:d")
+        for _ in range(6):
+            mem.contradict(rid)
+        remember_conversation(mem, "x", scope="repo:d", chat=_chat(("dana", "prefers", "throwaway")),
+                              source="b", now=2.0)
+        for src, t in (("a", 3.0), ("b", 4.0)):
+            remember_conversation(mem, "x", scope="repo:d", chat=_chat(("dana", "prefers", variant)),
+                                  source=src, now=t, authenticate=auth)
+        assert mem.get(rid).trust != Trust.VERIFIED, f"laundered via {variant!r}"
+
+
 def test_contradict_rejection_survives_demote_then_restate():
     # round-9 MED: a contradict-driven rejection now records the rejected value too, so a
     # contradict -> demote -> re-remember+attest chain can't launder it back to VERIFIED.

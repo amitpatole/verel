@@ -117,11 +117,12 @@ def make_id(subj_pred_key: str) -> str:
 
 
 def canon_value(text: str) -> str:
-    """Canonicalize a fact VALUE for rejection/identity comparison. NFKC-folds (matching how recall
-    renders to the LLM via `_neutralize`) then strips + casefolds — so a confusable (fullwidth `ｍ`,
-    circled `ⓜ`, …) that an LLM reads as the rejected value can't diverge the trust gate from what is
-    actually shown (round-9). The two sides of the rejection check MUST use this same canonicalization."""
-    return unicodedata.normalize("NFKC", text).strip().casefold()
+    """Canonicalize a fact VALUE for rejection/identity comparison. Must match EXACTLY what recall shows
+    the LLM (`recall._neutralize`), or the trust gate and the renderer diverge and a rejected value can be
+    laundered back as a "different" string that renders identically. So: NFKC-fold (fullwidth/circled
+    confusables, round-9), collapse every whitespace run to one space (round-10: `dark  mode` / `dark\tmode`
+    must equal `dark mode`, since `_neutralize` collapses them), then strip + casefold."""
+    return re.sub(r"\s+", " ", unicodedata.normalize("NFKC", text)).strip().casefold()
 
 
 def relevance(query: str, record: MemoryRecord) -> float:
