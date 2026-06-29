@@ -12,3 +12,7 @@ dist/
 site/
 .cache/
 tools/country_cache.json
+
+# Security residuals — LOCAL ONLY, never published (per directive 2026-06-28)
+docs/SECURITY_RESIDUALS.md
+.security-local/
