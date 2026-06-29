@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import unicodedata
 from enum import Enum
 from typing import Protocol, runtime_checkable
 
@@ -113,6 +114,14 @@ def make_key(subject: str, predicate: str, scope: str) -> str:
 
 def make_id(subj_pred_key: str) -> str:
     return hashlib.blake2s(subj_pred_key.encode()).hexdigest()[:16]
+
+
+def canon_value(text: str) -> str:
+    """Canonicalize a fact VALUE for rejection/identity comparison. NFKC-folds (matching how recall
+    renders to the LLM via `_neutralize`) then strips + casefolds — so a confusable (fullwidth `ｍ`,
+    circled `ⓜ`, …) that an LLM reads as the rejected value can't diverge the trust gate from what is
+    actually shown (round-9). The two sides of the rejection check MUST use this same canonicalization."""
+    return unicodedata.normalize("NFKC", text).strip().casefold()
 
 
 def relevance(query: str, record: MemoryRecord) -> float:

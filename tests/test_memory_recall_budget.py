@@ -136,3 +136,14 @@ def test_recall_collapses_unicode_line_breaks_and_isolates():
         body = recall_budgeted(m, "p status", scope="user:dana", token_budget=200).text
         forged = [ln for ln in body.splitlines() if ln.strip().startswith("### system")]
         assert not forged, f"char U+{ord(ch):04X} forged a line: {body!r}"
+
+
+def test_recall_collapses_all_unicode_whitespace_structurally():
+    # round-9 LOW->structural: collapse EVERY Unicode whitespace (ogham U+1680, em space U+2003,
+    # ideographic U+3000) to one ASCII space and strip object/replacement chars (U+FFFC/U+FFFD), so
+    # no exotic space survives to act as a separator or invisible gap.
+    from verel.memory.recall import _neutralize
+    for ch in (" ", " ", "　"):                 # ogham / em / ideographic space -> single ASCII space
+        assert _neutralize(f"a{ch}b{ch}c") == "a b c", f"U+{ord(ch):04X} not collapsed"
+    for ch in ("￼", "�"):                          # object / replacement chars stripped entirely
+        assert _neutralize(f"a{ch}b") == "ab", f"U+{ord(ch):04X} not stripped"

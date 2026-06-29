@@ -161,7 +161,7 @@ def _decode_candidates(token: str) -> list[str]:
         runs.add(re.sub(r"[.\s]", "", r))
     for t in runs:
         body = t.rstrip("=")
-        if len(body) < 8:   # a short command (`rm -rf ~`) base64s to a tiny body — decode it too (round-8)
+        if len(body) < 4:   # a tiny command (`:|sh`) base64s to a ~6-char body — decode it too (round-9)
             continue
         for alt in (None, b"-_"):
             try:
@@ -172,6 +172,11 @@ def _decode_candidates(token: str) -> list[str]:
             raws.append(base64.b32decode(body.upper() + "=" * (-len(body) % 8), casefold=True))
         except (binascii.Error, ValueError):
             pass
+        for b85 in (base64.b85decode, base64.a85decode):   # base85 / ascii85 (round-9: short b85 secret)
+            try:
+                raws.append(b85(t))
+            except (binascii.Error, ValueError):
+                pass
         if re.fullmatch(r"[0-9a-fA-F]+", t) and len(t) % 2 == 0:
             try:
                 raws.append(bytes.fromhex(t))
@@ -190,19 +195,44 @@ def _decode_candidates(token: str) -> list[str]:
 # DECODED plaintext only (never raw fact text), so it can't false-positive on a natural-language fact —
 # a benign value that base64-decodes to an English shell-verb sentence is itself an opaque blob already.
 _SHELL_CMD = re.compile(
-    r"^\s*(?:sudo\s+|doas\s+)?(?:rm|kill(?:all)?|chmod|chown|dd|mkfs\w*|shutdown|halt|reboot|poweroff"
-    r"|curl|wget|nc|ncat|telnet|bash|sh|zsh|ksh|eval|exec|mv|cp|truncate|shred|history|crontab"
-    r"|systemctl|service|iptables|ufw|userdel|useradd|passwd|chpasswd|insmod|modprobe)\b"
+    r"^\s*(?:sudo\s+|doas\s+|command\s+|/\w[\w/]*/)?(?:rm|rmdir|kill(?:all)?|chmod|chown|dd|mkfs\w*"
+    r"|shutdown|halt|reboot|poweroff|curl|wget|nc|ncat|telnet|bash|sh|zsh|ksh|eval|exec|mv|cp|truncate"
+    r"|shred|history|crontab|systemctl|service|iptables|ufw|userdel|useradd|passwd|chpasswd|insmod"
+    r"|modprobe|git\s+clean|npm|npx|yarn|pnpm|docker|kubectl|make|source|env|ssh|scp|rsync|tar|chattr"
+    r"|setfacl|mount|umount|ln|del|erase|format|rd|Remove-Item|Stop-Computer|Stop-Service"
+    r"|Invoke-WebRequest|Start-Process|reg\s+(?:delete|add))\b"
     r"|:\(\)\s*\{|>\s*[~/]|>>\s*[~/]|/dev/(?:sd|nvme|null|zero|random|urandom)|\bmkfs\b|\$\(|`[^`]+`",
     re.IGNORECASE | re.MULTILINE,
 )
+# Strip shell-quoting / escape noise BEFORE the verb scan so an obfuscated leading verb the shell would
+# re-expand (`r''m`, `r$@m`, `\x72m`, `\162m`) can't dodge the `^verb` anchor (round-9). Best-effort.
+_SHELL_NOISE = re.compile(r"""['"`]|\$[@*]|\$\{[^}]*\}|\\x[0-9a-fA-F]{2}|\\[0-7]{1,3}|\\""")
+
+
+def _deobfuscate(text: str) -> str:
+    # decode \xNN / \NNN escapes to the char they denote (so `\x72m`→`rm`), then drop quoting noise
+    def _esc(m: re.Match[str]) -> str:
+        g = m.group(0)
+        try:
+            if g[:2] == "\\x":
+                return chr(int(g[2:], 16))
+            if g[1:].isdigit():
+                return chr(int(g[1:], 8))
+        except ValueError:
+            return ""
+        return ""
+    decoded = re.sub(r"\\x[0-9a-fA-F]{2}|\\[0-7]{1,3}", _esc, text)
+    return _SHELL_NOISE.sub("", decoded)
 
 
 def _text_unsafe(text: str) -> bool:
     """A decoded string is unsafe if it reveals a credential/PII, a decode-and-run lure, or IS a shell
-    command (round-8: a bare destructive one-liner matches no secret/lure pattern but is still a payload)."""
-    return bool(_SECRET_TEXT.search(text) or _SECRET_TEXT_I.search(text)
-                or _PII_TEXT.search(text) or _DECODE_EXEC.search(text) or _SHELL_CMD.search(text))
+    command (round-8: a bare destructive one-liner matches no secret/lure pattern but is still a payload).
+    The command check also runs on a de-obfuscated copy so shell-quoting can't hide the leading verb."""
+    if (_SECRET_TEXT.search(text) or _SECRET_TEXT_I.search(text)
+            or _PII_TEXT.search(text) or _DECODE_EXEC.search(text) or _SHELL_CMD.search(text)):
+        return True
+    return bool(_SHELL_CMD.search(_deobfuscate(text)))
 
 
 def _decoded_unsafe(token: str, depth: int = 2) -> bool:

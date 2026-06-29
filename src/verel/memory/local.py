@@ -22,6 +22,7 @@ from .view import (
     MemoryView,
     Trust,
     apply_decay,
+    canon_value,
     make_id,
     make_key,
     rank,
@@ -175,7 +176,7 @@ class LocalMemory(MemoryView):
             # gate consults this so a once-rejected value stays un-promotable (round-7 C1).
             rejected = list(existing.detail.get("rejected_values", []))
             if existing.trust == Trust.REJECTED:
-                rv = existing.text.strip().lower()
+                rv = canon_value(existing.text)   # NFKC-canonical, matching the gate + recall (round-9)
                 if rv not in rejected:
                     rejected.append(rv)
             record.with_detail(corrections=chain, superseded=existing.text, rejected_values=rejected)
@@ -248,6 +249,13 @@ class LocalMemory(MemoryView):
         r = self._adjust(record_id, ec=-delta)
         if r is not None and r.epistemic_confidence < 0.2:
             r = self._adjust(record_id, trust=Trust.REJECTED)
+            if r is not None:   # record the rejected VALUE so a later supersede/restate can't launder it
+                rejected = list(r.detail.get("rejected_values", []))
+                cv = canon_value(r.text)
+                if cv not in rejected:
+                    rejected.append(cv)
+                    r.with_detail(rejected_values=rejected)
+                    self._upsert(r)
         return r
 
     def promote(self, record_id):

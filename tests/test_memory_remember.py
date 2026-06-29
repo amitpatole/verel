@@ -176,6 +176,40 @@ def test_rejected_value_is_not_launderable_by_supersede_then_restate():
     assert mem.get(rid).trust != Trust.VERIFIED
 
 
+def test_rejected_value_not_launderable_via_nfkc_confusable():
+    # round-9 HIGH: the rejection gate must canonicalize (NFKC) the SAME way recall renders, else a
+    # fullwidth/circled confusable of the rejected value slips the gate but folds back to the rejected
+    # string when shown to the LLM. reject 'malicious' -> supersede -> restate as 'ｍａｌｉｃｉｏｕｓ' + 2 principals.
+    mem = LocalMemory()
+    auth = {"a": "alice", "b": "bob"}.get
+    remember_conversation(mem, "x", scope="repo:d", chat=_chat(("proj", "editor", "malicious")),
+                          source="a", now=1.0)
+    rid = _fact_id("proj", "editor", "repo:d")
+    for _ in range(6):
+        mem.contradict(rid)
+    remember_conversation(mem, "x", scope="repo:d", chat=_chat(("proj", "editor", "throwaway")),
+                          source="b", now=2.0)
+    for src, t in (("a", 3.0), ("b", 4.0)):
+        remember_conversation(mem, "x", scope="repo:d", chat=_chat(("proj", "editor", "ｍａｌｉｃｉｏｕｓ")),
+                              source=src, now=t, authenticate=auth)
+    assert mem.get(rid).trust != Trust.VERIFIED
+
+
+def test_contradict_rejection_survives_demote_then_restate():
+    # round-9 MED: a contradict-driven rejection now records the rejected value too, so a
+    # contradict -> demote -> re-remember+attest chain can't launder it back to VERIFIED.
+    mem = LocalMemory()
+    remember_conversation(mem, "x", scope="s", chat=_chat(("u", "role", "admin")), source="a", now=1.0)
+    rid = _fact_id("u", "role", "s")
+    for _ in range(6):
+        mem.contradict(rid)
+    mem.demote(rid)   # operator flips REJECTED -> CANDIDATE
+    res = remember_conversation(mem, "x", scope="s", chat=_chat(("u", "role", "admin")),
+                                source="a", now=2.0, attest=lambda _r: True)
+    assert res.promoted == []
+    assert mem.get(rid).trust != Trust.VERIFIED
+
+
 def test_case_variant_principal_ids_count_as_one():
     # round-7 M1 residual: one human authenticated as 'Alice' / 'alice ' is ONE principal, not two —
     # the distinct-principal set dedups on the normalized (strip+casefold) id.
