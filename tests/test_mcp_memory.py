@@ -1,6 +1,6 @@
 """Phase 4 — the MCP surfaces for graded conversational memory (dispatch-level, no brain/LLM)."""
 
-from verel.mcp_server import TOOLS, _tool_remember_conversation
+from verel.mcp_server import TOOLS, _tool_recall, _tool_remember_conversation
 
 
 def test_tools_registered_with_schemas():
@@ -38,3 +38,24 @@ def test_remember_conversation_list_transcript_is_size_capped():
     # round-7 F-R7-2: a giant `role` (which _normalize ALSO renders) must not dodge the cap
     role_amplified = [{"role": "R" * 50_000, "content": "x"}] * 1000
     assert "error" in _tool_remember_conversation({"transcript": role_amplified, "scope": "team"})
+
+
+def test_recall_without_scope_does_not_leak_other_scopes():
+    # round-11 Finding A: a missing / empty / non-string scope must NOT become an unfiltered full-store
+    # read. It defaults to the least-privilege `team` scope (fenced to team + global via the lattice),
+    # never exposing user:/repo:/org/other-principal memory.
+    import verel.mcp_server as M
+    from verel.memory.view import MemoryKind, MemoryRecord, make_id, make_key
+    mem = M._brain()
+    for sc in ("team", "org", "global", "user:alice", "repo:secret"):
+        k = make_key("x", "secret_in", sc)
+        mem.write(MemoryRecord(id=make_id(k), kind=MemoryKind.FACT, subject="x", predicate="secret_in",
+                               text=sc, scope=sc, subj_pred_key=k))
+    allowed = {"team", "global"}
+    for args in ({"query": "x secret_in"},                       # no scope
+                 {"query": "x secret_in", "scope": 123},         # non-string scope
+                 {"query": "x secret_in", "scope": ""},          # empty scope
+                 {"query": "x secret_in", "token_budget": 500}):  # budgeted, no scope
+        out = _tool_recall(args)
+        got = {r["scope"] for r in out["records"]}
+        assert got <= allowed, f"leaked scopes {got - allowed} for args {args}"

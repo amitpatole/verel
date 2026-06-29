@@ -36,6 +36,11 @@ _COLS = (
     "epistemic_confidence, retrieval_strength, support_count, created_ts, last_recall_ts, detail_json"
 )
 
+# Bound per-record detail growth so repeated supersessions can't inflate one record's detail_json to
+# megabytes (round-11 Finding B): keep the most recent N corrections and a bounded rejected-value ledger.
+_MAX_CORRECTIONS = 20
+_MAX_REJECTED_VALUES = 50
+
 
 class LocalMemory(MemoryView):
     def __init__(self, path: str | Path = ":memory:", *, embedder=None,
@@ -164,10 +169,13 @@ class LocalMemory(MemoryView):
                 self._upsert(existing)
                 return existing
             # different value for the same key -> supersede (interference): keep a correction
-            # chain so the history is queryable, not just overwritten.
+            # chain so the history is queryable, not just overwritten. BOUNDED (round-11 Finding B): cap
+            # the chain length and truncate each stored prior value, so N supersessions of large values
+            # can't grow one record's detail_json to megabytes (re-parsed on every recall) — a storage/
+            # CPU-amplification DoS an attacker drives via repeated writes.
             chain = [*existing.detail.get("corrections", []),
-                     {"text": existing.text, "ec": existing.epistemic_confidence,
-                      "ts": existing.created_ts, "superseded_at": ts}]
+                     {"text": existing.text[:200], "ec": existing.epistemic_confidence,
+                      "ts": existing.created_ts, "superseded_at": ts}][-_MAX_CORRECTIONS:]
             record.support_count = 1
             record.retrieval_strength = 1.0
             # Carry a DURABLE set of rejected VALUES forward across supersessions: a value that was
@@ -179,7 +187,8 @@ class LocalMemory(MemoryView):
                 rv = canon_value(existing.text)   # NFKC-canonical, matching the gate + recall (round-9)
                 if rv not in rejected:
                     rejected.append(rv)
-            record.with_detail(corrections=chain, superseded=existing.text, rejected_values=rejected)
+            record.with_detail(corrections=chain, superseded=existing.text[:200],
+                               rejected_values=rejected[-_MAX_REJECTED_VALUES:])
         self._upsert(record)
         self._set_vector(record.id, self._embed_text(record))  # no-op without an embedder
         return record
@@ -254,7 +263,7 @@ class LocalMemory(MemoryView):
                 cv = canon_value(r.text)
                 if cv not in rejected:
                     rejected.append(cv)
-                    r.with_detail(rejected_values=rejected)
+                    r.with_detail(rejected_values=rejected[-_MAX_REJECTED_VALUES:])
                     self._upsert(r)
         return r
 

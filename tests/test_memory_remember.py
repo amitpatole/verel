@@ -229,6 +229,41 @@ def test_contradict_rejection_survives_demote_then_restate():
     assert mem.get(rid).trust != Trust.VERIFIED
 
 
+def test_rejected_value_not_launderable_via_invisible_char_variant():
+    # round-11: the trust gate (canon_value) and the recall renderer share ONE canonical_text, so a
+    # zero-width/bidi/control variant that renders to the rejected string can't slip the tombstone.
+    from verel.memory.view import canonical_text
+    auth = {"a": "alice", "b": "bob"}.get
+    for variant in ("dark⁦ ⁩mode", "dark​mode", "dark\x85mode", "dark﻿mode",
+                    "dark\x01mode", "dark￼mode"):
+        target = canonical_text(variant)   # what the LLM actually sees -> reject THAT, then restate variant
+        mem = LocalMemory()
+        remember_conversation(mem, "x", scope="team", chat=_chat(("dana", "prefers", target)),
+                              source="a", now=1.0)
+        rid = _fact_id("dana", "prefers", "team")
+        for _ in range(6):
+            mem.contradict(rid)
+        remember_conversation(mem, "x", scope="team", chat=_chat(("dana", "prefers", "throwaway")),
+                              source="b", now=2.0)
+        for src, t in (("a", 3.0), ("b", 4.0)):
+            remember_conversation(mem, "x", scope="team", chat=_chat(("dana", "prefers", variant)),
+                                  source=src, now=t, authenticate=auth)
+        assert mem.get(rid).trust != Trust.VERIFIED, f"laundered via {variant!r}"
+
+
+def test_correction_chain_is_bounded():
+    # round-11 Finding B: many supersessions of large values must not inflate one record's detail_json
+    # to megabytes (a storage/CPU-amplification DoS) — the chain is capped and prior text truncated.
+    mem = LocalMemory()
+    for i in range(120):
+        mem.write(MemoryRecord(id=_fact_id("a", "b", "s"), kind=MemoryKind.FACT, subject="a",
+                               predicate="b", text="V" * 2000 + str(i), scope="s",
+                               subj_pred_key=make_key("a", "b", "s")))
+    rec = mem.get(_fact_id("a", "b", "s"))
+    assert len(rec.detail.get("corrections", [])) <= 20
+    assert len(rec.detail_json) < 20000   # bounded (was ~2.4 MB unbounded)
+
+
 def test_case_variant_principal_ids_count_as_one():
     # round-7 M1 residual: one human authenticated as 'Alice' / 'alice ' is ONE principal, not two —
     # the distinct-principal set dedups on the normalized (strip+casefold) id.

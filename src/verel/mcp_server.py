@@ -445,7 +445,11 @@ def _tool_recall(args: dict) -> dict:
         return _err("query (string) is required")
     if len(query) > _MAX_QUERY:
         return _err(f"query too long (max {_MAX_QUERY} chars)")
-    scope = args.get("scope") if isinstance(args.get("scope"), str) else None
+    # A missing/empty/non-string scope must NOT become an UNFILTERED full-store read — that leaks every
+    # principal's / repo's / org-private memory to any caller (round-11 Finding A). Default to the
+    # least-privilege `team` scope (matching the write tool) and ALWAYS fence through the lattice.
+    sc = args.get("scope")
+    scope = sc if isinstance(sc, str) and sc.strip() else "team"
     k = args.get("k", 5)
     if not isinstance(k, int) or isinstance(k, bool) or k <= 0:
         return _err("k must be a positive integer")
@@ -474,8 +478,7 @@ def _tool_recall(args: dict) -> dict:
             br = recall_budgeted(mem, query, scope=scope, token_budget=min(budget, 100_000), kind=kind, k=k)
             return {"records": [_recall_brief(h) for h in br.records], "used_tokens": br.used_tokens,
                     "dropped": br.dropped, "context": br.text}
-        hits = (lattice_recall(mem, query, scope=scope, kind=kind, k=k) if scope
-                else mem.recall(query, kind=kind, k=k))
+        hits = lattice_recall(mem, query, scope=scope, kind=kind, k=k)   # scope is always set + fenced
     except urllib.error.HTTPError as e:   # remote brain: bad bearer (401) etc. — subclass of URLError
         return _err(f"remote brain rejected the request: HTTP {e.code}")
     except urllib.error.URLError as e:

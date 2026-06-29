@@ -116,13 +116,34 @@ def make_id(subj_pred_key: str) -> str:
     return hashlib.blake2s(subj_pred_key.encode()).hexdigest()[:16]
 
 
+# ONE canonical text transform, shared by the recall renderer (`recall._neutralize`) and the trust gate
+# (`canon_value`). They MUST agree byte-for-byte: if a value renders to the rejected string but the gate
+# treats it as different, a rejected value launders back to VERIFIED (rounds 9/10/11 each found a class
+# that diverged — NFKC, then whitespace, then the zero-width/bidi/control set). Deriving both from this
+# single function ends the divergence class permanently. Order matters: NFKC first, then drop every
+# invisible (zero-width/bidi/object-replacement), then collapse controls+whitespace, then defang angles.
+_ZERO_WIDTH = re.compile("[​-‏‪-‮⁠-⁤⁦-⁩﻿]")
+_CTRL = re.compile("[\x00-\x1f\x7f-\x9f᠎  ]+")
+_WS_RUN = re.compile(r"\s+")
+_REMOVE_OBJ = {ord("￼"): None, ord("�"): None}
+_ANGLES = str.maketrans({"<": "‹", ">": "›"})
+
+
+def canonical_text(s: str) -> str:
+    """The shared canonical render of an untrusted value: NFKC-fold, strip zero-width/bidi/object-
+    replacement, collapse controls + every Unicode whitespace run to one space, defang angle brackets,
+    strip. This is EXACTLY what the LLM sees via recall; the trust gate compares on this same form."""
+    s = unicodedata.normalize("NFKC", s)
+    s = _ZERO_WIDTH.sub("", s).translate(_REMOVE_OBJ)
+    s = _WS_RUN.sub(" ", _CTRL.sub(" ", s))
+    return s.translate(_ANGLES).strip()
+
+
 def canon_value(text: str) -> str:
-    """Canonicalize a fact VALUE for rejection/identity comparison. Must match EXACTLY what recall shows
-    the LLM (`recall._neutralize`), or the trust gate and the renderer diverge and a rejected value can be
-    laundered back as a "different" string that renders identically. So: NFKC-fold (fullwidth/circled
-    confusables, round-9), collapse every whitespace run to one space (round-10: `dark  mode` / `dark\tmode`
-    must equal `dark mode`, since `_neutralize` collapses them), then strip + casefold."""
-    return re.sub(r"\s+", " ", unicodedata.normalize("NFKC", text)).strip().casefold()
+    """Canonicalize a fact VALUE for rejection/identity comparison — `canonical_text` (matching the
+    renderer byte-for-byte) plus casefold, so case- and invisible-variant restates of a REJECTED value
+    can't diverge the gate from what's actually shown to the LLM (rounds 9/10/11)."""
+    return canonical_text(text).casefold()
 
 
 def relevance(query: str, record: MemoryRecord) -> float:
