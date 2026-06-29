@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.3.0 — FTS5 BM25 hybrid retrieval
+
+Upgrades the memory **retrieval** layer — the one on-mission gap a third-party comparative report
+flagged (hybrid retrieval is the field's recurring winning pattern; Verel's *ranking* was best-in-set
+but the *relevance signal* underneath was naive token-overlap).
+
+- **FTS5 BM25 recall** — `LocalMemory` recall now uses SQLite **FTS5 + BM25** instead of set-intersection
+  token-overlap: real term weighting, matches in the **text body** (not just subject/predicate), and
+  **SQL-side scope/kind/rejected filtering** instead of a full-table scan + Python scoring. The
+  trust-aware `rank` (verified-first + confidence + recency + budget) re-ranks the BM25 candidates on
+  top, so the moat is unchanged and recall stays fenced as untrusted DATA. Dependency-free (FTS5 ships
+  with `sqlite3`); falls back to token-overlap where a build lacks FTS5; the optional embedder/cosine
+  semantic path is retained. `recall_budgeted` now respects the BM25 order. The index is kept in sync at
+  the single write chokepoint + prune path, backfills for pre-existing dbs, and reconciles a partial
+  index on open.
+- **Security** — the untrusted FTS query is sanitized (decomposed to `\w+` tokens, each quoted as an
+  FTS5 string and OR-joined) so no FTS5 operator can inject, error the matcher, or scan wide (40k-fuzz
+  clean); SQL is parameter-bound. Recall `k` is clamped (`_MAX_RECALL_K=1000`) and reinforcement batched
+  into one transaction, closing a k-amplification DoS where a large `k` drove a committed write per
+  result. Hardened over a 2-round red-team cadence.
+
 ## 1.2.0 — graded conversational memory
 
 Closes the two most-felt agent-memory gaps (conversational fact extraction + prompt-size

@@ -82,7 +82,7 @@ the same way.
 |---|---|---|
 | `VEREL_MEMORY_BACKEND` | `local` | Backend to use — `local`, `remote`, `postgres`, `lancedb`, `redis`, or any registered name. If unset but `VEREL_BRAIN_URL` is set, defaults to `remote` (back-compat). |
 | `VEREL_MEMORY_STORE` | `~/.config/verel/brain.db` | SQLite path for the `local` backend (`:memory:` for ephemeral). |
-| `VEREL_EMBEDDER` | `lexical` | Recall relevance signal — `none`/`lexical` (token overlap, zero-config), `hash` (offline vectors), or `openai` (semantic; needs an OpenAI key). Shared by every backend. |
+| `VEREL_EMBEDDER` | `lexical` | Recall relevance signal — `none`/`lexical` (FTS5 BM25 term-weighted search, zero-config), `hash` (offline vectors), or `openai` (semantic; needs an OpenAI key). Shared by every backend. |
 | `VEREL_BRAIN_URL` | — | `remote` backend: URL of a `MemoryServer` to share one brain across machines. |
 | `VEREL_BRAIN_TOKEN` | — | Bearer token for the remote brain. |
 | `VEREL_CLUSTER_TOKEN` | — | Replication-channel credential for the remote brain. |
@@ -208,7 +208,7 @@ The **eyes** (AgentVision) read their own provider keys — see the
 ## Embeddings (semantic recall)
 
 `VEREL_EMBEDDER` picks the recall relevance signal, shared by **every** memory backend:
-`none`/`lexical` (token overlap, zero-config, the default), `hash` (offline vectors — exercises the
+`none`/`lexical` (FTS5 BM25 search, zero-config, the default), `hash` (offline vectors — exercises the
 ANN path with no API), or `openai` (real semantic vectors, needs an OpenAI key). With `openai`:
 
 | Variable | Default | Purpose |

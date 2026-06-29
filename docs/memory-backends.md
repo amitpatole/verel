@@ -361,13 +361,15 @@ OpenAI dependency, `lancedb` with `VEREL_EMBEDDER=hash` is usually the simpler c
 ## Embeddings (`VEREL_EMBEDDER`) {#embeddings}
 
 The recall relevance signal is configured **once**, the same way for every backend. Without an
-embedder, recall is lexical token-overlap (zero-config, and the only option that works with Ollama,
-which serves no embeddings endpoint). With one, recall ranks by cosine similarity of dense vectors —
-so *"the panel runs off the screen"* matches a rule about *"overflow"* with no shared words.
+embedder, `LocalMemory` recall is **FTS5 BM25** lexical search (v1.3.0) — term-weighted, matches the
+text body not just subject/predicate, with SQL-side scope/kind filtering; zero-config and the only
+option that works with Ollama, which serves no embeddings endpoint. With an embedder, recall ranks by
+cosine similarity of dense vectors — so *"the panel runs off the screen"* matches a rule about
+*"overflow"* with no shared words. Either way the trust-aware `rank` re-ranks on top (verified-first).
 
 | Env var | Default | Purpose |
 |---|---|---|
-| `VEREL_EMBEDDER` | `lexical` | `none`/`lexical` (token overlap), `hash` (offline, dependency-free vectors — surface overlap, **not** meaning), or `openai` (real semantic vectors). Unknown values fail closed. |
+| `VEREL_EMBEDDER` | `lexical` | `none`/`lexical` (FTS5 BM25 term-weighted lexical search), `hash` (offline, dependency-free vectors — surface overlap, **not** meaning), or `openai` (real semantic vectors). Unknown values fail closed. |
 | `VEREL_EMBED_MODEL` | `text-embedding-3-small` | OpenAI embedding model when `VEREL_EMBEDDER=openai` (e.g. `text-embedding-3-large`). |
 | `VEREL_EMBED_DIM` | model native | Override the vector width for an unknown model or a truncated-dimensions deployment. |
 
