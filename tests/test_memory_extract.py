@@ -139,6 +139,26 @@ def test_round6_encoding_evasions_are_dropped():
         assert recs == [], f"should drop encoded/secret: {(s, p, o)!r}"
 
 
+def test_round7_decode_and_rescan_catches_encoded_secrets():
+    # round-7: the robust layer — DECODE one layer (base64/base32/hex, dot/space-chunked, b64-of-b64)
+    # and re-scan. Statistical heuristics lose to short base64 (entropy ~= prose); decoding inverts it.
+    import base64
+    ghp = base64.b64encode(b"ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345").decode()
+    nested = base64.b64encode(base64.b64encode(b"AKIAIOSFODNN7EXAMPLE")).decode()
+    payloads = [
+        "QUtJQUlPU0ZPRE.5ON0VYQU1QTEU=.note",   # F-NEW-1 dotted base64 (defeats _url_like skip)
+        "QUtJQUlPU0ZPRE5ON0VYQU1QTEU=",         # F-NEW-2 plain 28-char base64, entropy < 4.0
+        "IFFUSQKJJ5JUMT2EJZHDORKYIFGVATCF",     # base32
+        ghp, nested,                            # github token b64; AWS key double-base64'd
+        "certutil -decode cm0gLXJm.b64 out.bat",  # F-NEW-3 decode-and-run idiom
+        "eval(base64_decode('test'))",          # F-NEW-3 PHP idiom
+    ]
+    for o in payloads:
+        recs = parse_extracted_facts(json.dumps([{"subject": "srv", "predicate": "config", "object": o}]),
+                                     scope="s")
+        assert recs == [], f"decode-and-rescan should drop: {o!r}"
+
+
 def test_round6_benign_facts_are_not_false_positives():
     # the encoding guard must NOT drop ordinary fact values (URLs, paths, semvers, prose, camelCase)
     benign = [

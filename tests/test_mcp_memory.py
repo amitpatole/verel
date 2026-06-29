@@ -35,3 +35,6 @@ def test_remember_conversation_list_transcript_is_size_capped():
     assert "error" in _tool_remember_conversation({"transcript": over_turns, "scope": "team"})
     big = [{"role": "user", "content": "x" * 20001}]
     assert "error" in _tool_remember_conversation({"transcript": big, "scope": "team"})
+    # round-7 F-R7-2: a giant `role` (which _normalize ALSO renders) must not dodge the cap
+    role_amplified = [{"role": "R" * 50_000, "content": "x"}] * 1000
+    assert "error" in _tool_remember_conversation({"transcript": role_amplified, "scope": "team"})

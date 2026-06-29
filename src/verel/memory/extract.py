@@ -19,6 +19,8 @@ House rules honored:
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import math
 import re
@@ -98,11 +100,12 @@ _ENCODED_RUN = re.compile(
 # A fact that ships its own decode-and-execute recipe is hostile on its face — drop regardless of length.
 # round-6 F9: cover the long-form / language-specific decode-and-run idioms the short list missed.
 _DECODE_EXEC = re.compile(
-    r"base64\s+--?d(?:ecode)?|b64decode|bytes\.fromhex|atob\s*\(|fromCharCode"
+    r"base(?:64|32)\s+--?d(?:ecode)?|b64decode|base64_decode|Base64\.decode64|bytes\.fromhex"
+    r"|atob\s*\(|fromCharCode|certutil\s+-decode|uudecode|wscript|cscript"
     r"|\beval\s*\(|\bexec(?:Sync|File)?\s*\(|\bsystem\s*[(\"']|os\.(?:system|popen|exec)"
-    r"|\bpopen\s*\(|subprocess|child_process|pty\.spawn|spawn\w*\s*\("
+    r"|\bpopen\s*\(|subprocess|child_process|pty\.spawn|spawn\w*\s*\(|openssl\s+enc\s+-d"
     r"|Invoke-Expression|\biex\b|-enc(?:odedcommand)?\b|\bperl\s+-e\b|\bnode\s+-e\b|\bpython3?\s+-c\b"
-    r"|\|\s*(?:ba)?sh\b|\$\(.*\)|`[^`]+`",
+    r"|\|\s*(?:ba)?sh\b|\$\(.*\)|\$'[^']*\\x|`[^`]+`",
     re.IGNORECASE,
 )
 # Common homoglyphs (Cyrillic / Greek lookalikes) folded to ASCII before scanning, so 'АKIA…' (Cyrillic
@@ -140,6 +143,66 @@ def _shannon(s: str) -> float:
     if n <= 1:
         return 0.0
     return -sum((c / n) * math.log2(c / n) for c in Counter(s).values())
+
+
+def _decode_candidates(token: str) -> list[str]:
+    """Best-effort: DECODE a token as base64/base64url/base32/hex and return any printable plaintext.
+    This is the principled answer to the encoding class — instead of guessing at the surface form
+    (an arms race short base64 wins, since it's statistically ~prose), we INVERT one layer and re-scan
+    the result. Attacker `.`/whitespace separators are stripped; a leading base64 run (before a trailing
+    noise word) and each long base64-ish substring are tried, so dot-chunking can't dodge it."""
+    raws: list[bytes] = []
+    strip = re.sub(r"[.\s]", "", token)
+    runs = {strip}
+    m = re.match(r"[A-Za-z0-9+/_-]+={0,2}", strip)
+    if m:
+        runs.add(m.group())
+    for r in re.findall(r"[A-Za-z0-9+/=_-]{12,}", token):
+        runs.add(re.sub(r"[.\s]", "", r))
+    for t in runs:
+        body = t.rstrip("=")
+        if len(body) < 16:
+            continue
+        for alt in (None, b"-_"):
+            try:
+                raws.append(base64.b64decode(body + "=" * (-len(body) % 4), altchars=alt, validate=True))
+            except (binascii.Error, ValueError):
+                pass
+        try:
+            raws.append(base64.b32decode(body.upper() + "=" * (-len(body) % 8), casefold=True))
+        except (binascii.Error, ValueError):
+            pass
+        if re.fullmatch(r"[0-9a-fA-F]+", t) and len(t) % 2 == 0:
+            try:
+                raws.append(bytes.fromhex(t))
+            except ValueError:
+                pass
+    out: list[str] = []
+    for raw in raws:
+        s = raw.decode("utf-8", "ignore")
+        if s and sum(c.isprintable() for c in s) >= 0.8 * len(s):
+            out.append(s)
+    return out
+
+
+def _text_unsafe(text: str) -> bool:
+    """A decoded string is unsafe if it reveals a credential/PII or a decode-and-run lure."""
+    return bool(_SECRET_TEXT.search(text) or _SECRET_TEXT_I.search(text)
+                or _PII_TEXT.search(text) or _DECODE_EXEC.search(text))
+
+
+def _decoded_unsafe(token: str, depth: int = 2) -> bool:
+    """Decode `token` (recursing once for base64-of-base64) and re-scan the plaintext for a secret or an
+    exec lure — closes the 'encode a secret/instruction, decode it later' class regardless of entropy or
+    chunking (round-7 F-NEW-1/F-NEW-2), without the false-positives a lowered entropy threshold causes."""
+    for d in _decode_candidates(token):
+        if _text_unsafe(d):
+            return True
+        if depth > 1:
+            for t2 in d.split():
+                if _decoded_unsafe(t2, depth - 1):
+                    return True
+    return False
 
 
 def _norm_pred(predicate: str) -> str:
@@ -196,6 +259,8 @@ def _is_opaque_blob(field: str) -> bool:
             strong = False
     for t in toks:
         core = t.strip("\"'`.,;:()[]{}<>")
+        # A URL/path/dotted token is excluded here (it would false-positive); a dotted blob that hides a
+        # SECRET is caught instead by `_decoded_unsafe` (decode-and-rescan), which a real path survives.
         if len(core) >= _BLOB_MIN and not _url_like(core):
             classes = sum(bool(re.search(p, core)) for p in
                           (r"[a-z]", r"[A-Z]", r"[0-9]", r"[^A-Za-z0-9]"))
@@ -210,7 +275,14 @@ def _looks_encoded(subject: str, predicate: str, obj: str) -> bool:
     triple = _fold(f"{subject}\n{predicate}\n{obj}")
     if _ENCODED_RUN.search(triple) or _DECODE_EXEC.search(triple):
         return True
-    return any(_is_opaque_blob(_fold(f)) for f in (subject, predicate, obj))
+    for f in (subject, predicate, obj):
+        ff = _fold(f)
+        if _is_opaque_blob(ff):
+            return True
+        for tok in ff.split():
+            if _decoded_unsafe(tok):   # decode one layer and re-scan — the robust catch (round-7)
+                return True
+    return False
 
 
 def _looks_secret(subject: str, predicate: str, obj: str) -> bool:

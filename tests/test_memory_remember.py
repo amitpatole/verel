@@ -144,6 +144,36 @@ def test_rejected_resurrection_via_value_change_is_blocked():
     assert mem.get(rid).trust != Trust.VERIFIED
 
 
+def test_rejected_value_is_not_launderable_by_supersede_then_restate():
+    # round-7 C1 residual: reject paris -> supersede with london (rebuilds CANDIDATE, erasing the
+    # verdict) -> restate paris + attest. The durable rejected_values set must keep paris un-promotable.
+    mem = LocalMemory()
+    remember_conversation(mem, "x", scope="s", chat=_chat(("capital", "of", "paris")),
+                          source="A", now=1.0)
+    rid = _fact_id("capital", "of", "s")
+    for _ in range(6):
+        mem.contradict(rid)
+    assert mem.get(rid).trust == Trust.REJECTED
+    remember_conversation(mem, "x", scope="s", chat=_chat(("capital", "of", "london")),
+                          source="B", now=2.0)                                   # supersede
+    res = remember_conversation(mem, "x", scope="s", chat=_chat(("capital", "of", "paris")),
+                                source="C", now=3.0, attest=lambda _r: True)     # restate the rejected value
+    assert res.promoted == []
+    assert mem.get(rid).trust != Trust.VERIFIED
+
+
+def test_case_variant_principal_ids_count_as_one():
+    # round-7 M1 residual: one human authenticated as 'Alice' / 'alice ' is ONE principal, not two —
+    # the distinct-principal set dedups on the normalized (strip+casefold) id.
+    mem = LocalMemory()
+    issued = {"s1": "Alice", "s2": "alice "}
+    chat = _chat(("billing", "is", "disabled"))
+    remember_conversation(mem, "x", scope="s", chat=chat, source="s1", now=1.0, authenticate=issued.get)
+    r = remember_conversation(mem, "x", scope="s", chat=chat, source="s2", now=2.0, authenticate=issued.get)
+    assert r.promoted == []
+    assert mem.get(_fact_id("billing", "is", "s")).trust == Trust.CANDIDATE
+
+
 def test_nonstring_authenticator_returns_do_not_count_as_principals():
     # round-6 M1: an authenticator that returns a truthy NON-string (True, an object) must not inflate
     # the distinct-principal count — {True, "bob"} is one real principal, not two.

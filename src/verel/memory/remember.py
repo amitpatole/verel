@@ -45,10 +45,11 @@ Authenticator = Callable[[str], "str | None"]
 
 
 def _distinct_principals(provenance: list[str], authenticate: Authenticator) -> int:
-    # Count ONLY non-empty *string* ids. A buggy authenticator that returns a truthy non-string (True,
-    # an object) must not inflate the distinct-principal count — `{True, "bob"}` is one real principal,
-    # not two (round-6 M1). The authenticator's contract is "verified-credential → principal-id string".
-    ids = {pid for p in provenance
+    # Count ONLY non-empty *string* ids, deduped on the NORMALIZED (strip+casefold) id. A buggy
+    # authenticator returning a truthy non-string (True, an object) must not inflate the count
+    # (`{True,"bob"}` is one principal, round-6 M1); and one human under case/whitespace id variants
+    # ("Alice"/"alice "/"alice") is ONE principal, not N (round-7 M1 residual) — so dedup canonically.
+    ids = {pid.strip().casefold() for p in provenance
            if isinstance((pid := authenticate(p)), str) and pid.strip()}
     return len(ids)
 
@@ -101,8 +102,13 @@ def remember_conversation(mem: MemoryView, transcript: object, *, scope: str, ch
         rec = mem.write(fact, ts=now)
         if rec.trust == Trust.VERIFIED:
             continue  # already trusted — don't double-count
-        attested = (not was_rejected) and bool(attest and attest(rec))
-        independent = (not was_rejected and rec.trust != Trust.REJECTED and authenticate is not None
+        # A value that was EVER rejected for this key is not promotable, even after a supersede-then-
+        # restate laundering chain (round-7 C1): `write` carries a durable `rejected_values` set forward
+        # across supersessions, so a once-rejected value can't be re-minted as a fresh promotable CANDIDATE.
+        value_rejected = fact.text.strip().lower() in set(rec.detail.get("rejected_values", ()))
+        blocked = was_rejected or value_rejected
+        attested = (not blocked) and bool(attest and attest(rec))
+        independent = (not blocked and rec.trust != Trust.REJECTED and authenticate is not None
                        and _distinct_principals(rec.provenance, authenticate) >= max(2, min_sources))
         if attested or independent:
             res.promoted.append(mem.promote(rec.id) or rec)

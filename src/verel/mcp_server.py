@@ -683,7 +683,11 @@ def _tool_remember_conversation(args: dict) -> dict:
     if isinstance(transcript, list):
         if len(transcript) > 1000:
             return _err("transcript too long (max 1000 turns)")
-        if sum(len(str(t.get("content", ""))) for t in transcript if isinstance(t, dict)) > _MAX_TEXT:
+        # count what the extractor actually RENDERS — `role` AND `content` (round-7 F-R7-2: counting
+        # only `content` let a giant `role` string dodge the cap and reach the LLM as a ~50MB prompt)
+        rendered = sum(len(str(t.get("role", ""))) + len(str(t.get("content", "")))
+                       for t in transcript if isinstance(t, dict))
+        if rendered > _MAX_TEXT:
             return _err(f"transcript too long (max {_MAX_TEXT} chars of content)")
     elif len(transcript) > _MAX_TEXT:
         return _err(f"transcript too long (max {_MAX_TEXT} chars)")

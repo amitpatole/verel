@@ -169,7 +169,16 @@ class LocalMemory(MemoryView):
                       "ts": existing.created_ts, "superseded_at": ts}]
             record.support_count = 1
             record.retrieval_strength = 1.0
-            record.with_detail(corrections=chain, superseded=existing.text)
+            # Carry a DURABLE set of rejected VALUES forward across supersessions: a value that was
+            # graded REJECTED must not be launderable by supersede-then-restate (REJECTED → supersede
+            # with a throwaway value → restate the rejected value as a fresh CANDIDATE). The promotion
+            # gate consults this so a once-rejected value stays un-promotable (round-7 C1).
+            rejected = list(existing.detail.get("rejected_values", []))
+            if existing.trust == Trust.REJECTED:
+                rv = existing.text.strip().lower()
+                if rv not in rejected:
+                    rejected.append(rv)
+            record.with_detail(corrections=chain, superseded=existing.text, rejected_values=rejected)
         self._upsert(record)
         self._set_vector(record.id, self._embed_text(record))  # no-op without an embedder
         return record
