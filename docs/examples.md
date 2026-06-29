@@ -314,6 +314,12 @@ is a runnable, real-output script in [`examples/`](https://github.com/amitpatole
 - **[`demo_toolsmith.py`](https://github.com/amitpatole/verel/blob/main/examples/demo_toolsmith.py)**
   — the tool-smith lifecycle (scenario 5 up close): an agent scaffolds a tool, tests it against held-out
   cases, and registers it to procedural memory **only on a passing, attested eval**.
+- **[`demo_memory.py`](https://github.com/amitpatole/verel/blob/main/examples/demo_memory.py)**
+  — graded conversational memory (no key): extract facts → a fact stays `CANDIDATE` until attested or
+  corroborated by ≥2 authenticated sources → budgeted, graded-first, fenced recall.
+- **[`demo_token_savings.py`](https://github.com/amitpatole/verel/blob/main/examples/demo_token_savings.py)**
+  — the cost angle (no key): budgeted graded-first recall cuts a 40-fact brain ~80% (679→135 tokens/turn,
+  exact `tiktoken` counts), hallucinations excluded — you don't replay the whole brain into every prompt.
 - **[`demo_memory_loop.py`](https://github.com/amitpatole/verel/blob/main/examples/demo_memory_loop.py)**
   — the fleet stops repeating mistakes: a real fix is recorded, marked `fixed` on pass, and consolidated
   into a candidate semantic rule.

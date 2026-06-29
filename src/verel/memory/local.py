@@ -2,8 +2,8 @@
 
 Implements the full trust layer (§5): split epistemic_confidence vs retrieval_strength,
 the interference rule (subj_pred_key supersede), the documented ranking, power-law decay,
-and the exact prune rule. Recall is lexical (token overlap) — embeddings are the v2 upgrade
-behind the same interface; the design explicitly defers the weighted MMR assembler to v2.
+and the exact prune rule. Recall is FTS5 BM25 lexical search (v1.3.0) re-ranked by the
+trust-aware `rank`; pass an embedder for semantic (cosine) recall behind the same interface.
 
 mem0 is the rentable alternative behind the SAME `MemoryView` Protocol (see view.py); swap
 it in without touching the failure-ledger, consolidation, or the loop.

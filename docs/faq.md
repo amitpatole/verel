@@ -67,6 +67,16 @@ Only *extraction* from a raw conversation needs an LLM (the injected `chat`); yo
 [quickstart](memory-quickstart.md) offline with a fake one. Set `VEREL_EMBEDDER=openai` for
 semantic recall (e.g. *"UI overflow"* matching *"text clipped"*).
 
+### Does Verel reduce my token / LLM cost?
+
+Yes — that's a primary reason to use the memory. Instead of replaying the whole brain (or raw chat
+history) into every prompt, `recall_budgeted` returns only the highest-value memories that fit a
+**token budget**, graded-first. Measured (`examples/demo_token_savings.py`, exact `tiktoken` counts):
+a 40-fact brain drops from **679 → 135 tokens/turn (80% less)** at a 100-token budget — and a
+hallucinated candidate is *excluded*, so you don't pay tokens to mislead the model. Facts (not
+transcripts), supersede-not-append, and decay/prune compound the saving. Full breakdown:
+[Cost](comparison.md#cost-what-graded-budgeted-recall-saves).
+
 ### Which memory backend should I use?
 
 `local` (SQLite, zero-config) for one process; a shared **hosted** brain (`MemoryServer`/

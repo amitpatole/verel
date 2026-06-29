@@ -29,6 +29,8 @@ success with no evidence — can't mint green.
   trusted memory? → **yes.** Start: **[Memory in 5 minutes](memory-quickstart.md)**.
 - **Agents that render UIs but never look at them** (overflow, contrast, 404s, video stalls)? → **yes**,
   with [AgentVision](https://amitpatole.github.io/agent-vision/) as the eyes.
+- **Paying too much for context** because you replay the whole memory into every prompt? → **yes** —
+  budgeted, graded-first recall cuts a 40-fact brain ~**80%** (679→135 tok/turn). [Cost →](comparison.md#cost-what-graded-budgeted-recall-saves)
 - **Just want a memory layer for a single agent with a human curator?** → Verel works, but **Mem0** is
   simpler. Here's the honest [when-to-use comparison](comparison.md).
 

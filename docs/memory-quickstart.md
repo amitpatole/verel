@@ -71,6 +71,10 @@ python demo_memory.py     # offline, no API key
   prompt-injection defense).
 - **Corrections, not overwrites** — a changed value *supersedes* the old one with a queryable
   correction chain; a value that was ever **rejected** stays un-promotable.
+- **Lower token bill** — budgeted, graded-first recall means you stop replaying the whole brain into
+  every prompt. Measured: a 40-fact brain drops from **679 → 135 tokens/turn (80% less)** at a 100-token
+  budget, hallucinations excluded. See the [cost breakdown](comparison.md#cost-what-graded-budgeted-recall-saves)
+  and run `python examples/demo_token_savings.py`.
 
 ## Use your real LLM
 

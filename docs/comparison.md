@@ -11,6 +11,36 @@ truth. Verel **extracts-then-verifies**: a fact enters as `CANDIDATE` and only b
 it's **attested** (a signed receipt) or corroborated by **≥2 authenticated sources**. A one-off, a
 hallucination, or an attacker repeating a lie never silently becomes "what the agent knows."
 
+## Cost: what graded, budgeted recall saves
+
+The naive memory pattern — *"stuff every fact (or the whole chat history) into the prompt each turn"* —
+grows your input token bill linearly with how much the agent remembers. Verel's `recall_budgeted`
+returns only the highest-value memories that fit a **token budget**, **graded-first**, so you spend the
+budget on the facts that matter — not the first N rows, and not a hallucinated `CANDIDATE`.
+
+Measured by `examples/demo_token_savings.py` (offline, real `tiktoken cl100k_base` counts) — a 40-fact
+user brain, naive context = **679 tokens/turn**:
+
+| Per-turn budget | Tokens used | Saved | Cost over 1,000 turns @ $2.50/1M |
+|---|---|---|---|
+| naive (replay all) | 679 | — | $1.70 |
+| `token_budget=400` | 458 | **32%** | $1.70 → **$1.15** |
+| `token_budget=200` | 237 | **65%** | $1.70 → **$0.59** |
+| `token_budget=100` | 135 | **80%** | $1.70 → **$0.34** |
+
+At each budget the hallucinated candidate is **excluded** (`graded-first`, not truncation), so you also
+don't pay tokens to mislead the model. Four mechanisms compound the saving:
+
+- **Budgeted recall** (`recall_budgeted`) — a hard token cap, filled best-first; injectable exact
+  tokenizer (`token_count=tiktoken…`) so the budget is precise.
+- **Facts, not transcripts** — `extract_facts` stores compact SPO facts ("Dana prefers dark mode"), not
+  raw conversation turns.
+- **Supersede, not append** — a changed value replaces the old one (one fact per key), so recall never
+  pays for stale duplicates.
+- **Decay + prune** — unused memories fade and are pruned, so the budget isn't spent on junk.
+
+Run it: `python examples/demo_token_savings.py` (`pip install tiktoken` for exact counts).
+
 ## When to use which
 
 | Your situation | Best fit |
