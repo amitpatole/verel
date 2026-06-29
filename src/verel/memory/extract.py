@@ -86,7 +86,7 @@ _PII_TEXT = re.compile(r"[\w.+\-]+@[\w\-]+\.[\w.\-]+"          # email
 # looks encoded/high-entropy. This closes secret-evasion AND encoded-instruction storage in one move,
 # and removes the durable vector for "store now, decode-and-run later". Best-effort (see R-020): a short
 # or multi-layer blob can still slip — but memory will not retain a large opaque payload.
-_ZERO_WIDTH = re.compile(r"[​-‏‪-‮⁠-⁤﻿]")  # zero-width / bidi controls
+_ZERO_WIDTH = re.compile("[\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]")  # zero-width/bidi
 _ENCODED_RUN = re.compile(
     r"[A-Za-z0-9+/]{40,}={0,2}"          # base64 / base64url run (legit facts don't have 40-char blobs)
     r"|[A-Za-z0-9_-]{40,}"               # base64url (- _ alphabet)
@@ -161,7 +161,7 @@ def _decode_candidates(token: str) -> list[str]:
         runs.add(re.sub(r"[.\s]", "", r))
     for t in runs:
         body = t.rstrip("=")
-        if len(body) < 16:
+        if len(body) < 8:   # a short command (`rm -rf ~`) base64s to a tiny body — decode it too (round-8)
             continue
         for alt in (None, b"-_"):
             try:
@@ -185,10 +185,24 @@ def _decode_candidates(token: str) -> list[str]:
     return out
 
 
+# A decoded blob that IS a shell command is a decode-and-run payload even with no decode-keyword
+# (round-8: `rm -rf ~`, a fork bomb, `shutdown now` decoded cleanly but matched nothing). This scans
+# DECODED plaintext only (never raw fact text), so it can't false-positive on a natural-language fact —
+# a benign value that base64-decodes to an English shell-verb sentence is itself an opaque blob already.
+_SHELL_CMD = re.compile(
+    r"^\s*(?:sudo\s+|doas\s+)?(?:rm|kill(?:all)?|chmod|chown|dd|mkfs\w*|shutdown|halt|reboot|poweroff"
+    r"|curl|wget|nc|ncat|telnet|bash|sh|zsh|ksh|eval|exec|mv|cp|truncate|shred|history|crontab"
+    r"|systemctl|service|iptables|ufw|userdel|useradd|passwd|chpasswd|insmod|modprobe)\b"
+    r"|:\(\)\s*\{|>\s*[~/]|>>\s*[~/]|/dev/(?:sd|nvme|null|zero|random|urandom)|\bmkfs\b|\$\(|`[^`]+`",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
 def _text_unsafe(text: str) -> bool:
-    """A decoded string is unsafe if it reveals a credential/PII or a decode-and-run lure."""
+    """A decoded string is unsafe if it reveals a credential/PII, a decode-and-run lure, or IS a shell
+    command (round-8: a bare destructive one-liner matches no secret/lure pattern but is still a payload)."""
     return bool(_SECRET_TEXT.search(text) or _SECRET_TEXT_I.search(text)
-                or _PII_TEXT.search(text) or _DECODE_EXEC.search(text))
+                or _PII_TEXT.search(text) or _DECODE_EXEC.search(text) or _SHELL_CMD.search(text))
 
 
 def _decoded_unsafe(token: str, depth: int = 2) -> bool:

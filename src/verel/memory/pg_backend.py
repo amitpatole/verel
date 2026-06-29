@@ -503,8 +503,9 @@ class PostgresMemory(MemoryView):
                 f"DELETE FROM memory WHERE NOT {_PINNED} AND ("  # nosec B608 — const exprs/thresholds; scalars bound
                 f"  ({_TTL} IS NOT NULL AND %s > 0 AND (%s - created_ts) > {_TTL}) "
                 f"  OR ({_VOLATILE} AND %s > 0 AND (%s - created_ts) > %s) "
+                # REJECTED is a durable tombstone (rejected_values), prune-exempt like verified (round-8)
                 f"  OR (retrieval_strength < {PRUNE_RS} AND epistemic_confidence < {PRUNE_EC} "
-                f"      AND support_count < {PRUNE_SUPPORT} AND trust <> 'verified'))",
+                f"      AND support_count < {PRUNE_SUPPORT} AND trust NOT IN ('verified','rejected')))",
                 (now, now, now, now, volatile_ttl_s))
             return cur.rowcount
 

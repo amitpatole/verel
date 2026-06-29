@@ -6,7 +6,7 @@ or attested one promotes to VERIFIED; a changed value supersedes the stale one."
 import json
 
 from verel.memory import LocalMemory, remember_conversation
-from verel.memory.view import MemoryKind, Trust, make_id, make_key
+from verel.memory.view import MemoryKind, MemoryRecord, Trust, make_id, make_key, should_prune
 
 
 def _chat(*facts):
@@ -142,6 +142,20 @@ def test_rejected_resurrection_via_value_change_is_blocked():
                                 source="B", now=2.0, attest=lambda _r: True)
     assert res.promoted == []
     assert mem.get(rid).trust != Trust.VERIFIED
+
+
+def test_rejected_record_is_prune_exempt_tombstone():
+    # round-8: prune must NOT evict a REJECTED record — it carries the rejected_values ledger that keeps
+    # a rejected value un-promotable; deleting it would reopen the launder. So REJECTED is exempt like
+    # VERIFIED even at rock-bottom strength/confidence/support.
+    rejected = MemoryRecord(kind=MemoryKind.FACT, subject="u", predicate="role", text="admin",
+                            trust=Trust.REJECTED, retrieval_strength=0.0,
+                            epistemic_confidence=0.0, support_count=1)
+    assert should_prune(rejected) is False
+    candidate = MemoryRecord(kind=MemoryKind.FACT, subject="u", predicate="role", text="admin",
+                             trust=Trust.CANDIDATE, retrieval_strength=0.0,
+                             epistemic_confidence=0.0, support_count=1)
+    assert should_prune(candidate) is True   # a cold candidate is still prunable
 
 
 def test_rejected_value_is_not_launderable_by_supersede_then_restate():

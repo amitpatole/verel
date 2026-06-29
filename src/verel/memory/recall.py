@@ -23,10 +23,14 @@ TokenCount = Callable[[str], int]
 # A stored fact is untrusted text (it came from a conversation). When rendered into a prompt it must be
 # unmistakable DATA, never instructions — so collapse newlines/control chars (a fact can't forge block
 # structure or a fake "## SYSTEM:" line) and fence the block (round-5 F7, second-order prompt injection).
-_CTRL = re.compile(r"[\x00-\x1f\x7f]+")
+# Collapse EVERY line-break / control a downstream tokenizer or `splitlines()` honors, not just C0 —
+# else a fact forges a `### system:` line with U+2028/U+2029/NEL (round-8 R8-1). Covers C0+DEL, the
+# whole C1 block (incl. U+0085 NEL), the Unicode line/paragraph separators, and U+180E.
+_CTRL = re.compile("[\x00-\x1f\x7f-\x9f\u180e\u2028\u2029]+")
 # zero-width / bidi controls: invisible to a human reviewer but read by the agent/LLM — they can hide an
-# instruction inside a "benign" recalled line or reorder it (round-6 encoding class). Strip, don't render.
-_ZERO_WIDTH = re.compile(r"[​-‏‪-‮⁠-⁤﻿]")
+# instruction inside a "benign" recalled line or reorder it (round-6/8). Includes the bidi-isolate block
+# U+2066–U+2069 (round-8 R8-1 closed the gap above U+2064). Strip, don't render.
+_ZERO_WIDTH = re.compile("[\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]")
 # Angle brackets in CONTENT are defanged to look-alikes so a stored fact can't emit the literal
 # `</recalled_memory>` (or a forged `<recalled_memory>`) to break out of / spoof the DATA fence —
 # the round-6 fence-escape. We NFKC-normalize FIRST so the fullwidth/small angle look-alikes

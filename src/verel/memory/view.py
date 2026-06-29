@@ -151,11 +151,15 @@ def rank(record: MemoryRecord, relevance: float) -> float:
 def should_prune(r: MemoryRecord) -> bool:
     if is_pinned(r):
         return False  # pinned memories are never pruned (they ignore decay entirely)
+    # A REJECTED record is a durable TOMBSTONE, not dead weight: it carries the `rejected_values`
+    # ledger the promotion gate consults so a rejected value can't be re-laundered to VERIFIED. Pruning
+    # it would erase that history and reopen the launder (round-8). So REJECTED is prune-exempt like
+    # VERIFIED — both are decisions we must remember, not transient candidates.
     return (
         r.retrieval_strength < PRUNE_RS
         and r.epistemic_confidence < PRUNE_EC
         and r.support_count < PRUNE_SUPPORT
-        and r.trust != Trust.VERIFIED
+        and r.trust not in (Trust.VERIFIED, Trust.REJECTED)
     )
 
 

