@@ -31,13 +31,18 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add brand/og-*.png
-          if git diff --cached --quiet; then
-            echo "no OG image changes"
-          else
-            # main is a protected branch (PR + checks required), so the bot can't push to it.
-            # Publish the generated assets to an unprotected og-assets branch instead; the
-            # Space og:image references that branch via raw.githubusercontent.
-            git commit -m "Render OG card images [skip ci]"
-            git push --force origin HEAD:og-assets
+          # Skip if the rendered image is byte-identical to what's already published.
+          git fetch --depth=1 origin og-assets 2>/dev/null || true
+          git show origin/og-assets:brand/og-verel.png > /tmp/pub-og.png 2>/dev/null || true
+          if [ -s /tmp/pub-og.png ] && cmp -s /tmp/pub-og.png brand/og-verel.png; then
+            echo "no OG image changes"; exit 0
           fi
+          # main is a protected branch (the bot can't push to it). Publish to an unprotected og-assets
+          # branch — but ONLY the rendered images, via a CLEAN ORPHAN branch (never a snapshot of the
+          # whole repo tree): keeps the public branch a single PNG and means no tracked file can ever
+          # leak onto it. The Space og:image references it via raw.githubusercontent.
+          git checkout --orphan og-assets-pub
+          git rm -r --cached . >/dev/null 2>&1 || true
+          git add -f brand/og-*.png
+          git commit -m "Render OG card images [skip ci]"
+          git push --force origin og-assets-pub:og-assets
