@@ -18,7 +18,19 @@ verel heal --repo .          # self-healing CI: failing tests → agent fixes �
 
 One **verdict bus** unifies vision + tests + lint + types into a single `pass / warn / fail`,
 so *progress*, *"done"*, and *what compounds* are all decided in one place — with grader
-attestation so a hollow check can't mint green.
+attestation (a signed receipt of what actually ran) so a *hollow check* — a grader that claims
+success with no evidence — can't mint green.
+
+## Is Verel for you?
+
+- **Agents that write code**, and you need a grader that re-runs the *real* tests so the agent can't
+  fake "done"? → **yes.** Start: **[5-minute tutorial](tutorial.md)**.
+- **A fleet of agents sharing one brain**, where a hallucination (or one bad actor) must not become
+  trusted memory? → **yes.** Start: **[Memory in 5 minutes](memory-quickstart.md)**.
+- **Agents that render UIs but never look at them** (overflow, contrast, 404s, video stalls)? → **yes**,
+  with [AgentVision](https://amitpatole.github.io/agent-vision/) as the eyes.
+- **Just want a memory layer for a single agent with a human curator?** → Verel works, but **Mem0** is
+  simpler. Here's the honest [when-to-use comparison](comparison.md).
 
 ## The six organs
 
@@ -44,6 +56,9 @@ into memory; then the eyes look again.
 
 ## Next
 
+- **[Memory in 5 minutes](memory-quickstart.md)** — extract → grade → recall, offline, no key. The
+  fastest standalone win if you came for the memory.
+- **[Verel vs Mem0 / Engram / Zep](comparison.md)** — honest when-to-use, and a "coming from Mem0" mapping.
 - **[Try it yourself](try-it.md)** — a from-scratch, copy-paste walkthrough (no API key): catch a
   real bug, fix it, watch Verel remember it so it can't come back.
 - **[Get started](getting-started.md)** — install, the gate, CI/agents adoption.

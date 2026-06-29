@@ -110,7 +110,7 @@ from verel.ci import inner_loop_stage, run_stage
 from verel.memory import FailureLedger, LocalMemory
 
 mem = LocalMemory("brain.db")          # a real on-disk brain (swap for an external DB — see below)
-ledger = FailureLedger(mem, scope="repo:taxes")
+ledger = FailureLedger(mem, scope="repo:taxes")   # scope = "where does this live?"; recall picks the most specific match (self → team → org → global)
 
 # Re-break the code to capture a REAL failing verdict from the grader:
 good = pathlib.Path("taxes.py").read_text()

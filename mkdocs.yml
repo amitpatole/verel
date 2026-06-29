@@ -59,6 +59,8 @@ plugins:
 
 nav:
   - Home: index.md
+  - Memory in 5 minutes: memory-quickstart.md
+  - Verel vs Mem0 / Engram / Zep: comparison.md
   - Get started: getting-started.md
   - Try it yourself: try-it.md
   - 5-minute tutorial: tutorial.md
@@ -67,6 +69,7 @@ nav:
   - Real-world scenarios: examples.md
   - Adoption: adoption.md
   - Guides:
+      - Recipes: recipes.md
       - Developer guide: usage.md
       - Architecture: ARCHITECTURE.md
       - Integrations: integrations.md
