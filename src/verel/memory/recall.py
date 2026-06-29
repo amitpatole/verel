@@ -14,7 +14,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from .view import MemoryKind, MemoryRecord, MemoryView, canonical_text, rank, relevance
+from .view import MemoryKind, MemoryRecord, MemoryView, canonical_text
 
 TokenCount = Callable[[str], int]
 
@@ -74,8 +74,11 @@ def recall_budgeted(mem: MemoryView, query: str, *, token_budget: int, scope: st
     least the single highest-ranked memory, so recall is never empty when a relevant memory exists
     (a one-line fact is worth more than an empty context, even under a sub-fact budget)."""
     tc = token_count or _est_tokens
-    pool = mem.recall(query, scope=scope, kind=kind, k=k, ts=now)
-    ranked = sorted(pool, key=lambda r: rank(r, relevance(query, r)), reverse=True)
+    # `mem.recall` already returns top-k in trust-aware `rank` order using the backend's OWN relevance
+    # signal (BM25 for the FTS5 default, cosine for an embedder, token-overlap otherwise). Respect that
+    # order instead of re-scoring with a naive token-overlap relevance here (v1.3.0) — re-scoring would
+    # diverge from BM25 and silently reorder the budgeted output.
+    ranked = mem.recall(query, scope=scope, kind=kind, k=k, ts=now)
     chosen: list[MemoryRecord] = []
     used = dropped = 0
     for r in ranked:

@@ -11,6 +11,7 @@ it in without touching the failure-ledger, consolidation, or the loop.
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from pathlib import Path
 
@@ -35,6 +36,26 @@ _COLS = (
     "id, kind, subject, predicate, text, scope, subj_pred_key, source, provenance, trust, "
     "epistemic_confidence, retrieval_strength, support_count, created_ts, last_recall_ts, detail_json"
 )
+# `_COLS` qualified to the `m` alias, for the FTS5 JOIN recall query.
+_MCOLS = ", ".join(f"m.{c.strip()}" for c in _COLS.split(","))
+_FTS_WORD = re.compile(r"\w+", re.UNICODE)
+_FTS_MAX_TERMS = 32     # cap term count + length so a huge/hostile query can't blow up the matcher
+_FTS_MAX_TERMLEN = 64
+# Clamp caller-supplied k (mirrors pg_backend): a large k drove BOTH the SQL fetch size AND the number
+# of reinforcement writes, so an in-process caller could turn one recall into thousands of fsync'd
+# writes (v1.3.0 security cadence). Reinforcement is now batched into ONE transaction regardless.
+_MAX_RECALL_K = 1000
+_RECALL_SCAN_CAP = 5000
+
+
+def _fts_match(query: str) -> str:
+    """Sanitize an UNTRUSTED query into a SAFE FTS5 expression. The query is decomposed into word
+    tokens (`\\w+` — no quotes/operators survive), each wrapped as a quoted FTS5 string and OR-joined
+    for recall. This neutralizes the whole FTS5 query grammar (phrases, `*`, `NEAR`, `col:`, `AND/OR/
+    NOT`, parens) so an attacker-controlled query can't inject operators, error the matcher, or scan
+    unintended columns. Returns "" when there is nothing to match (caller returns no candidates)."""
+    terms = [t[:_FTS_MAX_TERMLEN] for t in _FTS_WORD.findall(query.lower())[:_FTS_MAX_TERMS]]
+    return " OR ".join(f'"{t}"' for t in terms)
 
 # Bound per-record detail growth so repeated supersessions can't inflate one record's detail_json to
 # megabytes (round-11 Finding B): keep the most recent N corrections and a bounded rejected-value ledger.
@@ -71,6 +92,26 @@ class LocalMemory(MemoryView):
         cols = {r[1] for r in self._db.execute("PRAGMA table_info(memory)")}
         if "vector" not in cols:
             self._db.execute("ALTER TABLE memory ADD COLUMN vector TEXT DEFAULT ''")
+        # FTS5 lexical index (v1.3.0): BM25 retrieval over subject+predicate+text, kept in sync on every
+        # write/delete. Replaces the naive token-overlap signal with real term-weighted ranking + SQL-side
+        # candidate filtering. Falls back to token-overlap if this sqlite build lacks FTS5 (portability).
+        try:
+            self._db.execute("CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts "
+                             "USING fts5(id UNINDEXED, content, tokenize='unicode61')")
+            self._fts = True
+            # (Re)build the index whenever it is out of sync with the memory table — covers a fresh
+            # backfill for a pre-existing db AND reconciles a PARTIAL/stale index (e.g. from legacy
+            # surgery), so orphaned memory rows can never stay invisible to FTS recall. In normal
+            # operation the counts always match (sync on every write), so this is a no-op.
+            n_mem = self._db.execute("SELECT count(*) FROM memory").fetchone()[0]
+            n_fts = self._db.execute("SELECT count(*) FROM memory_fts").fetchone()[0]
+            if n_mem != n_fts:
+                self._db.execute("DELETE FROM memory_fts")
+                for rid, s, p, t in self._db.execute("SELECT id, subject, predicate, text FROM memory"):
+                    self._db.execute("INSERT INTO memory_fts (id, content) VALUES (?, ?)",
+                                     (rid, f"{s} {p} {t}"))
+        except sqlite3.OperationalError:
+            self._fts = False   # no FTS5 in this sqlite build → token-overlap fallback
         self._db.commit()
 
     @classmethod
@@ -133,6 +174,10 @@ class LocalMemory(MemoryView):
                 vector,
             ),
         )
+        if self._fts:   # keep the lexical index in sync at the single write chokepoint
+            self._db.execute("DELETE FROM memory_fts WHERE id = ?", (r.id,))
+            self._db.execute("INSERT INTO memory_fts (id, content) VALUES (?, ?)",
+                             (r.id, f"{r.subject} {r.predicate} {r.text}"))
         self._db.commit()
 
     # ---- MemoryView API ----
@@ -209,32 +254,63 @@ class LocalMemory(MemoryView):
         return self._row_to_record(row) if row else None
 
     def recall(self, query: str, *, scope=None, kind=None, k: int = 5, ts: float = 0.0):
-        rows = self._db.execute(f"SELECT {_COLS} FROM memory").fetchall()  # nosec B608 — _COLS is a constant column list (no user input in SQL)
-        cands = [self._row_to_record(r) for r in rows]
-        if scope is not None:
-            cands = [c for c in cands if c.scope == scope or c.scope == "global"]
-        if kind is not None:
-            cands = [c for c in cands if c.kind == kind]
-        cands = [c for c in cands if c.trust != Trust.REJECTED]
-
-        # Relevance signal: semantic cosine when an embedder is configured, else lexical.
-        if self.embedder is not None and cands:
-            from .embed import cosine
-
-            qv = self.embedder.embed([query])[0]
-            rel = {c.id: cosine(qv, self._get_vector(c.id) or []) for c in cands}
+        k = max(1, min(int(k), _MAX_RECALL_K))   # clamp: bound fetch size AND reinforcement writes
+        # DEFAULT path (v1.3.0): FTS5 BM25 lexical retrieval — SQL-side scope/kind/rejected filtering
+        # plus term-weighted relevance, over-fetched and then re-ranked by the trust-aware `rank` so a
+        # VERIFIED fact still surfaces above an equally-relevant CANDIDATE.
+        if self.embedder is None and self._fts:
+            match = _fts_match(query)
+            if not match:
+                return []
+            sql = (f"SELECT {_MCOLS}, bm25(memory_fts) AS bm25_score "  # nosec B608 — _MCOLS const; query is param-bound
+                   "FROM memory m JOIN memory_fts f ON m.id = f.id "
+                   "WHERE memory_fts MATCH ? AND m.trust != 'rejected'")
+            params: list = [match]
+            if scope is not None:
+                sql += " AND (m.scope = ? OR m.scope = 'global')"
+                params.append(scope)
+            if kind is not None:
+                sql += " AND m.kind = ?"
+                params.append(kind.value)
+            sql += " ORDER BY bm25_score LIMIT ?"
+            params.append(min(max(k * 4, 60), _RECALL_SCAN_CAP))   # over-fetch for re-rank, capped
+            rows = self._db.execute(sql, params).fetchall()
+            if not rows:
+                return []
+            cands = [self._row_to_record(r) for r in rows]
+            worst = min(r["bm25_score"] for r in rows)   # most-negative bm25 = best match
+            rel = {c.id: (rows[i]["bm25_score"] / worst if worst else 1.0)
+                   for i, c in enumerate(cands)}         # normalize to 0..1 (best == 1.0)
             relevance_of = lambda c: rel.get(c.id, 0.0)  # noqa: E731
-            threshold = 0.0
         else:
-            relevance_of = lambda c: _relevance(query, c)  # noqa: E731
-            threshold = 0.0
+            # full-scan + cosine (embedder) or token-overlap (no FTS5 in this sqlite build) — pre-1.3.0
+            rows = self._db.execute(f"SELECT {_COLS} FROM memory").fetchall()  # nosec B608 — const cols
+            cands = [self._row_to_record(r) for r in rows]
+            if scope is not None:
+                cands = [c for c in cands if c.scope == scope or c.scope == "global"]
+            if kind is not None:
+                cands = [c for c in cands if c.kind == kind]
+            cands = [c for c in cands if c.trust != Trust.REJECTED]
+            if self.embedder is not None and cands:
+                from .embed import cosine
+                qv = self.embedder.embed([query])[0]
+                rel = {c.id: cosine(qv, self._get_vector(c.id) or []) for c in cands}
+                relevance_of = lambda c: rel.get(c.id, 0.0)  # noqa: E731
+            else:
+                relevance_of = lambda c: _relevance(query, c)  # noqa: E731
         scored = sorted(cands, key=lambda c: rank(c, relevance_of(c)), reverse=True)
-        top = [c for c in scored if relevance_of(c) > threshold][:k]
-        # recall reinforces retrieval_strength ONLY (testing effect) — never confidence.
+        top = [c for c in scored if relevance_of(c) > 0.0][:k]
+        # recall reinforces retrieval_strength ONLY (testing effect) — never confidence. Batched into a
+        # SINGLE transaction with a targeted UPDATE (not a full _upsert per record): the searchable
+        # content is unchanged on reinforcement, so the FTS index needs no churn, and one recall costs
+        # one commit instead of k fsync'd writes (v1.3.0 security cadence — the k-amplification fix).
         for c in top:
             c.retrieval_strength = min(1.0, c.retrieval_strength + 0.3)
             c.last_recall_ts = ts or c.last_recall_ts
-            self._upsert(c)
+            self._db.execute("UPDATE memory SET retrieval_strength=?, last_recall_ts=? WHERE id=?",
+                             (c.retrieval_strength, c.last_recall_ts, c.id))
+        if top:
+            self._db.commit()
         return top
 
     def _adjust(self, record_id: str, *, ec: float = 0.0, support: int = 0,
@@ -317,6 +393,8 @@ class LocalMemory(MemoryView):
             if apply_decay(r, now=now, half_life_s=half_life_s,
                            stale_after_s=stale_after_s, volatile_ttl_s=volatile_ttl_s):
                 self._db.execute("DELETE FROM memory WHERE id=?", (r.id,))
+                if self._fts:
+                    self._db.execute("DELETE FROM memory_fts WHERE id=?", (r.id,))
                 pruned += 1
             else:
                 self._upsert(r)

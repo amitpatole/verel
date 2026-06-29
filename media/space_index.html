@@ -168,7 +168,7 @@
 </div></section>
 
 <section id="scenarios"><div class="wrap">
-  <div class="sech"><div class="k">In the wild</div><h2>Six real-world scenarios</h2>
+  <div class="sech"><div class="k">In the wild</div><h2>Seven real-world scenarios</h2>
     <p>Situations a team actually hits — each a runnable script in <code>examples/</code>. The output
        below is <b>real, not mocked</b>: an agent never decides “done”, a grader does.</p></div>
   <div class="scns">
@@ -223,6 +223,15 @@ socket() under the capability jail:
 quorum read, leader DOWN → still returns
   'restart the worker pool' (freshest)</pre>
       <span class="run">$ python examples/demo_shared_brain.py</span>
+    </div>
+    <div class="scn">
+      <div class="top"><span class="num">07</span><h3>Memory that can’t remember wrong</h3></div>
+      <p>Extract facts from a conversation like Mem0/Engram — but a fact only compounds after it’s <b>graded</b>: it stays <code>CANDIDATE</code> until <b>attested</b> or corroborated by <b>≥2 authenticated principals</b>, so a one-off (or an attacker repeating a lie) is never trusted. Recall is <b>token-budgeted, graded-first</b>, and fenced as untrusted data.</p>
+      <pre>single say-so → trust=<b>CANDIDATE</b> (not trusted)
+2 authenticated principals → trust=<b>VERIFIED</b>
+attacker repeating it N× → stays <b>CANDIDATE</b>
+recall budget=12 → used=8, dropped=2 (fenced)</pre>
+      <span class="run">$ python examples/demo_memory.py</span>
     </div>
   </div>
 </div></section>

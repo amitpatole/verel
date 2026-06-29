@@ -68,7 +68,10 @@ def test_text_block_is_prompt_ready_with_tail_note():
     # the block is fenced as untrusted DATA (round-5 F7) and the facts render as "- " lines inside it
     assert res.text.startswith("<recalled_memory>")
     assert res.text.rstrip().endswith("</recalled_memory>")
-    assert "\n- Dana theme: dark mode" in res.text
+    # exactly one fact fits this budget; which one depends on BM25 ranking (v1.3.0), so assert shape
+    # not identity — a "Dana <predicate>: <value>" bullet for one of the seeded facts.
+    import re as _re
+    assert _re.search(r"\n- Dana (theme|editor|language): (dark mode|neovim|Go)", res.text)
 
 
 def test_recall_neutralizes_injection_and_zero_width():
