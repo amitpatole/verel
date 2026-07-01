@@ -26,7 +26,7 @@ verel doctor                  # sanity-check your environment
 `verel doctor` ends with the memory backend it will use:
 
 ```text
-verel 1.3.0
+verel 1.3.1
   ...
   -> memory backend: local  (available: lancedb, local, postgres, redis, remote)
 ```

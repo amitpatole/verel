@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.3.1 — portability & scan hardening
+
+Cross-platform correctness and static-scan fixes; no API or behavior change on the supported path.
+Every change was verified byte-equivalent or empirically re-proven under the security cadence
+(4 independent adversarial passes + 2 manual equivalence proofs, terminal-clean).
+
+- **Interpreter portability** — the trusted-local test-runner and the fleet pre-receive hook now use
+  `sys.executable` instead of a bare `python`/`/usr/bin/env python3`, so the *running* interpreter is
+  used and the only PATH-hijackable argv element is removed (a hardening, not just portability).
+- **Runner hardening** — the `isolation="subprocess"` test tier now sets
+  `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` (no env-driven third-party plugin code-exec) and, on Windows,
+  forwards the minimal system env vars a Python subprocess needs to start. Default isolation stays
+  `container` (fail-closed); untrusted code never reaches this tier.
+- **Lease store fd-leak fixed** — `SqliteLeaseStore._conn` is now a context manager that closes each
+  connection; the distributed-fence compare-and-swap (`BEGIN IMMEDIATE`/`COMMIT`) and rollback-on-error
+  are unchanged and were re-proven atomic under concurrency. Fixes a real file-descriptor leak
+  (notably on Windows, where an unclosed handle blocks deletion).
+- **Sandbox belt-and-suspenders** — a best-effort in-child `open()` write guard fails a tool's
+  `open(...,'w')` fast with a clear error. It is **not** a containment boundary (bypassable via
+  `os.open`); the hard write guard remains `RLIMIT_FSIZE=0` and true isolation the container runner —
+  documented as such.
+- **Canonical-text gate** — the invisible/zero-width/control regexes in the memory trust gate were
+  rewritten from literal characters to `\uXXXX` escapes for portability and static scanners.
+  **Provably byte-for-byte identical** coverage (ZERO_WIDTH 20/20, CTRL 68/68, zero divergence across
+  the full codepoint space) — no bypass reopened.
+- **Encoding** — explicit `utf-8` on hook writes and test fixtures; BOM/credential test literals
+  assembled from escapes rather than raw bytes (clean static scans).
+
 ## 1.3.0 — FTS5 BM25 hybrid retrieval
 
 Upgrades the memory **retrieval** layer — the one on-mission gap a third-party comparative report

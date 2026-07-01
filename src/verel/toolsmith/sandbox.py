@@ -44,11 +44,15 @@ _CHILD = textwrap.dedent(
     except Exception:
         pass
 
+    # Best-effort convenience layer: fail a tool's open(...,'w') fast with a clear error instead of
+    # a late SIGXFSZ. This is NOT a containment boundary — it is bypassable (os.open, or reaching the
+    # original via __globals__). The HARD write guard is RLIMIT_FSIZE=0 above (a real write past 0
+    # bytes gets SIGXFSZ regardless of which open is used); true isolation is the container runner.
     import builtins, io
     _open = builtins.open
     def _read_only_open(file, mode="r", *args, **kwargs):
         if any(flag in mode for flag in ("w", "a", "x", "+")):
-            raise PermissionError("sandbox blocks file writes")
+            raise PermissionError("sandbox: file writes disabled (best-effort; RLIMIT_FSIZE is the guard)")
         return _open(file, mode, *args, **kwargs)
     builtins.open = _read_only_open
     io.open = _read_only_open
