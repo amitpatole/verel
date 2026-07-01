@@ -16,3 +16,11 @@ tools/country_cache.json
 # Security residuals — LOCAL ONLY, never published (per directive 2026-06-28)
 docs/SECURITY_RESIDUALS.md
 .security-local/
+
+# Internal design + critic-round notes — LOCAL ONLY, scrubbed from public history (2026-07-01)
+# preserved privately at ~/WORKSPACE/verel-private-docs/design-notes/
+docs/VEREL_DESIGN.md
+docs/SUBSTRATE_DESIGN.md
+docs/VERIFIED_REVIEW_DESIGN.md
+docs/K8S_DEPLOYMENT_DESIGN.md
+docs/CRITIC_CONVERGENCE.md
