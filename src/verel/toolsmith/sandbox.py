@@ -44,6 +44,15 @@ _CHILD = textwrap.dedent(
     except Exception:
         pass
 
+    import builtins, io
+    _open = builtins.open
+    def _read_only_open(file, mode="r", *args, **kwargs):
+        if any(flag in mode for flag in ("w", "a", "x", "+")):
+            raise PermissionError("sandbox blocks file writes")
+        return _open(file, mode, *args, **kwargs)
+    builtins.open = _read_only_open
+    io.open = _read_only_open
+
     req = json.loads(sys.stdin.read())
     ns = {{}}
     exec(compile(req["code"], "<sandboxed-tool>", "exec"), ns)

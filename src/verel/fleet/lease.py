@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import sqlite3
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -119,10 +121,14 @@ class SqliteLeaseStore:
                 key TEXT PRIMARY KEY, owner TEXT, token INTEGER, expires_at REAL,
                 max_token INTEGER NOT NULL DEFAULT 0, outcome TEXT)""")
 
-    def _conn(self) -> sqlite3.Connection:
+    @contextmanager
+    def _conn(self) -> Iterator[sqlite3.Connection]:
         c = sqlite3.connect(self.path, timeout=30, isolation_level=None)
-        c.execute("PRAGMA busy_timeout=30000")
-        return c
+        try:
+            c.execute("PRAGMA busy_timeout=30000")
+            yield c
+        finally:
+            c.close()
 
     def acquire(self, key: str, owner: str, *, now: float, ttl: float) -> Lease | None:
         with self._conn() as c:

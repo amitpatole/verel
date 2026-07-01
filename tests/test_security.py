@@ -7,6 +7,9 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import os
+
+import pytest
 
 from verel._secrets import load_secret
 from verel.registry.store import PublicRegistry
@@ -147,6 +150,7 @@ def test_eval_tool_cases_default_is_isolated_not_in_process():
     assert os.environ.get("VEREL_PWNED") is None                   # host env untouched → ran isolated
 
 
+@pytest.mark.skipif(os.name != "posix", reason="POSIX owner/mode bits are required for this check")
 def test_secret_rejects_insecure_planted_key(monkeypatch, tmp_path):
     """A pre-existing key file that is group/other-accessible (a planted key) must be refused so an
     attacker-known key can't be loaded to forge signatures — fall back to ephemeral (round-3 M)."""

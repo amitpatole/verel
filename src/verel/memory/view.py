@@ -130,8 +130,8 @@ def make_id(subj_pred_key: str) -> str:
 # that diverged — NFKC, then whitespace, then the zero-width/bidi/control set). Deriving both from this
 # single function ends the divergence class permanently. Order matters: NFKC first, then drop every
 # invisible (zero-width/bidi/object-replacement), then collapse controls+whitespace, then defang angles.
-_ZERO_WIDTH = re.compile("[​-‏‪-‮⁠-⁤⁦-⁩﻿]")
-_CTRL = re.compile("[\x00-\x1f\x7f-\x9f᠎  ]+")
+_ZERO_WIDTH = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]")
+_CTRL = re.compile(r"[\x00-\x1f\x7f-\x9f\u180e\u2028\u2029]+")
 _WS_RUN = re.compile(r"\s+")
 _REMOVE_OBJ = {ord("￼"): None, ord("�"): None}
 _ANGLES = str.maketrans({"<": "‹", ">": "›"})

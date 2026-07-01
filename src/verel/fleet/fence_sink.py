@@ -14,6 +14,7 @@ it on a bare remote. Tested both as a pure function and end-to-end against a rea
 from __future__ import annotations
 
 import stat
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -81,9 +82,10 @@ sys.exit(1)
 '''
 
 
-def render_pre_receive_hook(db_path: str | Path, *, python: str = "/usr/bin/env python3") -> str:
+def render_pre_receive_hook(db_path: str | Path, *, python: str | None = None) -> str:
     """The pre-receive hook script that fences pushes against the sqlite lease store at `db_path`."""
-    return _HOOK.replace("__PY__", str(python)).replace("__DB__", str(Path(db_path).resolve()))
+    py = str(python or sys.executable).replace("\\", "/")
+    return _HOOK.replace("__PY__", py).replace("__DB__", str(Path(db_path).resolve()))
 
 
 def enable_push_options(repo_git_dir: str | Path) -> None:
@@ -95,13 +97,13 @@ def enable_push_options(repo_git_dir: str | Path) -> None:
 
 
 def write_pre_receive_hook(repo_git_dir: str | Path, db_path: str | Path,
-                           *, python: str = "/usr/bin/env python3") -> Path:
+                           *, python: str | None = None) -> Path:
     """Install the hook into `<repo_git_dir>/hooks/pre-receive` (the bare-remote hooks dir), make
     it executable, and enable push options on the remote. Returns the hook path."""
     hooks = Path(repo_git_dir) / "hooks"
     hooks.mkdir(parents=True, exist_ok=True)
     hook = hooks / "pre-receive"
-    hook.write_text(render_pre_receive_hook(db_path, python=python))
+    hook.write_text(render_pre_receive_hook(db_path, python=python), encoding="utf-8")
     hook.chmod(hook.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     enable_push_options(repo_git_dir)
     return hook

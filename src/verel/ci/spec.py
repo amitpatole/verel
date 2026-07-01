@@ -26,6 +26,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -314,12 +315,17 @@ def run_check(repo: str, test_source: str, *, timeout: int = 30, allowed_modules
             return "error"  # FAIL CLOSED — never execute untrusted generated code without isolation
         # isolation="subprocess": TRUSTED-LOCAL opt-out only. Minimal env + rlimits, NO net isolation.
         env = {"PATH": os.environ.get("PATH", ""), "PYTHONPATH": os.path.realpath(repo),
-               "PYTHONDONTWRITEBYTECODE": "1", "HOME": d, "TMPDIR": d}
+               "PYTHONDONTWRITEBYTECODE": "1", "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+               "HOME": d, "TMPDIR": d}
+        if os.name == "nt":
+            for k in ("SystemRoot", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP"):
+                if k in os.environ:
+                    env[k] = os.environ[k]
         preexec = _rlimit_preexec(cpu_s=max(2, timeout), mem_bytes=768 * 1024 * 1024) \
             if os.name == "posix" else None
         try:
             r = subprocess.run(  # nosec B603 — fixed argv, no shell; trusted-local opt-out tier only
-                ["python", "-B", "-m", "pytest", tf, "-q", "-p", "no:cacheprovider"],
+                [sys.executable, "-B", "-m", "pytest", tf, "-q", "-p", "no:cacheprovider"],
                 cwd=repo, capture_output=True, text=True, timeout=timeout, env=env,
                 preexec_fn=preexec, start_new_session=True)
         except subprocess.TimeoutExpired:

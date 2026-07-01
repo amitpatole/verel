@@ -31,7 +31,9 @@ def test_resolve_aws_from_rootkey_csv(tmp_path):
     awsd = tmp_path / "AWS"
     awsd.mkdir()
     # utf-8-sig BOM + the real column headers from `rootkey.csv`
-    (awsd / "rootkey.csv").write_text(f"﻿Access key ID,Secret access key\n{_AKID},{_ASEC}\n")
+    (awsd / "rootkey.csv").write_text(
+        f"\ufeffAccess key ID,Secret access key\n{_AKID},{_ASEC}\n", encoding="utf-8"
+    )
     cc = resolve_aws(config_home=tmp_path)
     assert cc.available and cc.cloud == "aws"
     assert cc.env["AWS_ACCESS_KEY_ID"] == _AKID
