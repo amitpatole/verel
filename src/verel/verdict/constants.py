@@ -29,6 +29,13 @@ PRECISE_GRADERS = {
     # COST gates only against an EXPLICIT budget (never inferred), exactly like PERF — a spend
     # regression over a declared ceiling is hard evidence, so infracost can gate / drive rollback.
     GraderKind.COST,
+    # Telecom (RAN + 5G Core): KPI = PM-counter threshold/regression gate against DECLARED thresholds
+    # (never inferred, like COST/PERF); TELECOM_CFG = declared config invariants over a normalized
+    # network model. Both are pure deterministic evaluation of supplied artifacts → they gate. A KPI
+    # ratio below its min-samples floor is emitted at Confidence.LOW and clamped to WARNING by gate.py
+    # (statistical insufficiency cannot gate), so a small-denominator sample never fails the build.
+    GraderKind.KPI,
+    GraderKind.TELECOM_CFG,
     # Hearing: DSP signal analysis and ASR transcription are deterministic grounding.
     GraderKind.DSP,
     GraderKind.ASR,

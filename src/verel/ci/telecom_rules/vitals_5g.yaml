@@ -1,0 +1,92 @@
+# Built-in 5G vitals profile — canonical KPI ids → formula + 3GPP clause + domain.
+# Descriptive metadata ONLY: it gives an Issue chapter-and-verse (exact formula + clause) so a FAIL
+# names the real counter, not a bare string. Thresholds are declared SEPARATELY by the operator
+# (verel_kpi.yaml) — this file never sets a gate. Counter names track 3GPP TS 28.552 (PM counters)
+# and TS 28.554 (end-to-end KPIs). Standards version: Rel-17 vocabulary.
+kpis:
+  # ---- RAN (gNB) ----
+  RRC.ConnEstabSuccRate:
+    title: RRC Connection Setup Success Rate
+    formula: RRC.ConnEstabSucc / RRC.ConnEstabAtt
+    clause: 3GPP TS 28.552 §5.1.1.4
+    unit: "%"
+    domain: ran
+  UECNTX.EstabSuccRate:
+    title: NG signaling / UE-context setup success rate
+    formula: UECNTX.ConnEstabSucc / UECNTX.ConnEstabAtt
+    clause: 3GPP TS 28.552 §5.1.1.5
+    unit: "%"
+    domain: ran
+  DRB.RelActAbnormalRate:
+    title: Abnormal DRB release rate (retainability)
+    formula: DRB.RelActNbr(abnormal) / DRB.RelActNbr(total)
+    clause: 3GPP TS 28.552 §5.1.1.6
+    unit: "%"
+    domain: ran
+  MM.HoExeSuccRate:
+    title: Handover execution success rate
+    formula: MM.HoExeSucc / MM.HoExeAtt
+    clause: 3GPP TS 28.552 §5.1.1.7 / TS 28.554 §6.5
+    unit: "%"
+    domain: ran
+  DRB.UEThpDl:
+    title: DL UE throughput (excludes last-slot padding)
+    formula: DRB.UEThpDl
+    clause: 3GPP TS 28.552 §5.1.1.3
+    unit: Mbps
+    domain: ran
+  DRB.RlcSduDelayDl:
+    title: DL RLC SDU packet delay
+    formula: DRB.RlcSduDelayDl
+    clause: 3GPP TS 28.552 §5.1.3.3
+    unit: ms
+    domain: ran
+  RRU.PrbTotDl:
+    title: DL PRB utilization
+    formula: RRU.PrbTotDl
+    clause: 3GPP TS 28.552 §5.1.1.2
+    unit: "%"
+    domain: ran
+  # ---- 5G Core ----
+  RM.RegInitSuccRate:
+    title: AMF initial-registration success rate
+    formula: RM.RegInitSucc / RM.RegInitReq
+    clause: 3GPP TS 28.552 §5.2.1
+    unit: "%"
+    domain: core
+  SM.PduSessionCreationSuccRate:
+    title: SMF PDU-session establishment success rate
+    formula: SM.PduSessionCreationSucc / SM.PduSessionCreationReq
+    clause: 3GPP TS 28.552 §5.2.3
+    unit: "%"
+    domain: core
+  GTP.N3ThptDl:
+    title: UPF N3 DL throughput
+    formula: GTP.OutDataOctN3UPF over the window
+    clause: 3GPP TS 28.552 §5.2.5
+    unit: Mbps
+    domain: core
+  GTP.N3PacketLossRate:
+    title: UPF N3 packet loss rate
+    formula: dropped / (dropped + delivered) on N3
+    clause: 3GPP TS 28.552 §5.2.5
+    unit: "%"
+    domain: core
+  NRF.DiscoveryLatencyP95:
+    title: NRF NF-discovery latency (p95)
+    formula: p95 of SBI Nnrf_NFDiscovery response time
+    clause: SBI metric (NOT a standardized 28.552 counter — see honesty note)
+    unit: ms
+    domain: core
+  SBI.Http5xxRate:
+    title: SBI HTTP/2 5xx error rate
+    formula: 5xx / total SBI responses
+    clause: 3GPP TS 29.500 (SBI) — vendor/impl metric
+    unit: "%"
+    domain: core
+  N4.SessionEstabFailRate:
+    title: SMF↔UPF N4/PFCP session establishment failure rate
+    formula: PFCP session-establishment failures / attempts
+    clause: 3GPP TS 29.244 (PFCP) — impl metric
+    unit: "%"
+    domain: core

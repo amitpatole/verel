@@ -62,6 +62,7 @@ Two consequences worth internalising:
 | `IAM` | cloud-IAM change sensor + least-priv + effective-access | gates | `parse_terraform_plan` (sensor) · `parliament_spec` / `cloudsplaining_spec` · `EffectiveAccessVerifier` | `IAM_RISK` | `examples/demo_iac.py` |
 | `POLICY` | policy-as-code (conftest / OPA) | gates | `conftest_spec` | `OTHER` | `examples/demo_iac.py` |
 | `COST` | cloud spend vs an explicit budget (infracost) | gates | `infracost_spec(repo, budgets={...})` | `OTHER` | `examples/demo_iac.py` |
+| `KPI` | 5G RAN/Core PM counters vs **declared** thresholds (3GPP TS 28.552/28.554); delta-vs-baseline | gates | `grade_kpi(repo, metrics=, thresholds=)`; `verel-ci telecom --kpi` (needs `verel[telecom]`) | `THRESHOLD_BREACH`, `BASELINE_REGRESSION` | `examples/demo_telecom_kpi.py` |
 | `DSP` · `ASR` · `ACOUSTIC` · `AUDIO_LLM` | hearing (audel / ears) | reserved | not wired in verel | audio kinds | — |
 
 `DSP`/`ASR`/`ACOUSTIC`/`AUDIO_LLM` are organism-level `GraderKind`s the contract reserves (the

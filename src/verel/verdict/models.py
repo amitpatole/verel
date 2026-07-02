@@ -86,6 +86,13 @@ class IssueKind(str, Enum):
     IAC_DRIFT = "iac_drift"  # a planned destroy/replace — visibility, escalated at the gateway
     IAM_RISK = "iam_risk"  # dangerous IAM change: wildcard / privesc / public principal / admin grant
     MISCONFIG = "misconfig"  # infra misconfiguration from a config scanner (trivy/checkov/tflint)
+    # Telecom kinds. THRESHOLD_BREACH = a PM KPI crossed its declared min/max; BASELINE_REGRESSION = a
+    # KPI dropped more than the allowed delta vs a baseline window; INVARIANT_VIOLATION = a declared
+    # config invariant failed; CROSS_NF_MISMATCH = a cross-network-function/RAN↔Core inconsistency.
+    THRESHOLD_BREACH = "threshold_breach"
+    BASELINE_REGRESSION = "baseline_regression"
+    INVARIANT_VIOLATION = "invariant_violation"
+    CROSS_NF_MISMATCH = "cross_nf_mismatch"
     OTHER = "other"
 
 
@@ -118,6 +125,12 @@ class GraderKind(str, Enum):
     IAC = "iac"
     IAM = "iam"
     POLICY = "policy"
+    # Telecom (RAN + 5G Core) graders — deterministic, PRECISE (they gate). KPI = threshold/regression
+    # gate over PM counters (3GPP TS 28.552/28.554); TELECOM_CFG = declared config invariants over a
+    # normalized network model (3GPP TS 28.541 NRM / O-RAN). Neither observes the live network — both
+    # grade supplied artifacts (a metrics file / a config artifact). See docs/use-cases-telecom.md.
+    KPI = "kpi"
+    TELECOM_CFG = "telecom_cfg"
     OTHER = "other"
 
 

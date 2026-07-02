@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased — telecom RAN/Core graders (Phase 1: KPI/SLO vitals)
+
+First slice of the telecom track (see the plan): a **deterministic** KPI vitals grader that gates a 5G
+RAN/Core change against **operator-declared** PM-counter thresholds — never inferred, like `COST`/`PERF`.
+
+- **New `GraderKind.KPI`** (in `PRECISE_GRADERS`, it gates) + `IssueKind.THRESHOLD_BREACH` /
+  `BASELINE_REGRESSION`. `TELECOM_CFG` + `INVARIANT_VIOLATION` / `CROSS_NF_MISMATCH` are reserved for
+  Phase 2 (declared config-invariant grader).
+- **Canonical MetricFrame + adapters** (`verel.ci.telecom_model`, `verel.ci.telecom_kpi`): parse a
+  metrics artifact — JSON, CSV, or a Prometheus/OpenMetrics scrape (Open5GS/free5GC names mapped to
+  3GPP TS 28.552 counters) — into one normalized model, then evaluate pure threshold/delta rules.
+- **`grade_kpi(repo, metrics=, thresholds=)`** and **`verel-ci telecom --kpi … --thresholds …`** →
+  a signed `Report` bound to the input bytes; `direction`, `min`/`max`, `max_delta_vs_baseline`,
+  `min_samples`, and `worst`/`mean` aggregation. A ratio below `min_samples` is emitted at `LOW`
+  confidence → the bus clamps it to a non-gating WARNING (statistical insufficiency can't fail a build);
+  a threshold on an absent counter is WARNING "unmeasurable", **never a silent PASS** (fail closed).
+- **Built-in 5G vitals profile** (`telecom_rules/vitals_5g.yaml`, ~14 RAN+Core KPIs with formula +
+  clause) so a FAIL cites chapter and verse (e.g. `RM.RegInitSucc/RM.RegInitReq`, TS 28.552 §5.2.1).
+- New `verel[telecom]` extra (PyYAML for threshold/profile YAML; defusedxml reserved for the Phase-3
+  PM-XML/NETCONF adapters). Demo: `examples/demo_telecom_kpi.py` (offline, synthetic Open5GS-shaped data).
+- **Honest scope:** a threshold gate over supplied PM data, not a service-assurance system — it does not
+  observe the network and cannot attribute a regression to a cause. Fail-closed everywhere: an absent
+  counter, a renamed/unmapped counter, a non-finite value, or a declared delta-gate with no baseline all
+  surface as a non-gating WARNING ("unmeasurable") — never a silent PASS. A Prometheus/OpenMetrics scrape
+  carries no denominator, so `min_samples`-gated KPIs surface as WARNING on scrape data (supply the
+  denominator via JSON/CSV or a ROP window to gate). Hardened over a 3-round security cadence.
+
 ## 1.3.1 — portability & scan hardening
 
 Cross-platform correctness and static-scan fixes; no API or behavior change on the supported path.

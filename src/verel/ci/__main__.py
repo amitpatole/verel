@@ -4,6 +4,7 @@ Subcommands:
   precommit --repo PATH   run the pre-commit stage; exit non-zero on FAIL (aborts a commit)
   check     --repo PATH   run the inner-loop stage and print the verdict
   iac       --repo PATH   grade a terraform plan / K8s manifests (drift + cloud-IAM sensor), offline
+  telecom   --repo PATH   grade 5G PM counters (--kpi) against declared thresholds (--thresholds), offline
   install   --repo PATH   install the pre-commit hook
 """
 
@@ -41,6 +42,14 @@ def main(argv=None) -> int:
     sp.add_argument("--plan", help="a `terraform show -json` plan file (in the repo)")
     sp.add_argument("--manifests", help="Kubernetes manifests as JSON, e.g. `kubectl -o json` (in the repo)")
 
+    sp = sub.add_parser("telecom")
+    sp.add_argument("--repo", required=True)
+    sp.add_argument("--kpi", help="a metrics artifact in the repo (JSON / CSV / OpenMetrics scrape)")
+    sp.add_argument("--thresholds", help="declared KPI thresholds (YAML file in the repo)")
+    sp.add_argument("--baseline", help="optional baseline metrics artifact for delta-vs-baseline gating")
+    sp.add_argument("--fmt", default="auto", choices=["auto", "json", "csv", "openmetrics"])
+    sp.add_argument("--attest", default="hmac", choices=["hmac", "ed25519"])
+
     sp = sub.add_parser("install")
     sp.add_argument("--repo", required=True)
 
@@ -62,6 +71,25 @@ def main(argv=None) -> int:
         print(f"[iac] verdict={rep.verdict.value}")
         for i in rep.issues[:50]:
             print(f"      {i.source.value}:{i.severity.value} {i.locator or ''} {i.message[:80]}")
+        return 0 if rep.verdict != Verdict.FAIL else 1
+
+    if args.cmd == "telecom":
+        from .telecom_kpi import grade_kpi
+        if not args.kpi or not args.thresholds:
+            print("telecom: provide --kpi <metrics> and --thresholds <yaml>", file=sys.stderr)
+            return 2
+        try:
+            rep = grade_kpi(args.repo, metrics=args.kpi, thresholds=args.thresholds,
+                            baseline=args.baseline, fmt=args.fmt, attest=args.attest)
+        except (ValueError, FileNotFoundError, RecursionError, MemoryError) as e:
+            print(f"telecom: {type(e).__name__}: {e}", file=sys.stderr)
+            return 2
+        print(f"[telecom:kpi] verdict={rep.verdict.value}")
+        for i in rep.issues[:50]:
+            print(f"      {i.source.value}:{i.severity.value} {i.locator or ''} {i.message[:100]}")
+        if rep.run_receipt:
+            kind = "publicly verifiable" if rep.run_receipt.alg == "ed25519" else "shared-secret"
+            print(f"  receipt: alg={rep.run_receipt.alg} ({kind})")
         return 0 if rep.verdict != Verdict.FAIL else 1
 
     stage = (precommit_stage(args.repo) if args.cmd == "precommit"
