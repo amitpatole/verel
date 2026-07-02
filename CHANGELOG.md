@@ -2,6 +2,15 @@
 
 ## Unreleased — telecom Phase 5 (stretch)
 
+- **Vendor CM-export adapters — bulk-CM config + vendor PM-counter mapping.** Extends "one machinery"
+  to a THIRD input form: the NRM adapter now unwraps **3GPP bulk-CM (32.615) `VsDataContainer`** MOs
+  (effective type from `vsDataType`, attributes from `vsData`) into the SAME `TelecomConfigModel` — so
+  the identical rules (incl. the flagship `tac-plmn-consistency`) grade Helm ≡ NETCONF-NRM ≡ bulk-CM.
+  On the KPI side, `load_pm_mapping` + `verel-ci telecom --mapping <name|path>` apply a vendor
+  counter→TS 28.552 mapping (built-in `open5gs`; bring your own vendor table — a maintained artifact,
+  `telecom_mappings/TEMPLATE.yaml`). Unmapped counters stay verbatim → "unmeasurable", never mis-graded.
+  New surface reuses the XXE-safe `xml_root`, path-safe `_read_in_repo`, and `yaml.safe_load` (adversarial
+  check: deep-nest / huge-type / traversal / non-str-values / YAML-bomb all handled).
 - **RF resolver: eliminated the >8-deep DN fail-safe residual.** The PRACH neighbor resolver's O(1)
   index now uses a **reversed-name trie** (every node caches the min list-index cell in its subtree),
   so it indexes every DN separator-suffix and is **fully faithful to the linear `_resolve` for

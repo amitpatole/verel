@@ -26,7 +26,9 @@ that can hallucinate is worse than useless):
 
 - **KPI / SLO vitals** ([`KPI`](graders.md)) — grade a metrics snapshot against **operator-declared**
   thresholds (never inferred), naming the exact 3GPP counter + clause. Inputs: a Prometheus/OpenMetrics
-  scrape, CSV/JSON, or a **PM-XML (TS 32.435)** EMS export. `verel-ci telecom --kpi`.
+  scrape, CSV/JSON, or a **PM-XML (TS 32.435)** EMS export. Vendor counter dialects map to the canonical
+  TS 28.552 vocabulary via `--mapping <name|path>` (built-in `open5gs`; bring your own vendor table —
+  a maintained artifact, `telecom_mappings/TEMPLATE.yaml`). `verel-ci telecom --kpi`.
 - **Declared config invariants** ([`TELECOM_CFG`](graders.md)) — normalize a config artifact into one
   canonical network model and run declared invariants over it: **S-NSSAI consistency, UE-pool overlap,
   N3/N6 separation, redundancy floors, SUCI/null-scheme, SBI-TLS, MTU** (Core) and **PCI
@@ -37,9 +39,10 @@ that can hallucinate is worse than useless):
 
 ### One machinery, cloud-native *and* classic
 
-The config grader normalizes **both** an Open5GS-shaped **Helm-values** document (cloud-native) **and** a
-**NETCONF / TS 28.541 NRM** export (classic/appliance) into the *same* model, so the **identical rule
-body** grades both worlds. The flagship `tac-plmn-consistency` proves it: the same finding — a gNB
+The config grader normalizes an Open5GS-shaped **Helm-values** document (cloud-native), a
+**NETCONF / TS 28.541 NRM** export (classic/appliance), **and a 3GPP bulk-CM (TS 32.615)
+`VsDataContainer` export** (vendor EMS) into the *same* model, so the **identical rule body** grades all
+three worlds. The flagship `tac-plmn-consistency` proves it: the same finding — a gNB
 broadcasting a `(PLMN, TAC)` that no AMF serves → Registration Reject *'tracking area not allowed'*
 (5GMM cause #12) — fires on the Helm form and the NETCONF form with the same `rule_id` and the same
 `(PLMN, TAC)`; only the source `locator` differs. See `examples/demo_telecom_ran.py`.

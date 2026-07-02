@@ -44,8 +44,22 @@ def _mo_id(el: Any) -> str:
 def _attrs_el(mo: Any) -> Any:
     for c in mo:
         if local_name(c.tag) == "attributes":
+            for gc in c:  # 3GPP bulk-CM (32.615): the real MO attributes live under <vsData>
+                if local_name(gc.tag) == "vsData":
+                    return gc
             return c
     return mo  # some exports inline attributes directly under the MO
+
+
+def _vsdata_type(mo: Any) -> str | None:
+    """The effective MO local-name for a bulk-CM VsDataContainer, from its `vsDataType` (e.g.
+    'vsDataNRCellDU' → 'NRCellDU'); None if not resolvable → the container is just recursed into."""
+    for c in mo:
+        if local_name(c.tag) == "attributes":
+            t = (_text(c, "vsDataType") or "").strip()
+            if t:
+                return t[6:] if t[:6].lower() == "vsdata" else t
+    return None
 
 
 def _find(el: Any, name: str) -> list[Any]:
@@ -85,6 +99,8 @@ def normalize_nrm_xml(raw: str) -> TelecomConfigModel:
 def _walk(el: Any, path: str, ctx: dict, cells: list[Cell], nfs: list[NF], relations: list[dict]) -> None:
     for child in el:
         ln = local_name(child.tag)
+        if ln == "VsDataContainer":  # bulk-CM wrapper → grade by the vendor MO's effective type
+            ln = _vsdata_type(child) or ln
         mid = _mo_id(child)
         p = _extend(path, ln, mid)
         if ln == "ManagedElement":

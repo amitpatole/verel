@@ -1,0 +1,20 @@
+# Vendor PM-counter mapping template.
+#
+# Vendor EMS/CM exports and Prometheus scrapes name PM counters in vendor dialects (Ericsson
+# `pmRrcConnEstabSucc`, Huawei numeric ids, Nokia `M8006C…`) — NONE emit TS 28.552 names verbatim.
+# The mapping from your vendor's counters to the canonical 28.552 vocabulary is a MAINTAINED ARTIFACT
+# you own (build it from your vendor's PM Reference / counter dictionary — Verel does not ship
+# unverified vendor tables, because a wrong mapping silently mis-grades).
+#
+# Copy this file into your repo (e.g. verel_pm_ericsson.yaml), fill in `map:`, and grade with:
+#   verel-ci telecom --repo . --kpi scrape.txt --thresholds verel_kpi.yaml --mapping verel_pm_ericsson.yaml
+#
+# An UNMAPPED counter is kept verbatim; a threshold on a canonical name with no contributing sample
+# reads as WARNING "unmeasurable" (never a silent PASS). So a partial mapping is safe — it just leaves
+# unmapped counters ungraded rather than mis-graded.
+version: 1
+vendor: <your-vendor>
+map:
+  # <vendor counter name>: <canonical TS 28.552 name>
+  # pmRrcConnEstabSucc: RRC.ConnEstabSucc.sum        # example — VERIFY against your PM reference
+  # pmRrcConnEstabAtt:  RRC.ConnEstabAtt.sum

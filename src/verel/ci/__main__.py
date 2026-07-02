@@ -49,6 +49,8 @@ def main(argv=None) -> int:
     sp.add_argument("--thresholds", help="declared KPI thresholds (YAML file in the repo)")
     sp.add_argument("--baseline", help="optional baseline metrics artifact for delta-vs-baseline gating")
     sp.add_argument("--fmt", default="auto", choices=["auto", "json", "csv", "openmetrics", "pmxml"])
+    sp.add_argument("--mapping", help="vendor PM-counter mapping: a built-in name ('open5gs') or a "
+                    "repo-relative YAML path mapping vendor counter names → canonical TS 28.552")
     sp.add_argument("--attest", default="hmac", choices=["hmac", "ed25519"])
 
     sp = sub.add_parser("telecom-cfg")
@@ -87,7 +89,8 @@ def main(argv=None) -> int:
             return 2
         try:
             rep = grade_kpi(args.repo, metrics=args.kpi, thresholds=args.thresholds,
-                            baseline=args.baseline, fmt=args.fmt, attest=args.attest)
+                            baseline=args.baseline, fmt=args.fmt, mapping=args.mapping,
+                            attest=args.attest)
         except (ValueError, FileNotFoundError, RecursionError, MemoryError) as e:
             print(f"telecom: {type(e).__name__}: {e}", file=sys.stderr)
             return 2

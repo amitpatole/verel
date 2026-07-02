@@ -1,0 +1,13 @@
+# Open5GS / free5GC Prometheus metric name → canonical TS 28.552 counter.
+# These cores expose metrics that deliberately track 28.552; this is the verified reference mapping
+# (identical to the always-on builtin). Pass `--mapping open5gs` to apply it explicitly, or copy this
+# file, rename the left-hand side to YOUR vendor's PM counter names, and pass `--mapping <path>`.
+version: 1
+vendor: open5gs
+map:
+  fivegs_amffunction_rm_reginitreq: RM.RegInitReq
+  fivegs_amffunction_rm_reginitsucc: RM.RegInitSucc
+  fivegs_smffunction_sm_pdusessioncreationreq: SM.PduSessionCreationReq
+  fivegs_smffunction_sm_pdusessioncreationsucc: SM.PduSessionCreationSucc
+  gtp_inpacketsn3: GTP.InDataPktN3UPF
+  gtp_outpacketsn3: GTP.OutDataPktN3UPF

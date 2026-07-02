@@ -341,19 +341,52 @@ def builtin_profile() -> dict[str, KpiMeta]:
         return {}
 
 
+# Built-in vendor mapping names → packaged file. Extend by shipping more telecom_mappings/<name>.yaml.
+_BUILTIN_MAPPINGS = {"open5gs"}
+
+
+def load_pm_mapping(spec: str, repo: str | None = None) -> dict[str, str]:
+    """Resolve a vendor PM-counter mapping (`vendor counter → canonical TS 28.552`). `spec` is either a
+    built-in vendor name (e.g. 'open5gs') or a repo-relative YAML path (safe-loaded, size-capped,
+    path-traversal-contained). Returns a str→str overlay applied ON TOP of the always-on builtin map."""
+    import yaml  # lazy (telecom extra)
+    if spec in _BUILTIN_MAPPINGS:
+        from importlib.resources import files
+        text = (files("verel.ci.telecom_mappings") / f"{spec}.yaml").read_text(encoding="utf-8")
+    else:
+        if repo is None:
+            raise ValueError(f"unknown built-in mapping {spec!r} and no repo to resolve a file path")
+        from .k8s import _read_in_repo  # path-traversal-safe, size-capped
+        text = _read_in_repo(repo, spec)
+    try:
+        doc = yaml.safe_load(text) or {}
+    except yaml.YAMLError as e:
+        raise ValueError(f"invalid mapping YAML {spec!r}: {e}") from e
+    raw_map = doc.get("map") if isinstance(doc, dict) else None
+    if not isinstance(raw_map, dict):
+        raise ValueError(f"mapping {spec!r} has no 'map:' object")
+    out: dict[str, str] = {}
+    for k, v in raw_map.items():  # charset/type-validate: only str→str, bounded
+        if isinstance(k, str) and isinstance(v, str) and k and v:
+            out[k] = v
+    return out
+
+
 def grade_kpi(repo: str, *, metrics: str, thresholds: str | dict | list,
-              baseline: str | None = None, fmt: str = "auto",
+              baseline: str | None = None, fmt: str = "auto", mapping: str | dict | None = None,
               profile: dict[str, KpiMeta] | None = None, attest: str = "hmac") -> Report:
     """Grade a metrics artifact against declared thresholds, OFFLINE, into one KPI Report with a signed
     receipt. `metrics`/`baseline` are repo-relative files; `thresholds` is a repo-relative YAML file
-    path OR an in-memory dict/list of rules (the latter needs no PyYAML)."""
+    path OR an in-memory dict/list of rules (the latter needs no PyYAML). `mapping` is an optional vendor
+    PM-counter mapping — a built-in name ('open5gs'), a repo-relative YAML path, or an in-memory dict."""
     from .k8s import _read_in_repo  # path-traversal-safe reader (realpath-contained, size-capped)
 
+    overlay = mapping if isinstance(mapping, dict) else (load_pm_mapping(mapping, repo) if mapping else None)
     raw = _read_in_repo(repo, metrics)
-    frame = parse_frame(raw, fmt)
+    frame = parse_frame(raw, fmt, overlay)
     rules = load_thresholds(_read_in_repo(repo, thresholds)) if isinstance(thresholds, str) \
         else load_thresholds(thresholds)
-    base_frame = parse_frame(_read_in_repo(repo, baseline), fmt) if baseline else None
+    base_frame = parse_frame(_read_in_repo(repo, baseline), fmt, overlay) if baseline else None
     prof = profile if profile is not None else builtin_profile()
 
     issues = evaluate_kpis(frame, rules, prof, base_frame)
