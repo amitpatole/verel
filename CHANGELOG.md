@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased — telecom RAN RF rules (prach-root-nonoverlap + ssb-raster)
+
+The two RF-math RAN rules deferred in v1.4.0, now shipped — the exact 3GPP lookup tables were
+**cross-verified by two independent research passes** (a domain advisor + an adversarial web-research
+workflow, 3-0 agreement on the N_CS / GSCN / ARFCN tables; the N_RB grid validated against guard-band
+physics + canonical anchors), then pinned by unit tests.
+
+- **`prach-root-nonoverlap`** (TS 38.211 §6.3.3.1) — two co-sited / neighbor cells on the same frequency
+  layer must not use overlapping PRACH logical root-sequence ranges. Encodes all three N_CS unrestricted
+  tables (6.3.3.1-5/-6/-7) — crucially the **format-3 ΔfRA=5 kHz table is distinct** from formats 0/1/2
+  (a wrong-table split would silently miscount roots); `roots_needed = ⌈64/⌊L_RA/N_CS⌋⌉` with the N_CS=0
+  edge; wrap-aware overlap over the correct modulus (838/138). Same-site overlap → ERROR; neighbor-only
+  overlap → WARNING (msg1 FDM/time offsets are unmodeled). Restricted sets → INFO (skip).
+- **`ssb-raster`** (TS 38.104 §5.4.2.1 / §5.4.3.1 / TS 38.101-1 Table 5.3.2-1) — the SSB must sit on the
+  NR sync raster (a valid GSCN), within the band's GSCN range (per-band first/last/step + the n38
+  discrete set), and each BWP must fit the carrier's N_RB. All frequency math in integer kHz. The
+  SSB-in-carrier sub-check needs `arfcn_dl` to be the carrier CENTRE — **off by default**
+  (`arfcn_is_centre`), so a Point-A value can't false-FAIL.
+- New `verel.ci.telecom_rf` (the pure tables + math, unit-testable in isolation); the NRM adapter now
+  extracts `prach.format` / `config_index` / `restricted_set`, `ssb_scs_khz`, and BWPs.
+- **Honest scope:** checks DECLARED config only — not msg1 frequency/time separation, not restricted-set
+  suitability, not kSSB/offsetToPointA/CORESET#0 alignment (needs MIB fields not in the model).
+
 ## 1.4.0 — telecom RAN/Core graders
 
 A new grader track: **deterministic, offline, receipt-signed grading of 5G RAN + Core** — declared config

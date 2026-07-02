@@ -151,6 +151,12 @@ def _cell(mo: Any, path: str, ctx: dict) -> Cell:
                              "gnb_id": ctx.get("gnb_id", "")}
     if pci is None and pci_raw is not None:  # declared but not an integer → flagged, not silently dropped
         attrs["pci_invalid"] = pci_raw
+    scs = _scs_khz(_text(a, "ssbSubCarrierSpacing"))
+    if scs is not None:
+        attrs["ssb_scs_khz"] = scs
+    bwps = _bwps(mo)
+    if bwps:
+        attrs["bwps"] = bwps
     return Cell(
         name=f"{ctx.get('me', '')}/{ctx.get('gnb', '')}/NRCellDU={_mo_id(mo)}".strip("/"),
         gnb=ctx.get("gnb", ""),
@@ -166,13 +172,44 @@ def _cell(mo: Any, path: str, ctx: dict) -> Cell:
         attrs=attrs)
 
 
+# SSB SCS as an enum ("kHz30") or a number ("30"/30) → kHz int; None if unparseable/unknown.
+def _scs_khz(v: object) -> int | None:
+    if v is None:
+        return None
+    s = str(v).strip().lower().removeprefix("khz").removesuffix("khz").strip()
+    n = _as_int(s)
+    return n if n in (15, 30, 60, 120, 240) else None
+
+
+def _bwps(mo: Any) -> list[dict]:
+    out = []
+    for bwp in _find(mo, "BWP"):
+        ba = _attrs_el(bwp)
+        scs = _scs_khz(_text(ba, "subCarrierSpacing"))
+        start = _as_int(_text(ba, "startRB"))
+        nrb = _as_int(_text(ba, "numberOfRBs"))
+        if start is not None or nrb is not None or scs is not None:
+            out.append({"start_rb": start, "num_rbs": nrb, "scs_khz": scs,
+                        "is_initial": (_text(ba, "isInitialBwp") or "").lower() == "true",
+                        "loc": f"BWP={_mo_id(bwp)}"})
+    return out
+
+
 def _prach(a: Any) -> dict:
     prach: dict[str, Any] = {}
     for src, dst in (("rachRootSequence", "root"), ("prachRootSequenceIndex", "root"),
-                     ("zeroCorrelationZoneConfig", "zero_corr_zone")):
+                     ("zeroCorrelationZoneConfig", "zero_corr_zone"),
+                     ("prachConfigurationIndex", "config_index"),
+                     ("prach-ConfigurationIndex", "config_index")):
         v = _as_int(_text(a, src))
         if v is not None:
             prach.setdefault(dst, v)
+    fmt = _text(a, "preambleFormat") or _text(a, "prachFormat")
+    if fmt:
+        prach["format"] = fmt.strip()
+    rs = _text(a, "restrictedSetConfig")
+    if rs:
+        prach["restricted_set"] = rs.strip()
     return prach
 
 

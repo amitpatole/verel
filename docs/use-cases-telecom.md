@@ -30,7 +30,7 @@ that can hallucinate is worse than useless):
 - **Declared config invariants** ([`TELECOM_CFG`](graders.md)) — normalize a config artifact into one
   canonical network model and run declared invariants over it: **S-NSSAI consistency, UE-pool overlap,
   N3/N6 separation, redundancy floors, SUCI/null-scheme, SBI-TLS, MTU** (Core) and **PCI
-  collision/confusion, neighbor symmetry, EIRP** (RAN), plus the flagship **`tac-plmn-consistency`**
+  collision/confusion, neighbor symmetry, EIRP, PRACH-root non-overlap, SSB sync-raster** (RAN), plus the flagship **`tac-plmn-consistency`**
   RAN↔Core cross-check. `verel-ci telecom-cfg --values`.
 - **Receipt-visible waivers** — a waived violation becomes a non-gating INFO (never silently dropped);
   an expired waiver gates again + warns; a stale waiver warns. Every waiver is in the signed receipt.
@@ -123,7 +123,10 @@ tester, or an RF planner. Read this before you deploy it as a gate:
   adapters target a pinned vocabulary (Rel-17) and read vendor-extension attributes where present.
 - **Explicit non-goals:** no E2/A1/O1/N2/N4 **message-level** conformance, no vendor **interop** guarantee,
   no **drive-test** perception, no **slice-SLA delivery** verification (S-NSSAI *consistency* ≠ slice
-  *performance*), and — for now — no PRACH-root/SSB-raster RF arithmetic (a documented follow-up).
+  *performance*). The PRACH-root and SSB-raster rules check **declared** config against the exact 3GPP
+  tables (TS 38.211 N_CS, TS 38.104 GSCN, TS 38.101-1 N_RB) — not msg1 frequency/time separation, not
+  restricted-set suitability, and not kSSB / offsetToPointA / CORESET#0 alignment (needs MIB fields not
+  in the model); the SSB-in-carrier sub-check is off unless you assert `arfcn_dl` is the carrier centre.
 - **Demo data is synthetic** or captured from open-source cores (Open5GS/free5GC), labeled as such in the
   demo output; nothing here implies vendor validation.
 
