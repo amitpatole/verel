@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — telecom Phase 5 (stretch)
+## 1.6.0 — telecom Phase 5 (part 1: resolver hardening + vendor CM-export adapters)
 
 - **Vendor CM-export adapters — bulk-CM config + vendor PM-counter mapping.** Extends "one machinery"
   to a THIRD input form: the NRM adapter now unwraps **3GPP bulk-CM (32.615) `VsDataContainer`** MOs

@@ -287,7 +287,7 @@ world is actually in the intended state — not that a script exited 0. (See the
 | Surface | Command | Use it for |
 |---|---|---|
 | **CI gate** | `verel-ci iac --repo . --plan tfplan.json` (exit 1 on FAIL) | every repo's pipeline / pre-merge |
-| **Pre-commit** | a `repo: local` hook calling `verel-ci iac` (or the published `verel-precommit` hook, `rev: v1.5.0`, for the full gate) | catch it before the push |
+| **Pre-commit** | a `repo: local` hook calling `verel-ci iac` (or the published `verel-precommit` hook, `rev: v1.6.0`, for the full gate) | catch it before the push |
 | **Agent host (MCP)** | `verel mcp install` → `verel_iac_check` | an agent grades its own plan/manifests |
 | **Rules file** | `verel rules` | make any agent gate via Verel |
 | **REST + PR webhook** | `verel serve --repo .` (`POST /gate`, `POST /github`) | a shared gate service / bot |
