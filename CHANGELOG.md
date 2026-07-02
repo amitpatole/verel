@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased — telecom RAN/Core graders
+## 1.4.0 — telecom RAN/Core graders
+
+A new grader track: **deterministic, offline, receipt-signed grading of 5G RAN + Core** — declared config
+invariants and PM-counter KPIs — with one rule body grading both cloud-native (Helm) and classic
+(NETCONF) artifacts. New `GraderKind.KPI` + `TELECOM_CFG`, the `verel[telecom]` extra, `verel-ci telecom`
+/ `verel-ci telecom-cfg`, and `docs/use-cases-telecom.md`. Built over four gated phases, each hardened
+under the security cadence (KPI 5 rounds, config 3, classic/RAN 6 — terminal-clean). Honest scope is
+explicit: it grades declared config and reported KPIs, not the live network. Details below by phase.
 
 ### Phase 4 — positioning, honest scope, and the combined flagship
 

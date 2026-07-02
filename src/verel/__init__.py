@@ -7,7 +7,7 @@ single-worker ultracode loop. See docs/VEREL_DESIGN.md.
 
 from __future__ import annotations
 
-__version__ = "1.3.1"
+__version__ = "1.4.0"
 
 from .verdict import (
     GateResult,
