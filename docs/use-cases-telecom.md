@@ -102,7 +102,14 @@ over the changed artifacts and fails the build on a `FAIL` verdict.
 Need **live** KPIs instead of a committed snapshot? `verel-ci telecom-fetch --url <prometheus> --out
 metrics.json [--query <promql>]` scrapes your Prometheus and writes a file the grader then reads —
 acquisition stays **outside** the grader (network-facing, SSRF/size/TLS-guarded), so the gate itself
-remains offline and deterministic. Grade the written file with `verel-ci telecom --kpi metrics.json`. The receipt is signed (HMAC by
+remains offline and deterministic. Grade the written file with `verel-ci telecom --kpi metrics.json`.
+
+Want the graders to also **apply** a change, not just review it? `verel-ci telecom-apply` is act-then-verify
+with real guardrails: `--desired`/`--current` produce a **dry-run plan** (grade the target, classify the
+change) — nothing is touched. A live `--apply` (NETCONF, `verel[telecom-actuator]`) uses a **confirmed
+commit** that re-grades the running config and **auto-rolls-back unless the verdict passes**; an
+IRREVERSIBLE change (removing an MO, or altering PLMN/TAC/S-NSSAI/an NF's endpoints) refuses without an
+explicit `--i-understand`. The senses confirm the world actually changed before the change is made permanent. The receipt is signed (HMAC by
 default; `--attest ed25519` for a receipt a second party verifies with only the public key). The gate is
 offline and deterministic, so it runs anywhere — a laptop, a CI runner, or a `GateRun` in-cluster.
 

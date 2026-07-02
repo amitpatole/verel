@@ -707,6 +707,16 @@ def apply_waivers(issues: list[Issue], rules: list[CfgRule], today: date) -> lis
 
 
 # ============================================================================ offline entry-point
+def _model_from_artifact(raw: str) -> TelecomConfigModel:
+    """Normalize any supported config artifact — NETCONF/NRM or bulk-CM XML (starts with '<') else an
+    Open5GS-shaped Helm-values document — into the canonical model. One dispatch, reused by the grader
+    and the actuator's change classification."""
+    if raw.lstrip().startswith("<"):
+        from .telecom_nrm import normalize_nrm_xml
+        return normalize_nrm_xml(raw)
+    return normalize_helm_values(raw)
+
+
 def grade_cfg(repo: str, *, values: str, rules: str | dict | None = None,
               today: date | None = None, attest: str = "hmac") -> Report:
     """Grade a telecom config artifact against declared invariants, OFFLINE, into one TELECOM_CFG Report
@@ -715,11 +725,7 @@ def grade_cfg(repo: str, *, values: str, rules: str | dict | None = None,
     from .k8s import _read_in_repo
 
     raw = _read_in_repo(repo, values)
-    if raw.lstrip().startswith("<"):  # NETCONF / NRM XML artifact (classic/appliance path)
-        from .telecom_nrm import normalize_nrm_xml
-        tcm = normalize_nrm_xml(raw)
-    else:
-        tcm = normalize_helm_values(raw)
+    tcm = _model_from_artifact(raw)
     cfg_rules = load_cfg_rules(_read_in_repo(repo, rules) if isinstance(rules, str) else rules)
     issues: list[Issue] = []
     for r in cfg_rules:

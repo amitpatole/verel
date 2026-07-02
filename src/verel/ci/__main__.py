@@ -31,6 +31,53 @@ def _print(result):
         print(f"  ! {len(result.regressions)} reintroduced failure(s) blocked from memory")
 
 
+def _telecom_apply(args) -> int:
+    """DRY-RUN by default: plan (grade desired + classify change) and print. With --apply: guarded live
+    NETCONF apply (confirmed-commit + post-verify + auto-rollback)."""
+    from .telecom_actuator import TelecomActuator
+
+    edit = None
+    if args.edit_config:
+        try:
+            with open(args.edit_config, encoding="utf-8") as f:
+                edit = f.read()
+        except OSError as e:
+            print(f"telecom-apply: cannot read --edit-config: {e}", file=sys.stderr)
+            return 2
+    act = TelecomActuator(args.repo, rules=args.rules)
+    try:
+        plan = act.plan(current=args.current, desired=args.desired, edit_config=edit or "",
+                        confirm_timeout=args.confirm_timeout)
+    except (ValueError, FileNotFoundError) as e:
+        print(f"telecom-apply: {type(e).__name__}: {e}", file=sys.stderr)
+        return 2
+    print(f"[telecom-apply] plan: action={plan.action.value} verdict={plan.report.verdict.value}")
+    for r in plan.reasons[:20]:
+        print(f"  change: {r}")
+    if not args.apply:
+        print("  dry-run (no --apply) — nothing was changed. Re-run with --apply to execute.")
+        return 0 if plan.report.verdict.value != "fail" else 1
+    if not (args.host and args.user and edit):
+        print("telecom-apply --apply needs --host, --user, and --edit-config", file=sys.stderr)
+        return 2
+    from .telecom_actuator import ncclient_session
+    try:
+        session = ncclient_session(args.host, port=args.port, username=args.user)
+    except RuntimeError as e:
+        print(f"telecom-apply: {e}", file=sys.stderr)
+        return 2
+    try:
+        res = act.act(plan, session=session, approved=args.i_understand)
+    finally:
+        try:
+            session.close()
+        except Exception:  # noqa: BLE001
+            pass
+    print(f"[telecom-apply] {'OK' if res.ok else 'REFUSED/FAILED'}: {res.detail}"
+          + (" (rolled back)" if res.rolled_back else ""))
+    return 0 if res.ok else 1
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="verel.ci")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -70,10 +117,25 @@ def main(argv=None) -> int:
     sp.add_argument("--allow-link-local", action="store_true",
                     help="permit link-local targets (169.254/fe80) — bypasses the cloud-metadata SSRF guard")
 
+    sp = sub.add_parser("telecom-apply")  # act-then-verify a config change; DRY-RUN unless --apply
+    sp.add_argument("--repo", required=True)
+    sp.add_argument("--desired", required=True, help="the target config artifact (graded pre-flight)")
+    sp.add_argument("--current", required=True, help="current config artifact (for change classification)")
+    sp.add_argument("--edit-config", help="NETCONF edit-config payload file (required for a live --apply)")
+    sp.add_argument("--rules", help="declared invariants (verel_telecom.yaml)")
+    sp.add_argument("--confirm-timeout", type=int, default=120, help="confirmed-commit rollback window (s)")
+    sp.add_argument("--apply", action="store_true", help="LIVE apply (else dry-run/plan only)")
+    sp.add_argument("--i-understand", action="store_true", help="approve an IRREVERSIBLE change")
+    sp.add_argument("--host", help="NETCONF host (live apply)")
+    sp.add_argument("--port", type=int, default=830)
+    sp.add_argument("--user", help="NETCONF SSH user (live apply); creds from env/agent, never the repo")
+
     sp = sub.add_parser("install")
     sp.add_argument("--repo", required=True)
 
     args = p.parse_args(argv)
+    if args.cmd == "telecom-apply":
+        return _telecom_apply(args)
     if args.cmd == "telecom-fetch":
         from .telecom_fetch import FetchError, query_prometheus, scrape
         try:

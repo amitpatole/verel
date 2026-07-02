@@ -2,6 +2,18 @@
 
 ## Unreleased — telecom Phase 5 (part 2)
 
+- **NETCONF actuator — act-then-verify, guardrail-gated (`verel-ci telecom-apply`).** The "hands" of the
+  telecom track: apply a 5G config change, then the graders CONFIRM it landed and is still valid.
+  Guardrails are not optional — **dry-run by default** (`plan()` is offline, mutates nothing: it grades
+  the desired config pre-flight and classifies the change); **human approval for IRREVERSIBLE** changes
+  (removing an MO, or changing PLMN/TAC/S-NSSAI/an NF's endpoints — refused without `--i-understand`);
+  **confirmed-commit rollback** (the live apply uses `<commit confirmed>` with a timeout, re-grades the
+  running config, and only confirms on PASS — else it discards and auto-reverts); **plan-binding**
+  (refuses if the edit-config changed since `plan()`); and a FAIL desired-grade refuses. The live NETCONF
+  session is an OPTIONAL lazy-imported backend (`verel[telecom-actuator]` = ncclient); the offline
+  planner needs no dependency. We do NOT synthesize the edit-config from the slim model — the operator
+  supplies the payload; we grade the target, classify the risk, and run the apply through the
+  confirmed-commit + post-verify + auto-rollback sequence. New `verel.ci.telecom_actuator`.
 - **Live metrics acquisition (`verel-ci telecom-fetch`).** A network-facing helper that scrapes a
   Prometheus/OpenMetrics endpoint (or runs a PromQL instant query via the HTTP API) and WRITES a metrics
   file the offline KPI grader then reads — acquisition is deliberately **separate** from grading, so the

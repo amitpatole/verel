@@ -294,9 +294,10 @@ python examples/demo_telecom_kpi.py       # 14 · 5G PM snapshot: AMF registrati
 python examples/demo_telecom_cfg.py       # 15 · a slice in SMF missing from NSSF → grounded FAIL
 python examples/demo_telecom_ran.py       # 16 · RAN↔Core TAC/PLMN cross-check on Helm AND NETCONF (one machinery)
 python examples/demo_telecom_flagship.py  # 17 · one gNB TAC change → config FAIL + KPI FAIL, two grounded receipts
+python examples/demo_telecom_apply.py     # 18 · NETCONF actuator: dry-run → approval-gated apply → verify → rollback
 ```
 
-> The telecom demos (14–17) need `verel[telecom]` and run fully offline on synthetic Open5GS-shaped data.
+> The telecom demos (14–18) need `verel[telecom]` and run fully offline on synthetic Open5GS-shaped data.
 > See **[Use cases — Telecom RAN / 5G Core](use-cases-telecom.md)** for the positioning and the honest scope.
 
 ## More feature-level demos
