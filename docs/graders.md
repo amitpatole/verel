@@ -63,6 +63,7 @@ Two consequences worth internalising:
 | `POLICY` | policy-as-code (conftest / OPA) | gates | `conftest_spec` | `OTHER` | `examples/demo_iac.py` |
 | `COST` | cloud spend vs an explicit budget (infracost) | gates | `infracost_spec(repo, budgets={...})` | `OTHER` | `examples/demo_iac.py` |
 | `KPI` | 5G RAN/Core PM counters vs **declared** thresholds (3GPP TS 28.552/28.554); delta-vs-baseline | gates | `grade_kpi(repo, metrics=, thresholds=)`; `verel-ci telecom --kpi` (needs `verel[telecom]`) | `THRESHOLD_BREACH`, `BASELINE_REGRESSION` | `examples/demo_telecom_kpi.py` |
+| `TELECOM_CFG` | declared 5G-Core config invariants over a normalized model (S-NSSAI consistency, UE-pool overlap, N3/N6 separation, redundancy, SUCI/null-scheme, SBI-TLS, MTU) — deterministic, receipt-visible waivers | gates | `grade_cfg(repo, values=, rules=)`; `verel-ci telecom-cfg --values` (needs `verel[telecom]`) | `INVARIANT_VIOLATION`, `CROSS_NF_MISMATCH` | `examples/demo_telecom_cfg.py` |
 | `DSP` · `ASR` · `ACOUSTIC` · `AUDIO_LLM` | hearing (audel / ears) | reserved | not wired in verel | audio kinds | — |
 
 `DSP`/`ASR`/`ACOUSTIC`/`AUDIO_LLM` are organism-level `GraderKind`s the contract reserves (the

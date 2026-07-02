@@ -6,9 +6,14 @@ NETCONF NRM) into ONE canonical model, and pure deterministic evaluators run ove
 normalized artifacts, never raw formats — that is what lets one grader core serve RAN + Core and
 cloud-native + classic.
 
-This module holds the KPI half (Phase 1): `MetricSample` / `MetricFrame` (canonical PM counters, named
-per 3GPP TS 28.552/28.554) and the `KpiThreshold` rule. Everything here is pure data + parsing — no
-I/O, no network. The evaluators live in `telecom_kpi.py`.
+The KPI half (Phase 1): `MetricSample` / `MetricFrame` (canonical PM counters, named per 3GPP TS
+28.552/28.554) and the `KpiThreshold` rule; evaluators in `telecom_kpi.py`.
+
+The config half (Phase 2): `TelecomConfigModel` (a slim projection of the 3GPP TS 28.541 NRM — `NF` +
+`Endpoint`) that adapters build from a Helm-values / NETCONF artifact; declared-invariant evaluators in
+`telecom_cfg.py`. Every field carries a `loc` (provenance) so a FAIL points at the exact source path.
+
+Everything here is pure data + parsing — no I/O, no network.
 """
 
 from __future__ import annotations
@@ -16,6 +21,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from hashlib import blake2s
+from typing import Any
 
 # PyYAML is behind the `telecom` extra and lazy-imported (mirrors ci/k8s.py's helm YAML path) so the
 # base wheel stays light. Thresholds/profiles may also be passed as plain dicts (no yaml needed).
@@ -32,7 +38,11 @@ def _yaml_load(text: str) -> object:
         raise MissingTelecomDep(
             "telecom KPI thresholds/profile are YAML — install `verel[telecom]` (PyYAML)"
         ) from e
-    return yaml.safe_load(text or "")
+    try:
+        return yaml.safe_load(text or "")
+    except (yaml.YAMLError, RecursionError) as e:
+        # fail closed with a clean error — never let a raw parser traceback escape on untrusted input
+        raise ValueError(f"invalid YAML artifact: {type(e).__name__}") from e
 
 
 @dataclass(frozen=True)
@@ -197,3 +207,109 @@ def load_profile(spec: str | dict) -> dict[str, KpiMeta]:
             clause=str(b.get("clause", "")), unit=str(b.get("unit", "")), domain=str(b.get("domain", "")),
         )
     return out
+
+
+# ============================================================================
+# Config model (Phase 2) — a slim projection of the 3GPP TS 28.541 NRM. Adapters populate it from a
+# Helm-values / rendered-manifest / NETCONF artifact; the declared-invariant evaluators in
+# telecom_cfg.py run pure functions over it. Deliberately ~30 attributes, NOT full NRM fidelity.
+# ============================================================================
+_IFACES = frozenset({"N2", "N3", "N4", "N6", "SBI", "mgmt"})
+
+
+@dataclass
+class Endpoint:
+    """A network-function interface endpoint. `iface` is the reference point (N2/N3/N4/N6/SBI/mgmt);
+    `subnet` is the CIDR/address it binds. `loc` is the source-artifact provenance."""
+
+    iface: str
+    subnet: str = ""
+    loc: str = ""
+
+
+@dataclass
+class NF:
+    """A 5G network function projected from config. `snssais` are canonical "SST" or "SST-SD" strings;
+    `attrs` carries rule-specific extras (dnn_pools, suci, ciphering, mtu, sbi_scheme, upf_pool …) so
+    the model stays slim while rules read what they need. Every field's origin is in `loc`/`attr_locs`."""
+
+    kind: str  # AMF | SMF | UPF | NSSF | NRF | AUSF | UDM | PCF | ... (compared case-insensitively)
+    name: str = ""
+    plmns: list[str] = field(default_factory=list)  # "MCC-MNC"
+    snssais: list[str] = field(default_factory=list)
+    endpoints: list[Endpoint] = field(default_factory=list)
+    replicas: int | None = None
+    attrs: dict[str, Any] = field(default_factory=dict)  # rule-specific extension bag (heterogeneous)
+    attr_locs: dict[str, str] = field(default_factory=dict)  # attr name → source provenance
+    loc: str = ""
+
+    def is_kind(self, kind: str) -> bool:
+        return self.kind.upper() == kind.upper()
+
+
+@dataclass
+class TelecomConfigModel:
+    """The normalized network model an artifact projects into; declared invariants evaluate over it."""
+
+    nfs: list[NF] = field(default_factory=list)
+    source_sha: str = ""
+
+    def of_kind(self, *kinds: str) -> list[NF]:
+        want = {k.upper() for k in kinds}
+        return [nf for nf in self.nfs if nf.kind.upper() in want]
+
+
+def canonical_snssai(sst: object, sd: object = None) -> str:
+    """Canonical S-NSSAI id: "SST" (no SD) or "SST-SD" with SD zero-padded to 6 lowercase hex digits
+    (3GPP TS 23.003 §28.4.2 — SD is a 3-octet HEX value). Tolerant of ints, hex/`0x` strings, and an
+    already-joined "sst-sd". SD `0xffffff` (the "no SD" value) collapses to SST-only. An unparseable SD
+    is kept verbatim (lower-cased) so two distinct values never canonicalize to the same id (no
+    fail-open). Returns "" if SST is unusable."""
+    if isinstance(sst, str) and "-" in sst and sd is None:
+        head, _, tail = sst.partition("-")
+        return canonical_snssai(head.strip(), tail.strip())
+    s = _as_int(sst)
+    if s is None:
+        return ""
+    if sd in (None, "", "null"):
+        return str(s)
+    v = _sd_int(sd)
+    if v is None:
+        return f"{s}-{str(sd).strip().lower()}"  # unparseable → keep raw so distinct stays distinct
+    if v == 0xFFFFFF:
+        return str(s)  # "no SD" per TS 23.003
+    return f"{s}-{v:06x}"
+
+
+def _sd_int(sd: object) -> int | None:
+    # SD is a 3-octet HEX value (TS 23.003). Interpret an int and a string CONSISTENTLY by parsing the
+    # value's TEXTUAL form as hex — this matches how a chart renders the YAML value into the NF config
+    # (Open5GS parses it as hex), so `sd: 16` (int) and `sd: "10"` are treated identically to how they
+    # deploy. (Red-team R2 #2 — removes the int-vs-string interpretation split.)
+    if isinstance(sd, bool) or sd is None:
+        return None
+    s = str(sd).strip().lower().removeprefix("0x")
+    # require pure hex digits: int(s, 16) also accepts "_" grouping ("1_0" == "10"), which could let
+    # two differently-written SDs collide — reject anything but [0-9a-f] (red-team R3 observation).
+    if not s or not all(c in "0123456789abcdef" for c in s):
+        return None
+    try:
+        return int(s, 16)
+    except ValueError:
+        return None
+
+
+def _as_int(v: object) -> int | None:
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, int):
+        return v
+    if isinstance(v, str):
+        s = v.strip()
+        if not s.isascii():
+            return None
+        try:
+            return int(s, 0) if s.lower().startswith("0x") else int(s)
+        except ValueError:
+            return None
+    return None

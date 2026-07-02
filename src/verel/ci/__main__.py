@@ -5,6 +5,7 @@ Subcommands:
   check     --repo PATH   run the inner-loop stage and print the verdict
   iac       --repo PATH   grade a terraform plan / K8s manifests (drift + cloud-IAM sensor), offline
   telecom   --repo PATH   grade 5G PM counters (--kpi) against declared thresholds (--thresholds), offline
+  telecom-cfg --repo PATH grade a 5G-Core config artifact (--values) against declared invariants, offline
   install   --repo PATH   install the pre-commit hook
 """
 
@@ -50,6 +51,12 @@ def main(argv=None) -> int:
     sp.add_argument("--fmt", default="auto", choices=["auto", "json", "csv", "openmetrics"])
     sp.add_argument("--attest", default="hmac", choices=["hmac", "ed25519"])
 
+    sp = sub.add_parser("telecom-cfg")
+    sp.add_argument("--repo", required=True)
+    sp.add_argument("--values", help="an Open5GS-shaped Helm-values artifact in the repo")
+    sp.add_argument("--rules", help="declared invariants (verel_telecom.yaml); default: all built-ins")
+    sp.add_argument("--attest", default="hmac", choices=["hmac", "ed25519"])
+
     sp = sub.add_parser("install")
     sp.add_argument("--repo", required=True)
 
@@ -90,6 +97,21 @@ def main(argv=None) -> int:
         if rep.run_receipt:
             kind = "publicly verifiable" if rep.run_receipt.alg == "ed25519" else "shared-secret"
             print(f"  receipt: alg={rep.run_receipt.alg} ({kind})")
+        return 0 if rep.verdict != Verdict.FAIL else 1
+
+    if args.cmd == "telecom-cfg":
+        from .telecom_cfg import grade_cfg
+        if not args.values:
+            print("telecom-cfg: provide --values <helm-values artifact>", file=sys.stderr)
+            return 2
+        try:
+            rep = grade_cfg(args.repo, values=args.values, rules=args.rules, attest=args.attest)
+        except (ValueError, FileNotFoundError, RecursionError, MemoryError) as e:
+            print(f"telecom-cfg: {type(e).__name__}: {e}", file=sys.stderr)
+            return 2
+        print(f"[telecom:cfg] verdict={rep.verdict.value}")
+        for i in rep.issues[:50]:
+            print(f"      {i.source.value}:{i.severity.value} {i.locator or ''} {i.message[:110]}")
         return 0 if rep.verdict != Verdict.FAIL else 1
 
     stage = (precommit_stage(args.repo) if args.cmd == "precommit"

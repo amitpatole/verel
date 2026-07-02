@@ -1,6 +1,29 @@
 # Changelog
 
-## Unreleased — telecom RAN/Core graders (Phase 1: KPI/SLO vitals)
+## Unreleased — telecom RAN/Core graders
+
+### Phase 2 — declared config-invariant grader (5G Core)
+
+A **deterministic** grader (no LLM — a telecom gate that can hallucinate is worse than useless) that
+normalizes an Open5GS-shaped Helm-values artifact into a canonical network model and runs declared
+invariants over it. Clones the `iac.py` normalize-then-evaluate pattern; every finding is grounded with
+a `locator` into the exact source values path.
+
+- **New `GraderKind.TELECOM_CFG`** (gates) + `IssueKind.INVARIANT_VIOLATION` / `CROSS_NF_MISMATCH`.
+  `verel.ci.telecom_model` gains `TelecomConfigModel` / `NF` / `Endpoint` + `canonical_snssai`;
+  `verel.ci.telecom_cfg` holds the adapter + 7 built-in Core rules + loader + waivers + `grade_cfg`.
+- **7 Core invariants** with 3GPP clauses: `snssai-consistency` (flagship cross-NF: an SMF slice missing
+  from NSSF / unsupported by AMF / with no UPF → FAIL), `ue-pool-sanity` (overlap/missing pool),
+  `upf-interface-separation` (N3/N6 + mgmt), `redundancy-floor`, `suci-security-posture` (null-scheme /
+  NEA0-priority / NIA0), `sbi-tls` (cleartext SBI), `mtu-coherence` (GTP-U encapsulation blackhole).
+- **`verel_telecom.yaml` rule declaration** (`load_cfg_rules`, fail-closed): enable/parameterize built-ins
+  + **receipt-visible waivers** (a waived violation → non-gating INFO, never silently dropped; expired
+  waiver → gates + a WARNING; stale waiver → WARNING). `verel-ci telecom-cfg --values … --rules …`.
+- Demo: `examples/demo_telecom_cfg.py` (offline, Open5GS-shaped values, slice-mismatch FAIL → fix → PASS).
+- **Honest scope:** grades DECLARED config, not the running network; chart-dependent fields that aren't
+  derivable emit a non-gating INFO ("insufficient evidence"), never a false FAIL or a silent PASS.
+
+### Phase 1 — KPI/SLO vitals grader
 
 First slice of the telecom track (see the plan): a **deterministic** KPI vitals grader that gates a 5G
 RAN/Core change against **operator-declared** PM-counter thresholds — never inferred, like `COST`/`PERF`.
