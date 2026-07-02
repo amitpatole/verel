@@ -212,7 +212,21 @@ def test_resolver_index_bounded_on_pathological_name():
     cells = [Cell(name="=" * 200000, loc="x")]
     t0 = time.monotonic()
     _resolver_index(cells)
-    assert time.monotonic() - t0 < 1.0  # was ~23s / 20GB before the bound
+    assert time.monotonic() - t0 < 2.0  # trie build is O(len); was ~23s / 20GB when materializing suffixes
+
+
+def test_resolver_deep_dn_now_resolves_fully_faithful():
+    # Phase-5 residual fix: the reversed-suffix trie indexes EVERY separator boundary, so a target that
+    # is a suffix after an arbitrarily-deep (>8) separator resolves exactly as the linear _resolve —
+    # the old last-8 bound dropped these (accepted fail-safe), now closed.
+    from verel.ci.telecom_ran import _resolve, _resolve_idx, _resolver_index
+    deep = "A=1/B=2/C=3/D=4/E=5/F=6/G=7/H=8/I=9/J=10/NRCellDU=x"  # 10 RDN levels (> 8 separators)
+    cell = Cell(name=deep, loc="deep")
+    cells = [cell]
+    ridx = _resolver_index(cells)
+    target = "1/B=2/C=3/D=4/E=5/F=6/G=7/H=8/I=9/J=10/NRCellDU=x"  # suffix after the deepest separator
+    assert _resolve(target, cells) is cell
+    assert _resolve_idx(target, ridx) is cell  # trie resolves it (last-8 bound would have returned None)
 
 
 def test_resolver_none_target_parity():

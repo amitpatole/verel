@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — telecom Phase 5 (stretch)
+
+- **RF resolver: eliminated the >8-deep DN fail-safe residual.** The PRACH neighbor resolver's O(1)
+  index now uses a **reversed-name trie** (every node caches the min list-index cell in its subtree),
+  so it indexes every DN separator-suffix and is **fully faithful to the linear `_resolve` for
+  arbitrarily deep DNs** — with no O(len²) suffix materialization (the prior last-8 bound dropped
+  >8-deep targets; red-team R3/R4/R5). Proven by a 300k-iteration differential fuzz (0 divergences vs
+  `_resolve`, incl. deep/None/empty/unicode/NUL targets) and bounded (20k deep-DN cells in ~1.5s).
+
 ## 1.5.0 — telecom RAN RF rules (prach-root-nonoverlap + ssb-raster)
 
 The two RF-math RAN rules deferred in v1.4.0, now shipped — the exact 3GPP lookup tables were

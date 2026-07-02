@@ -86,40 +86,53 @@ def _resolve(target: object, cells: list[Cell]) -> Cell | None:
     return None
 
 
-_MAX_DN_SUFFIXES = 8  # index only the last N RDN-suffixes of a name (a real DN has ≤ ~5 separators)
+_TRIE_MIN = 0  # int sentinel key for a trie node's min (list_index, cell); never collides with a str char
 
 
 def _resolver_index(cells: list[Cell]) -> dict:
-    """O(1) neighbor-resolution index that FAITHFULLY mirrors `_resolve` — avoids its O(n²) per-neighbor
-    scan (red-team R2) without the criterion-priority divergence that missed overlaps (red-team R3). Each
-    key stores the (list_index, cell) of the FIRST cell to claim it; lookup returns the earliest cell
-    across all criteria, exactly as `_resolve`'s first-cell-wins linear scan would."""
-    idx: dict = {}
+    """O(1) neighbor-resolution index that FAITHFULLY mirrors `_resolve` (name / cellLocalId / DN-tail
+    after ANY separator / pci) and returns the earliest cell across criteria, exactly as `_resolve`'s
+    first-cell-wins linear scan would. Built in O(total input): the DN-tail match (`name.endswith("="+ts)`
+    / `("/"+ts)`) is served by a REVERSED-name trie whose every node caches the min list-index cell in its
+    subtree — so every separator-suffix is indexed with NO O(len²) suffix materialization (the earlier
+    last-8 bound dropped >8-deep DNs; red-team R3/R4/R5)."""
+    exact: dict = {}
+    trie: dict = {}
     for i, c in enumerate(cells):
-        idx.setdefault(("n", c.name), (i, c))
+        exact.setdefault(("n", c.name), (i, c))
         cl = c.attrs.get("cellLocalId")
         if cl is not None:
-            idx.setdefault(("cl", str(cl)), (i, c))
-        # `_resolve` matches ts via name.endswith("=" + ts) / ("/" + ts) — ts is the suffix after any
-        # separator. Index the last _MAX_DN_SUFFIXES boundaries (covers multi-RDN DN references, red-team
-        # R4) but NOT every boundary — materializing all suffixes is O(len²) and a name with thousands of
-        # separators is a DoS (red-team R5). Bounded to O(len·k); an exotic >8-deep DN target at most
-        # misses a neighbor WARNING (co-sited ERRORs use the group path, not the resolver — fail-safe).
-        seps = [k for k, ch in enumerate(c.name) if ch in ("=", "/")]
-        for k in seps[-_MAX_DN_SUFFIXES:]:
-            idx.setdefault(("tok", c.name[k + 1:]), (i, c))
+            exact.setdefault(("cl", str(cl)), (i, c))
         if c.pci is not None:
-            idx.setdefault(("pci", c.pci), (i, c))
-    return idx
+            exact.setdefault(("pci", c.pci), (i, c))
+        node = trie  # insert reversed name; cache min (index) at every node on the path
+        for ch in reversed(c.name):
+            node = node.setdefault(ch, {})
+            cur = node.get(_TRIE_MIN)
+            if cur is None or i < cur[0]:
+                node[_TRIE_MIN] = (i, c)
+    return {"exact": exact, "trie": trie}
 
 
 def _resolve_idx(target: object, idx: dict) -> Cell | None:
     ts = str(target).strip()
-    cands = [idx[k] for k in (("n", ts), ("cl", ts), ("tok", ts)) if k in idx]
+    exact = idx["exact"]
+    cands = [exact[k] for k in (("n", ts), ("cl", ts)) if k in exact]
+    # name.endswith(sep+ts)  ⇔  reversed(name) starts with reversed(sep+ts): walk the trie by that prefix
+    for sep in ("=", "/"):
+        node = idx["trie"]
+        for ch in reversed(sep + ts):
+            node = node.get(ch)
+            if node is None:
+                break
+        else:
+            entry = node.get(_TRIE_MIN)
+            if entry is not None:
+                cands.append(entry)
     if cands:
         return min(cands, key=lambda t: t[0])[1]  # earliest cell across criteria (mirrors _resolve)
     ti = _as_int(ts)
-    entry = idx.get(("pci", ti)) if ti is not None else None
+    entry = exact.get(("pci", ti)) if ti is not None else None
     return entry[1] if entry else None
 
 
