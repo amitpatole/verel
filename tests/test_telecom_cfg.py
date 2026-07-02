@@ -5,6 +5,8 @@ from datetime import date
 
 import pytest
 
+pytest.importorskip("yaml", reason="telecom grader tests need verel[telecom] (pyyaml)")
+
 from verel.ci.telecom_cfg import (
     BUILTIN_RULES,
     apply_waivers,

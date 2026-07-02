@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import pytest
 
+pytest.importorskip("yaml", reason="telecom grader tests need verel[telecom] (pyyaml)")
+pytest.importorskip("defusedxml", reason="telecom XML tests need verel[telecom] (defusedxml)")
+
 from verel.ci.telecom_cfg import grade_cfg, normalize_helm_values
 from verel.ci.telecom_kpi import evaluate_kpis, parse_frame
 from verel.ci.telecom_model import NF, Cell, KpiThreshold, TelecomConfigModel, xml_root
