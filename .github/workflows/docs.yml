@@ -42,3 +42,9 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v5
+        with:
+          # GitHub Pages backend has been slow to CONFIRM deployments (content publishes, but the
+          # action aborted at the default 10-min poll, reddening the workflow). Give confirmation a
+          # 30-min window + more retries so a slow Pages backend doesn't fail an otherwise-good deploy.
+          timeout: 1800000
+          error_count: 20
