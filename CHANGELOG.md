@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — telecom RAN RF rules (prach-root-nonoverlap + ssb-raster)
+## 1.5.0 — telecom RAN RF rules (prach-root-nonoverlap + ssb-raster)
 
 The two RF-math RAN rules deferred in v1.4.0, now shipped — the exact 3GPP lookup tables were
 **cross-verified by two independent research passes** (a domain advisor + an adversarial web-research

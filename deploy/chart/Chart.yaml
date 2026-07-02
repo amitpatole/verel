@@ -6,8 +6,8 @@ description: |
 type: application
 # Chart version is bumped per chart change (independent of appVersion, which tracks the image tag).
 # 1.0.1: add the artifacthub.io/images annotation so Artifact Hub runs the security scan.
-version: 1.4.0
-appVersion: "1.4.0"
+version: 1.5.0
+appVersion: "1.5.0"
 home: https://amitpatole.github.io/verel/
 sources:
   - https://github.com/amitpatole/verel
