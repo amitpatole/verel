@@ -59,10 +59,35 @@ def main(argv=None) -> int:
     sp.add_argument("--rules", help="declared invariants (verel_telecom.yaml); default: all built-ins")
     sp.add_argument("--attest", default="hmac", choices=["hmac", "ed25519"])
 
+    sp = sub.add_parser("telecom-fetch")  # acquisition helper: talks to the network, writes a file
+    sp.add_argument("--url", required=True, help="Prometheus /metrics endpoint, or the server base URL "
+                    "when --query is given")
+    sp.add_argument("--out", required=True, help="write the metrics artifact here (grade with telecom --kpi)")
+    sp.add_argument("--query", help="PromQL instant query (uses the HTTP API; output is JSON)")
+    sp.add_argument("--timeout", type=float, default=15.0)
+    sp.add_argument("--max-bytes", type=int, default=32 * 1024 * 1024)
+    sp.add_argument("--insecure", action="store_true", help="disable TLS verification (discouraged)")
+    sp.add_argument("--allow-link-local", action="store_true",
+                    help="permit link-local targets (169.254/fe80) — bypasses the cloud-metadata SSRF guard")
+
     sp = sub.add_parser("install")
     sp.add_argument("--repo", required=True)
 
     args = p.parse_args(argv)
+    if args.cmd == "telecom-fetch":
+        from .telecom_fetch import FetchError, query_prometheus, scrape
+        try:
+            kw = {"timeout": args.timeout, "max_bytes": args.max_bytes,
+                  "verify_tls": not args.insecure, "allow_link_local": args.allow_link_local}
+            out = query_prometheus(args.url, args.query, **kw) if args.query else scrape(args.url, **kw)
+            with open(args.out, "w", encoding="utf-8") as f:
+                f.write(out)
+        except FetchError as e:
+            print(f"telecom-fetch: {e}", file=sys.stderr)
+            return 2
+        print(f"telecom-fetch: wrote {args.out} ({len(out)} bytes) — grade with "
+              f"`verel-ci telecom --kpi {args.out}`{' --fmt json' if args.query else ' --fmt openmetrics'}")
+        return 0
     if args.cmd == "install":
         print(f"installed: {install_precommit(args.repo)}")
         return 0

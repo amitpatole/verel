@@ -97,7 +97,12 @@ MM.HoExeSuccRate:   {max_delta_vs_baseline: 0.5}   # gate a regression vs a supp
 
 Telecom grading rides CI as a **step**, exactly like the [IaC / cloud-IAM track](use-cases-infra.md):
 a pre-commit hook, a GitHub Action, or a Kubernetes Job runs `verel-ci telecom-cfg` / `verel-ci telecom`
-over the changed artifacts and fails the build on a `FAIL` verdict. The receipt is signed (HMAC by
+over the changed artifacts and fails the build on a `FAIL` verdict.
+
+Need **live** KPIs instead of a committed snapshot? `verel-ci telecom-fetch --url <prometheus> --out
+metrics.json [--query <promql>]` scrapes your Prometheus and writes a file the grader then reads —
+acquisition stays **outside** the grader (network-facing, SSRF/size/TLS-guarded), so the gate itself
+remains offline and deterministic. Grade the written file with `verel-ci telecom --kpi metrics.json`. The receipt is signed (HMAC by
 default; `--attest ed25519` for a receipt a second party verifies with only the public key). The gate is
 offline and deterministic, so it runs anywhere — a laptop, a CI runner, or a `GateRun` in-cluster.
 

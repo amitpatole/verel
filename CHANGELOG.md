@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — telecom Phase 5 (part 2)
+
+- **Live metrics acquisition (`verel-ci telecom-fetch`).** A network-facing helper that scrapes a
+  Prometheus/OpenMetrics endpoint (or runs a PromQL instant query via the HTTP API) and WRITES a metrics
+  file the offline KPI grader then reads — acquisition is deliberately **separate** from grading, so the
+  grader never touches the network and stays pure/deterministic. `new verel.ci.telecom_fetch`. Network
+  guards: http/https-only, **redirects disabled** (3xx = error), an **SSRF guard** rejecting link-local
+  targets (169.254/fe80 = cloud metadata) unless `--allow-link-local`, a bounded read (`--max-bytes`),
+  connect+read `--timeout`, and TLS verification on by default (`--insecure` to opt out). Honest residual:
+  DNS-rebinding TOCTOU is not fully closed — it's an operator tool for your own Prometheus, not for
+  untrusted URLs. Stdlib-only (urllib), no new dependency.
+
 ## 1.6.0 — telecom Phase 5 (part 1: resolver hardening + vendor CM-export adapters)
 
 - **Vendor CM-export adapters — bulk-CM config + vendor PM-counter mapping.** Extends "one machinery"
