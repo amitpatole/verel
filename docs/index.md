@@ -31,6 +31,9 @@ success with no evidence — can't mint green.
   with [AgentVision](https://amitpatole.github.io/agent-vision/) as the eyes.
 - **Paying too much for context** because you replay the whole memory into every prompt? → **yes** —
   budgeted, graded-first recall cuts a 40-fact brain ~**80%** (679→135 tok/turn). [Cost →](comparison.md#cost-what-graded-budgeted-recall-saves)
+- **Gating agent-authored 5G RAN/Core changes** (a slice missing from NSSF, a gNB TAC no AMF serves, a
+  KPI regression)? → **yes** — deterministic, offline, one rule body grades Helm *and* NETCONF.
+  [Telecom RAN / 5G Core →](use-cases-telecom.md)
 - **Just want a memory layer for a single agent with a human curator?** → Verel works, but **Mem0** is
   simpler. Here's the honest [when-to-use comparison](comparison.md).
 

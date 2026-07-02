@@ -290,7 +290,14 @@ python examples/demo_invariant_grader.py  # 10 · a declared business rule viola
 python examples/demo_smell_grader.py      # 11 · over-engineering → complexity gates, speculative flagged
 python examples/demo_gateway.py           # 12 · gate the action boundary: write blocked, deploy dry-run
 python examples/demo_iac.py               # 13 · a dangerous IAM grant in a terraform plan → grounded FAIL
+python examples/demo_telecom_kpi.py       # 14 · 5G PM snapshot: AMF registration SR collapse → grounded FAIL
+python examples/demo_telecom_cfg.py       # 15 · a slice in SMF missing from NSSF → grounded FAIL
+python examples/demo_telecom_ran.py       # 16 · RAN↔Core TAC/PLMN cross-check on Helm AND NETCONF (one machinery)
+python examples/demo_telecom_flagship.py  # 17 · one gNB TAC change → config FAIL + KPI FAIL, two grounded receipts
 ```
+
+> The telecom demos (14–17) need `verel[telecom]` and run fully offline on synthetic Open5GS-shaped data.
+> See **[Use cases — Telecom RAN / 5G Core](use-cases-telecom.md)** for the positioning and the honest scope.
 
 ## More feature-level demos
 

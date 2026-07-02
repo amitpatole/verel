@@ -2,6 +2,19 @@
 
 ## Unreleased — telecom RAN/Core graders
 
+### Phase 4 — positioning, honest scope, and the combined flagship
+
+The capstone: makes the telecom track adoptable and honestly scoped.
+
+- **`docs/use-cases-telecom.md`** — who it's for (Core / RAN / automation), what the three graders do,
+  the one-machinery story (Helm ≡ NETCONF), a copy-paste offline quickstart, how it fits CI (a step,
+  like the IaC track), and an explicit **honest-scope / non-goals** section (correlation≠causation,
+  config≠runtime, vendor dialects, topological-not-RF-planning, no message-level conformance, no
+  drive-test, no slice-SLA delivery). Wired into the docs nav + the homepage "Is Verel for you?".
+- **`examples/demo_telecom_flagship.py`** — one gNB TAC change caught two ways on one gate: the config
+  grader FAILs the declared change (`tac-plmn-consistency`) AND the KPI grader FAILs the synthetic
+  post-window (registration SR collapse) — the config CAUSE and the KPI EFFECT, two signed receipts.
+
 ### Phase 3 — classic/appliance path + RAN rules + the RAN↔Core cross-check
 
 Extends the telecom track to the **classic/appliance** world and RAN, proving **one machinery**: the
