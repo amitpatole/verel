@@ -19,8 +19,10 @@ from datetime import date
 
 from ..verdict.models import Confidence, GraderKind, Issue, IssueKind, Report, Severity, Verdict
 from .graders import GraderSpec, _receipt
+from .telecom_issues import _SEV, _info, _mk
 from .telecom_model import (
     NF,
+    Cell,
     Endpoint,
     MetricFrame,
     TelecomConfigModel,
@@ -119,9 +121,16 @@ def normalize_helm_values(raw: str) -> TelecomConfigModel:
         eps = [Endpoint("N2", str(a), "amf.configmap.amf.ngap.server")
                for a in _addr_list(_dig(cm, "ngap", "server"))]
         uris, scheme = _sbi_client_uris(cm, "amf.configmap.amf")
+        served_tais = []  # SAME shape the NRM adapter fills → tac-plmn-consistency fires on both
+        for i, tai in enumerate(_as_list(_dig(cm, "tai"))):
+            plmn = _plmn(_dig(tai, "plmn_id"))
+            for tac in _as_list(_dig(tai, "tac")):  # Open5GS tac may be scalar or a list
+                t = _as_int(tac)
+                if plmn and t is not None:
+                    served_tais.append({"plmn": plmn, "tac": t, "loc": f"amf.configmap.amf.tai[{i}]"})
         nf = NF(kind="AMF", name="amf", plmns=sorted(set(plmns)), endpoints=eps,
                 replicas=_replicas(data, "amf"), loc="amf.configmap.amf",
-                attrs={"plmn_slices": plmn_slices,
+                attrs={"plmn_slices": plmn_slices, "served_tais": served_tais,
                        "integrity_order": _upper(_dig(sec, "integrity_order")),
                        "ciphering_order": _upper(_dig(sec, "ciphering_order")),
                        "sbi_client_uris": uris, "sbi_scheme": scheme})
@@ -194,7 +203,32 @@ def normalize_helm_values(raw: str) -> TelecomConfigModel:
         nfs.append(NF(kind="UDM", name="udm", replicas=_replicas(data, "udm"),
                       loc="udm.configmap.udm", attrs={"hnet": hnet}))
 
-    return TelecomConfigModel(nfs=nfs, source_sha=MetricFrame.digest(raw))
+    return TelecomConfigModel(nfs=nfs, cells=_helm_cells(data), source_sha=MetricFrame.digest(raw))
+
+
+def _helm_cells(data: dict) -> list[Cell]:
+    """RAN cells from a Helm values RAN section — UERANSIM (`ueransim.gnb`) or a generic `gnb`/`ran`
+    block — populating the SAME Cell shape the NETCONF-NRM adapter fills (the one-machinery point)."""
+    cells: list[Cell] = []
+    for base, gnb in (("ueransim.gnb", _dig(data, "ueransim", "gnb")), ("gnb", _dig(data, "gnb"))):
+        for i, g in enumerate(_as_list(gnb)):
+            if not isinstance(g, dict):
+                continue
+            plmn = _plmn(_dig(g, "plmn_id")) or _plmn(g)  # {mcc,mnc} may be inline
+            tac = _as_int(_dig(g, "tac"))
+            neighbors = [{"target": str(n), "ho_allowed": None, "loc": f"{base}.neighbors"}
+                         for n in _as_list(_dig(g, "neighbors"))]
+            pci_raw = _dig(g, "pci")
+            pci = _as_int(pci_raw)
+            cattrs = {"pci_invalid": pci_raw} if pci is None and pci_raw is not None else {}
+            cells.append(Cell(
+                name=str(_dig(g, "name") or _dig(g, "nci") or f"{base}[{i}]"),
+                gnb=str(_dig(g, "gnb") or base), pci=pci, tac=tac, attrs=cattrs,
+                plmns=[plmn] if plmn else [], arfcn_dl=_as_int(_dig(g, "arfcn") or _dig(g, "arfcnDL")),
+                ssb_frequency=_as_int(_dig(g, "ssbFrequency")),
+                max_tx_power_dbm=_as_float(_dig(g, "maxTxPower")),
+                neighbors=neighbors, loc=f"{base}.tac" if tac is not None else base))
+    return cells
 
 
 def _sessions(cm: dict, base: str) -> list[dict]:
@@ -228,21 +262,6 @@ def _net(cidr: str) -> ipaddress._BaseNetwork | None:
 
 
 # ============================================================================ rule helpers
-_SEV = {"error": Severity.ERROR, "warning": Severity.WARNING, "info": Severity.INFO}
-
-
-def _mk(rule_id: str, check: str, sev: Severity, kind: IssueKind, msg: str,
-        loc: str = "", **detail: object) -> Issue:
-    import json
-    detail = {"rule_id": rule_id, "check": check, **detail}
-    conf = Confidence.HIGH if sev in (Severity.ERROR, Severity.CRITICAL) else Confidence.MEDIUM
-    return Issue(kind=kind, severity=sev, source=GraderKind.TELECOM_CFG, confidence=conf,
-                 message=msg, locator=loc or None, locator_precise=bool(loc),
-                 detail_json=json.dumps(detail))
-
-
-def _info(rule_id: str, check: str, msg: str, loc: str = "") -> Issue:
-    return _mk(rule_id, check, Severity.INFO, IssueKind.OTHER, f"insufficient evidence: {msg}", loc)
 
 
 # ============================================================================ the 7 Core rules
@@ -542,6 +561,14 @@ BUILTIN_RULES: dict[str, RuleDef] = {
                      {"encap_overhead": 60, "n3_transport_mtu": 1500}),
 }
 
+# Register the Phase-3 RAN + cross-domain rules into the SAME registry — that shared registry is the
+# one-machinery proof (identical rule bodies grade Helm and NETCONF-NRM artifacts). Imported here (not
+# at top) to avoid a cycle: telecom_ran depends only on telecom_issues + telecom_model.
+from .telecom_ran import RAN_RULES as _RAN_RULES  # noqa: E402
+
+for _rid, (_fn, _sev, _clause, _params) in _RAN_RULES.items():
+    BUILTIN_RULES[_rid] = RuleDef(_fn, _sev, _clause, _params)
+
 
 # ============================================================================ rule declaration + waivers
 @dataclass(frozen=True)
@@ -688,7 +715,11 @@ def grade_cfg(repo: str, *, values: str, rules: str | dict | None = None,
     from .k8s import _read_in_repo
 
     raw = _read_in_repo(repo, values)
-    tcm = normalize_helm_values(raw)
+    if raw.lstrip().startswith("<"):  # NETCONF / NRM XML artifact (classic/appliance path)
+        from .telecom_nrm import normalize_nrm_xml
+        tcm = normalize_nrm_xml(raw)
+    else:
+        tcm = normalize_helm_values(raw)
     cfg_rules = load_cfg_rules(_read_in_repo(repo, rules) if isinstance(rules, str) else rules)
     issues: list[Issue] = []
     for r in cfg_rules:

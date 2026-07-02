@@ -148,7 +148,9 @@ def parse_frame(raw: str, fmt: str = "auto", mapping: dict[str, str] | None = No
     fmt = (fmt or "auto").lower()
     if fmt == "auto":
         head = (raw or "").lstrip()[:1]
-        if head in "{[":
+        if head == "<":
+            fmt = "pmxml"
+        elif head in "{[":
             fmt = "json"
         elif _OM_LINE.match((raw or "").strip().splitlines()[0] if raw.strip() else ""):
             fmt = "openmetrics"
@@ -160,7 +162,10 @@ def parse_frame(raw: str, fmt: str = "auto", mapping: dict[str, str] | None = No
         return frame_from_openmetrics(raw, mapping)
     if fmt == "csv":
         return frame_from_csv(raw)
-    raise ValueError(f"unknown metrics format: {fmt!r} (expected auto|json|csv|openmetrics)")
+    if fmt == "pmxml":  # 3GPP TS 32.435 measCollecFile \u2192 raw counters + derived ratio KPIs
+        from .telecom_pmxml import derive_kpis, frame_from_pmxml
+        return derive_kpis(frame_from_pmxml(raw, mapping))
+    raise ValueError(f"unknown metrics format: {fmt!r} (expected auto|json|csv|openmetrics|pmxml)")
 
 
 # --------------------------------------------------------------------------- evaluation

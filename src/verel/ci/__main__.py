@@ -48,7 +48,7 @@ def main(argv=None) -> int:
     sp.add_argument("--kpi", help="a metrics artifact in the repo (JSON / CSV / OpenMetrics scrape)")
     sp.add_argument("--thresholds", help="declared KPI thresholds (YAML file in the repo)")
     sp.add_argument("--baseline", help="optional baseline metrics artifact for delta-vs-baseline gating")
-    sp.add_argument("--fmt", default="auto", choices=["auto", "json", "csv", "openmetrics"])
+    sp.add_argument("--fmt", default="auto", choices=["auto", "json", "csv", "openmetrics", "pmxml"])
     sp.add_argument("--attest", default="hmac", choices=["hmac", "ed25519"])
 
     sp = sub.add_parser("telecom-cfg")

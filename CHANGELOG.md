@@ -2,6 +2,32 @@
 
 ## Unreleased — telecom RAN/Core graders
 
+### Phase 3 — classic/appliance path + RAN rules + the RAN↔Core cross-check
+
+Extends the telecom track to the **classic/appliance** world and RAN, proving **one machinery**: the
+identical rule bodies grade a cloud-native (Helm) *and* a classic (NETCONF/NRM) artifact.
+
+- **XXE-safe XML** (`telecom_model.xml_root`): defusedxml with DTD/entities/external all forbidden,
+  plus a cheap pre-parse element+attribute bound and post-parse depth/count/text/attr caps (fails
+  closed to a clean `ValueError` on any malformed/oversized input — no XXE, no billion-laughs, no DoS).
+- **NETCONF / TS 28.541 NRM adapter** (`telecom_nrm.py`) → the SAME `TelecomConfigModel` the Helm
+  adapter fills (cells + NFs + AMF served-TAIs). Namespace-tolerant (matched by local name); NRCellRelation
+  neighbors attach gNB-scoped by `(gNBId, cellLocalId)`.
+- **PM-XML / TS 32.435 adapter** (`telecom_pmxml.py`) → `MetricFrame`; `derive_kpis` turns raw counters
+  into the Phase-1 ratio KPIs (RRC/HO/registration/PDU-session success rates) so the same `verel_kpi.yaml`
+  thresholds work on Prometheus scrapes and EMS ROP files alike. `verel-ci telecom --kpi --fmt pmxml`.
+- **RAN rules** in the shared registry: `pci-collision-confusion`, `neighbor-symmetry`, `eirp-cap`, and
+  the **flagship cross-domain `tac-plmn-consistency`** — a gNB-broadcast (PLMN,TAC) not in any AMF's
+  served-TAI list → Registration Reject 'tracking area not allowed' (5GMM cause #12). `verel-ci
+  telecom-cfg` auto-dispatches Helm (YAML) vs NETCONF (XML). Demo: `examples/demo_telecom_ran.py`
+  (the same FAIL fires on both forms; only the locator differs).
+- **Deferred (documented, not shipped half-right):** `prach-root-nonoverlap` and `ssb-raster` — the
+  N_CS / GSCN raster arithmetic is error-prone offline; a specialized follow-up beats a shaky gate.
+- Hardened over a **6-round security cadence** (terminal-clean): closed a late XML-size guard, an
+  attribute bomb, string-typed/float fail-opens, PM-XML impossible-ratio & negative-subcounter
+  laundering, a suspect-flag bypass, and — across three rounds — the NRM neighbor-relation join
+  (nested-relation drop → RDN-vs-cellLocalId mismatch → cross-gNB cellLocalId reuse).
+
 ### Phase 2 — declared config-invariant grader (5G Core)
 
 A **deterministic** grader (no LLM — a telecom gate that can hallucinate is worse than useless) that
