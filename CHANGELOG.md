@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — telecom Phase 5 (part 2)
+## 1.7.0 — telecom Phase 5 (part 2: live acquisition + NETCONF actuator)
 
 - **NETCONF actuator — act-then-verify, guardrail-gated (`verel-ci telecom-apply`).** The "hands" of the
   telecom track: apply a 5G config change, then the graders CONFIRM it landed and is still valid.
