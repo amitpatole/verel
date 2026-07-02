@@ -66,7 +66,10 @@ into memory; then the eyes look again.
 - **[Verel vs Mem0 / Engram / Zep](comparison.md)** — honest when-to-use, and a "coming from Mem0" mapping.
 - **[Try it yourself](try-it.md)** — a from-scratch, copy-paste walkthrough (no API key): catch a
   real bug, fix it, watch Verel remember it so it can't come back.
+- **[Start here](start-here.md)** — zero to your first verdict in two minutes; the one core idea.
 - **[Get started](getting-started.md)** — install, the gate, CI/agents adoption.
+- **[Install & extras](install-extras.md)** — the light base wheel + every optional extra, and when to use it.
+- **[Trust model](trust-model.md)** — what's cryptographically guaranteed (signed receipts, isolation) and what isn't.
 - **[5-minute tutorial](tutorial.md)** — gate a repo, heal failing tests, watch a bug get remembered.
 - **[Use cases](use-cases.md)** — where Verel fits: agent loops, CI/CD, fleets, shared memory.
 - **[Real-world scenarios](examples.md)** — runnable demos with real captured output for each.

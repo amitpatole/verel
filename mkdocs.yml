@@ -59,9 +59,11 @@ plugins:
 
 nav:
   - Home: index.md
+  - Start here: start-here.md
   - Memory in 5 minutes: memory-quickstart.md
   - Verel vs Mem0 / Engram / Zep: comparison.md
   - Get started: getting-started.md
+  - Install & extras: install-extras.md
   - Try it yourself: try-it.md
   - 5-minute tutorial: tutorial.md
   - Use cases: use-cases.md
@@ -78,6 +80,7 @@ nav:
   - Reference:
       - CLI: cli.md
       - Configuration: configuration.md
+      - Trust model: trust-model.md
       - Graders: graders.md
       - Memory backends: memory-backends.md
       - Python API: api.md
