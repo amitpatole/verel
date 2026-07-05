@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.7.1 — adoption: first-run usability + portability
+
+Fixes from a three-angle adoption audit (portability / first-run / CLI-docs). The golden path was
+already excellent and honest; these close the "one inch off the path → wordless `ERRORED`" cliff and
+some front-door trust gaps.
+
+- **`ERRORED` now prints its reason.** An errored grader shows its `summary` (e.g. `lint: tool missing
+  (ruff)`) and the gate's overall reason instead of a bare "ERRORED" — the #1 first-run dead-end.
+- **Test/mutation graders run `sys.executable`, not bare `"python"`.** On a python3-only host, pipx, or
+  a mismatched venv the old code silently ran the *wrong* interpreter's pytest → wrong verdicts.
+- **`verel doctor` is first-run-friendly:** regrouped (core grading / sandbox tier / agentic / optional
+  IaC), now probes **pytest** (the one required grader) + bwrap/systemd-run/seccomp (the Linux-only
+  sandbox tier), labels the LLM-key lines "agentic only", and ends with the next command to run.
+- **Windows subprocess sandbox warns** when `resource` is unavailable (it's timeout-only there) — a
+  security control must never degrade silently.
+- **Docs truth:** README test badge corrected + a drift-guard test so it can't silently rot again;
+  telecom now visible in the README; dead "Phase 0 / VEREL_DESIGN.md" docstrings rewritten.
+
 ## 1.7.0 — telecom Phase 5 (part 2: live acquisition + NETCONF actuator)
 
 - **NETCONF actuator — act-then-verify, guardrail-gated (`verel-ci telecom-apply`).** The "hands" of the
