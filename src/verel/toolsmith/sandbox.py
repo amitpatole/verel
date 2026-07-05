@@ -91,6 +91,17 @@ def run_sandboxed(tool: ToolRecord, args=None, kwargs=None, *, timeout_s: float 
     if not tool.verify():
         raise SandboxError(f"tool {tool.name!r} failed signature verification")
 
+    # The child applies RLIMIT_* via the `resource` module, which does NOT exist on Windows. Never let a
+    # security control degrade SILENTLY (project rule): warn loudly that the sandbox is timeout-only here.
+    import importlib.util
+    import warnings
+    if importlib.util.find_spec("resource") is None:
+        warnings.warn(
+            "run_sandboxed: the 'resource' module is unavailable on this platform (e.g. Windows) — the "
+            "subprocess sandbox enforces a wall-clock timeout ONLY (no CPU/memory/file-size/proc caps). "
+            "Run untrusted-tool execution on Linux, or in a Linux container, for the full sandbox.",
+            RuntimeWarning, stacklevel=2)
+
     child = _CHILD.format(cpu=cpu_s, mem=mem_bytes)
     cmd = [sys.executable, "-I", "-S", "-c", child]
     return exec_child(cmd, tool, args, kwargs, timeout_s=timeout_s, start_new_session=True)

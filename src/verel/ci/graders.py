@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from hashlib import blake2s
@@ -194,7 +195,10 @@ def pytest_spec(repo: str, covers: list[str] | None = None, *, paths: list[str] 
     # `-B`: never write/read .pyc. The ultracode loop edits source in place and re-tests
     # within the same second; same-size edits + 1s mtime granularity make a stale .pyc pass
     # old bytecode (a false verdict). -B forces a fresh compile every run.
-    cmd = ["python", "-B", "-m", "pytest", "-q", "--tb=line", "-rfE", "-p", "no:cacheprovider",
+    # sys.executable, NOT bare "python": a python3-only host, pipx, or any venv where `python` on PATH
+    # isn't the one running verel would run the WRONG interpreter's pytest → wrong verdicts (adoption
+    # audit P0; the same fix already landed for spec-checks in v1.3.1).
+    cmd = [sys.executable, "-B", "-m", "pytest", "-q", "--tb=line", "-rfE", "-p", "no:cacheprovider",
            *(paths or [])]
     return GraderSpec(GraderKind.TEST, cmd, cwd=repo, covers=covers or [])
 
@@ -230,7 +234,7 @@ def mutation_spec(repo: str, targets: list[str], covers: list[str] | None = None
                   cap: int = 25, timeout: int = 120):
     """Test-effectiveness grader: mutate `targets` (the changed source files) and re-run the suite.
     Gates (`GraderKind.MUTATION` ∈ PRECISE_GRADERS) on any surviving mutant."""
-    cmd = ["python", "-m", "verel.ci.mutation", "--repo", repo, "--targets", ",".join(targets),
+    cmd = [sys.executable, "-m", "verel.ci.mutation", "--repo", repo, "--targets", ",".join(targets),
            "--cap", str(cap), "--timeout", str(timeout)]
     return GraderSpec(GraderKind.MUTATION, cmd, cwd=repo, covers=covers or list(targets),
                       parser=parse_mutation)

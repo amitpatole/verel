@@ -26,19 +26,47 @@ def _doctor() -> int:
     def ok(b):
         return "OK " if b else "-- "
 
+    import subprocess
+
+    def tool_ok(cmd) -> bool:  # a real invocation probe (not just PATH) — catches a broken/mismatched tool
+        try:
+            return subprocess.run(cmd, capture_output=True, timeout=15).returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            return False
+
     print(f"verel {__version__}")
+    print("  — core grading (no key / no network needed):")
     print(f"  {ok(sys.version_info >= (3, 10))}python {sys.version.split()[0]}")
     print(f"  {ok(shutil.which('git'))}git")
-    print(f"  {ok((Path.home() / '.config/ollama/key').exists())}ollama cloud key (~/.config/ollama/key)")
-    print(f"  {ok((Path.home() / '.config/OpenAI/key').exists())}openai key (fallback)")
+    # pytest is the ONE grader `required` by every stage — probed the same way the grader runs it
+    # (sys.executable), so `doctor` can't say OK while the very next `verel-ci check` errors (adoption P0).
+    print(f"  {ok(tool_ok([sys.executable, '-m', 'pytest', '--version']))}"
+          f"pytest (test grader — required) — `pip install verel[dev]`   [{sys.executable}]")
+    print(f"  {ok(shutil.which('ruff'))}ruff (lint grader) — `pip install verel[dev]`")
+    print(f"  {ok(shutil.which('mypy'))}mypy (typecheck grader) — `pip install verel[dev]`")
+    # Untrusted-code sandbox tier — Linux-only; on macOS/Windows these paths fail CLOSED (they don't run
+    # the core gate, only agent-built tools / generated spec-checks / MCP build_tool).
+    print("  — sandbox tier (untrusted-code isolation; Linux-only, fails closed elsewhere):")
+    print(f"  {ok(shutil.which('bwrap'))}bubblewrap (container sandbox — Linux only)")
+    print(f"  {ok(shutil.which('systemd-run'))}systemd-run (cgroup memory bound for containered checks)")
+    try:
+        import pyseccomp  # noqa: F401
+        _seccomp = True
+    except ImportError:
+        _seccomp = False
+    print(f"  {ok(_seccomp)}pyseccomp (seccomp-bpf syscall filter) — `pip install verel[container]`")
+    print("  — agentic features (`verel heal` / `loop` / `fleet` — needs an LLM key):")
+    print(f"  {ok((Path.home() / '.config/ollama/key').exists())}"
+          "ollama cloud key (~/.config/ollama/key or OLLAMA_API_KEY)")
+    print(f"  {ok((Path.home() / '.config/OpenAI/key').exists())}"
+          "openai key (fallback, VEREL_LLM_PROVIDER=openai)")
     try:
         import agentvision  # noqa: F401
         sight = True
     except ImportError:
         sight = False
     print(f"  {ok(sight)}agentvision (eyes) — `pip install verel[sight]`")
-    print(f"  {ok(shutil.which('ruff'))}ruff (lint grader)")
-    print(f"  {ok(shutil.which('mypy'))}mypy (typecheck grader)")
+    print("  — optional: IaC / K8s graders (`verel[iac]` + external binaries):")
     # IaC / DevOps graders + IAM sensor (IAC-KICKOFF.md) — external binaries, install `verel[iac]`.
     # terraform/tofu is the IAC grader + IAM-change source; the rest broaden coverage by phase.
     _tf = shutil.which("terraform") or shutil.which("tofu")
@@ -75,6 +103,7 @@ def _doctor() -> int:
     backend = _os.environ.get("VEREL_MEMORY_BACKEND") or (
         "remote" if _os.environ.get("VEREL_BRAIN_URL") else "local")
     print(f"  -> memory backend: {backend}  (available: {', '.join(known_backends())})")
+    print("\n  next: `verel-ci check --repo .` — grade a repo into one signed verdict (no key needed).")
     return 0
 
 

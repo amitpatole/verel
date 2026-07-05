@@ -2,9 +2,7 @@
 
 This is an *extension* of AgentVision's `Report` reached through the sight adapter
 (`verel.senses.sight`), NOT a copy. Fields marked COMPUTED are produced by Verel:
-`Issue.fingerprint` (§7.2), `Report.cost_usd`, `Report.errored`, `Report.run_receipt`.
-
-Faithful to docs/VEREL_DESIGN.md §7.1.
+`Issue.fingerprint`, `Report.cost_usd`, `Report.errored`, `Report.run_receipt`.
 """
 
 from __future__ import annotations

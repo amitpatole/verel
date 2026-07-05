@@ -1,8 +1,9 @@
 """Verel — the agent framework where nothing is "done" until a grader returns a verdict,
 checked by real senses including eyes (AgentVision), and only verified work compounds.
 
-Phase 0 (walking skeleton) ships the verdict bus + the AgentVision sight adapter + the
-single-worker ultracode loop. See docs/VEREL_DESIGN.md.
+The verdict bus grades work (`pass`/`warn`/`fail`) with signed receipts; graders span code (tests,
+types, lint, security, mutation), infrastructure (IaC/IAM/K8s), telecom (5G RAN/Core config + KPIs),
+and perception (eyes/ears). Docs: https://amitpatole.github.io/verel/
 """
 
 from __future__ import annotations

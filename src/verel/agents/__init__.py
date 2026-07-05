@@ -1,7 +1,7 @@
 """Verel agents — the seam where models author work the verdict bus then gates.
 
-Phase 0 ships the coding agent (`FixHook`). The orchestration/fleet layer (agents managing
-agents) is v2 per docs/VEREL_DESIGN.md §6.
+The coding agent heals a red build (`verel heal`); the fleet/loop layer runs many managers over one
+shared, trust-gated brain. Agentic features need an LLM; grading itself does not.
 """
 
 from __future__ import annotations

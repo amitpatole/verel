@@ -25,8 +25,16 @@ def _print(result):
         if r.issues or r.errored:
             tag = "ERRORED" if r.errored else f"{len(r.issues)} issue(s)"
             print(f"  - {r.grader.value}: {tag}")
+            # An errored grader has no issues to show — print WHY it errored (tool missing, bad path,
+            # no tests) so the user isn't left staring at a bare "ERRORED" (adoption audit P0).
+            if r.errored and r.summary:
+                print(f"      {r.summary}")
             for i in r.issues[:10]:
                 print(f"      {i.source.value}:{i.severity.value} {i.locator or ''} {i.message[:80]}")
+    # Surface the gate's overall reason on any non-pass (e.g. "required grader(s) absent/errored: lint").
+    gate = getattr(result, "gate", None)
+    if gate is not None and getattr(gate, "reason", "") and result.verdict.value != "pass":
+        print(f"  → {gate.reason}")
     if result.regressions:
         print(f"  ! {len(result.regressions)} reintroduced failure(s) blocked from memory")
 
