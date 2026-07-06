@@ -48,7 +48,7 @@ verel doctor
 A representative run:
 
 ```text
-verel 1.7.2
+verel 1.8.0
   — core grading (no key / no network needed):
   OK python 3.11.9
   OK git

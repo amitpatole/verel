@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.8.0 — eyes grade motion (video/GIF) over time
+
+- **Sight sense now grades local motion media.** With AgentVision 0.11, `perceive()` and
+  `watch()` route a local video file (`.mp4`/`.webm`/`.mov`/…) or an animated GIF into the
+  temporal grader — sampled over time, not flattened to a still. The motion signal rides the
+  existing percept fields (`live`=moving, `stabilized`), and a **dead/static export** gates the
+  verdict-bus to **FAIL** via a deterministic `no_motion` CV issue. No contract change — the
+  `Report`/`Issue`/`Percept` shape is unchanged; motion "just works" through the existing wrappers.
+- **`verel[sight]` now pulls `agentvision[render,motion]>=0.11`** so a fresh install grades video
+  out of the box (bundled ffmpeg via the eyes' `[motion]` extra; animated GIFs need nothing extra).
+- Regression tests pin the mapping: a motion report surfaces `live`, and a dead export FAILs the bus.
+
 ## 1.7.2 — adoption P2 polish (CLI help + docs completeness)
 
 - `verel-ci --help` now populated (correct prog name + description + per-subcommand help; was mute).

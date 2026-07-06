@@ -8,7 +8,7 @@ and perception (eyes/ears). Docs: https://amitpatole.github.io/verel/
 
 from __future__ import annotations
 
-__version__ = "1.7.2"
+__version__ = "1.8.0"
 
 from .verdict import (
     GateResult,

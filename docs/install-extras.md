@@ -15,7 +15,7 @@ pip install verel               # core: the verdict bus + graders that need no e
 | Extra | Pulls in | Use it for |
 |---|---|---|
 | `dev` | pytest · pytest-asyncio · ruff · mypy · **bandit** | The pre-merge CI gate — the test / type / lint / **security** graders. |
-| `sight` | `agentvision[render]` | The **eyes** — visual gating of rendered UIs/video, temporal watch. |
+| `sight` | `agentvision[render,motion]` | The **eyes** — visual gating of rendered UIs, plus **local motion media** (video files + animated GIFs) graded **over time** and the temporal `watch`. |
 | `hearing` | `audel[asr]` | The **ears** — audio/voice grading (DSP grounding + local ASR). |
 | `attest` | `pynacl` | **ed25519** publicly-verifiable receipts. HMAC receipts work without it. |
 | `container` | `pyseccomp` | The **seccomp-bpf** syscall filter for the bwrap container runner. |

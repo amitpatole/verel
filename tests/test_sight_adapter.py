@@ -113,6 +113,28 @@ def test_stalled_video_gates_to_fail():
     assert gate(res.reports).verdict == Verdict.FAIL
 
 
+def test_motion_file_surfaces_moving_signal():
+    # A local video/GIF graded over time rides the same temporal signal as a page watch —
+    # so a motion artifact perceived through the sight sense sets live(moving)/stabilized.
+    signal = {"moving": True, "stabilized": False, "loops_cleanly": False, "videos": []}
+    av = _av_report([_av_issue("other", "info", "cv", detail={"temporal": signal})],
+                    verdict="pass", backend="watch")
+    res = from_agentvision(av)
+    assert res.percept.live is True          # motion detected across sampled frames
+    assert res.percept.stabilized is False
+    assert res.percept.playing is None       # no <video> element (a file has no DOM media)
+
+
+def test_dead_export_motion_file_gates_to_fail():
+    # A motion file that never moves (static export bug) rides a deterministic CV ERROR
+    # (temporal=no_motion) -> not clamped -> gates the bus to FAIL.
+    av = _av_report([_av_issue("other", "error", "cv",
+                               message="Nothing moved across sampled frames — dead export",
+                               detail={"temporal": "no_motion"})])
+    res = from_agentvision(av)
+    assert gate(res.reports).verdict == Verdict.FAIL
+
+
 def test_mixed_sources_split_into_separate_reports():
     av = _av_report([
         _av_issue("overflow", "error", "dom"),
