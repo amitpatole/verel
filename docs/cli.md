@@ -78,7 +78,8 @@ verel ci check --repo . --no-lint
 ```
 
 `verel ci …` forwards its remainder verbatim to `verel-ci`, so any `verel-ci` subcommand/flag
-(`check`, `precommit`, `iac`, `install`) works behind `verel ci`. See [`verel-ci`](#verel-ci-the-ci-gate).
+(`check`, `precommit`, `iac`, `telecom`, `telecom-cfg`, `telecom-fetch`, `telecom-apply`, `install`)
+works behind `verel ci`. See [`verel-ci`](#verel-ci-the-ci-gate).
 
 ```bash
 # Grade an IaC artifact OFFLINE — catch a dangerous cloud-IAM change before apply (exit 1 on FAIL):
@@ -180,7 +181,15 @@ wires straight into CI or a git hook.
 |---|---|
 | `check --repo PATH [--no-lint]` | Run the inner-loop stage, print the verdict, exit non-zero on FAIL. |
 | `precommit --repo PATH [--no-lint]` | Pre-commit stage — aborts a commit on FAIL. |
+| `iac --repo PATH [--plan/--manifests]` | Grade a Terraform plan / K8s manifests (IaC + cloud-IAM + RBAC). |
+| `telecom --repo PATH --kpi … --thresholds …` | Grade 5G PM-counter KPIs (needs `verel[telecom]`). |
+| `telecom-cfg --repo PATH --values …` | Grade declared 5G Core+RAN config invariants (Helm/NETCONF/bulk-CM). |
+| `telecom-fetch --url … --out …` | Scrape Prometheus/PromQL → a metrics file (network-facing; grader stays offline). |
+| `telecom-apply --repo PATH --desired … --current …` | Act-then-verify a config change (dry-run unless `--apply`). |
 | `install --repo PATH` | Install a native git pre-commit hook. |
+
+Run `verel-ci <command> --help` for each command's flags. The telecom family is documented in depth on
+the [Telecom RAN / 5G Core](use-cases-telecom.md) page.
 
 ```bash
 verel-ci check --repo .        # gate; exit 0 unless verdict == fail

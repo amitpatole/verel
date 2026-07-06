@@ -159,7 +159,7 @@ verel doctor                               # confirms: -> memory backend: local 
 
 ```python
 from verel.memory import load_backend, known_backends
-print(known_backends())                    # ['local', 'remote']
+print(known_backends())                    # ['lancedb', 'local', 'postgres', 'redis', 'remote']
 brain = load_backend("local")              # resolved by name through the backend registry
 ```
 

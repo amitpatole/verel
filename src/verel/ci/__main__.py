@@ -1,12 +1,14 @@
 """`python -m verel.ci` — the CLI agents (and git hooks) invoke for gated CI (§7.4).
 
-Subcommands:
-  precommit --repo PATH   run the pre-commit stage; exit non-zero on FAIL (aborts a commit)
-  check     --repo PATH   run the inner-loop stage and print the verdict
-  iac       --repo PATH   grade a terraform plan / K8s manifests (drift + cloud-IAM sensor), offline
-  telecom   --repo PATH   grade 5G PM counters (--kpi) against declared thresholds (--thresholds), offline
-  telecom-cfg --repo PATH grade a 5G-Core config artifact (--values) against declared invariants, offline
-  install   --repo PATH   install the pre-commit hook
+Subcommands (see `verel-ci <command> --help`):
+  precommit     --repo PATH   run the pre-commit stage; exit non-zero on FAIL (aborts a commit)
+  check         --repo PATH   run the inner-loop stage and print the verdict
+  iac           --repo PATH   grade a terraform plan / K8s manifests (drift + cloud-IAM sensor), offline
+  telecom       --repo PATH   grade 5G PM counters (--kpi) against declared thresholds, offline
+  telecom-cfg   --repo PATH   grade a 5G Core+RAN config artifact (--values) against invariants, offline
+  telecom-fetch --url URL     scrape Prometheus/PromQL → a metrics file (network-facing acquisition)
+  telecom-apply --repo PATH   act-then-verify a config change (dry-run unless --apply), guardrail-gated
+  install       --repo PATH   install the pre-commit hook
 """
 
 from __future__ import annotations
@@ -87,18 +89,21 @@ def _telecom_apply(args) -> int:
 
 
 def main(argv=None) -> int:
-    p = argparse.ArgumentParser(prog="verel.ci")
-    sub = p.add_subparsers(dest="cmd", required=True)
-    for name in ("precommit", "check"):
-        sp = sub.add_parser(name)
+    p = argparse.ArgumentParser(
+        prog="verel-ci",
+        description="Verel CI gate — grade a repo/artifact into one signed pass/warn/fail verdict.")
+    sub = p.add_subparsers(dest="cmd", required=True, metavar="<command>")
+    for name, _help in (("precommit", "grade the pre-commit stage (tests/lint/types) over a repo"),
+                        ("check", "grade the inner-loop stage over a repo")):
+        sp = sub.add_parser(name, help=_help)
         sp.add_argument("--repo", required=True)
         sp.add_argument("--no-lint", action="store_true")
-    sp = sub.add_parser("iac")
+    sp = sub.add_parser("iac", help="grade a Terraform plan / K8s manifests (IaC + cloud-IAM + RBAC)")
     sp.add_argument("--repo", required=True)
     sp.add_argument("--plan", help="a `terraform show -json` plan file (in the repo)")
     sp.add_argument("--manifests", help="Kubernetes manifests as JSON, e.g. `kubectl -o json` (in the repo)")
 
-    sp = sub.add_parser("telecom")
+    sp = sub.add_parser("telecom", help="grade 5G PM-counter KPIs against declared thresholds")
     sp.add_argument("--repo", required=True)
     sp.add_argument("--kpi", help="a metrics artifact in the repo (JSON / CSV / OpenMetrics scrape)")
     sp.add_argument("--thresholds", help="declared KPI thresholds (YAML file in the repo)")
@@ -108,13 +113,15 @@ def main(argv=None) -> int:
                     "repo-relative YAML path mapping vendor counter names → canonical TS 28.552")
     sp.add_argument("--attest", default="hmac", choices=["hmac", "ed25519"])
 
-    sp = sub.add_parser("telecom-cfg")
+    sp = sub.add_parser("telecom-cfg",
+                        help="grade declared 5G Core+RAN config invariants (Helm/NETCONF/bulk-CM)")
     sp.add_argument("--repo", required=True)
     sp.add_argument("--values", help="an Open5GS-shaped Helm-values artifact in the repo")
     sp.add_argument("--rules", help="declared invariants (verel_telecom.yaml); default: all built-ins")
     sp.add_argument("--attest", default="hmac", choices=["hmac", "ed25519"])
 
-    sp = sub.add_parser("telecom-fetch")  # acquisition helper: talks to the network, writes a file
+    sp = sub.add_parser("telecom-fetch",  # acquisition helper: talks to the network, writes a file
+                        help="scrape Prometheus/PromQL → a metrics file (network-facing; grader offline)")
     sp.add_argument("--url", required=True, help="Prometheus /metrics endpoint, or the server base URL "
                     "when --query is given")
     sp.add_argument("--out", required=True, help="write the metrics artifact here (grade with telecom --kpi)")
@@ -125,7 +132,8 @@ def main(argv=None) -> int:
     sp.add_argument("--allow-link-local", action="store_true",
                     help="permit link-local targets (169.254/fe80) — bypasses the cloud-metadata SSRF guard")
 
-    sp = sub.add_parser("telecom-apply")  # act-then-verify a config change; DRY-RUN unless --apply
+    sp = sub.add_parser("telecom-apply",  # act-then-verify a config change; DRY-RUN unless --apply
+                        help="apply a 5G config change, act-then-verify guardrails (dry-run unless --apply)")
     sp.add_argument("--repo", required=True)
     sp.add_argument("--desired", required=True, help="the target config artifact (graded pre-flight)")
     sp.add_argument("--current", required=True, help="current config artifact (for change classification)")
@@ -138,7 +146,7 @@ def main(argv=None) -> int:
     sp.add_argument("--port", type=int, default=830)
     sp.add_argument("--user", help="NETCONF SSH user (live apply); creds from env/agent, never the repo")
 
-    sp = sub.add_parser("install")
+    sp = sub.add_parser("install", help="install the Verel pre-commit hook into a repo")
     sp.add_argument("--repo", required=True)
 
     args = p.parse_args(argv)

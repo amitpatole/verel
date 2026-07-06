@@ -59,6 +59,41 @@ def test_sandbox_warns_when_resource_module_absent(monkeypatch):
     assert any(issubclass(x.category, RuntimeWarning) and "timeout" in str(x.message).lower() for x in w)
 
 
+def test_grade_functions_top_level_reexport():
+    # adoption P2: grade_kpi / grade_cfg re-exported from verel.ci like grade_iac (not a deep path)
+    from verel.ci import grade_cfg, grade_iac, grade_kpi  # noqa: F401
+
+
+def test_verel_ci_help_lists_all_subcommands():
+    # adoption P2: `verel-ci --help` was mute (no help text, prog "verel.ci"). Now every subcommand shows.
+    import subprocess
+    out = subprocess.run([sys.executable, "-m", "verel.ci", "--help"],
+                         capture_output=True, text=True).stdout
+    assert "verel-ci" in out  # correct prog name, not "verel.ci"
+    for c in ("precommit", "check", "iac", "telecom", "telecom-cfg", "telecom-fetch",
+              "telecom-apply", "install"):
+        assert c in out, f"{c} missing from --help"
+
+
+def test_heal_llm_error_prints_hint_not_traceback(monkeypatch, capsys):
+    # adoption P2: a missing LLM key must print a one-line hint + `verel doctor`, not a raw traceback.
+    import verel.ci as ci
+    from verel import cli
+    from verel.agents.llm import LLMError
+
+    monkeypatch.setattr(ci, "inner_loop_stage", lambda repo, with_lint=False: object())
+
+    def boom(*a, **k):
+        raise LLMError("no key for 'ollama' (set OLLAMA_API_KEY or ~/.config/ollama/key)")
+    monkeypatch.setattr(ci, "self_heal", boom)
+
+    class _Args:
+        repo = "."
+        max_rounds = 1
+    rc = cli._heal(_Args())
+    assert rc == 2 and "verel doctor" in capsys.readouterr().err
+
+
 def test_pass_does_not_print_gate_reason_noise():
     # on a clean pass, no spurious gate-reason line
     result = StageResult(name="s", verdict=Verdict.PASS,

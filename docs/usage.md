@@ -18,7 +18,12 @@ pip install "verel[sight]"        # + AgentVision eyes (visual gating + temporal
 pip install "verel[container]"    # + seccomp-bpf for the bwrap tool sandbox
 pip install "verel[mem0]"         # + the rented mem0 memory backend
 pip install "verel[mcp]"          # + the MCP server
+pip install "verel[iac]"          # + IaC / cloud-IAM / K8s graders
+pip install "verel[telecom]"      # + 5G RAN/Core config + KPI graders
 ```
+
+> The full list of extras (14) — including `attest`, `postgres`, `lancedb`, `redis`, `operator`,
+> `hearing`, `telecom-actuator` — with when to use each is on the **[Install & extras](install-extras.md)** page.
 
 | Extra | Pulls in | Enables |
 |---|---|---|

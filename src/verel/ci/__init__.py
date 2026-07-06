@@ -99,6 +99,8 @@ from .rollback import (
     RollbackPolicy,
     RollbackProposal,
 )
+from .telecom_cfg import grade_cfg  # parity with grade_iac — top-level, not a deep telecom_* path
+from .telecom_kpi import grade_kpi
 
 __all__ = [
     "GraderSpec", "run_grader", "subprocess_runner", "suite_sha",
@@ -119,7 +121,7 @@ __all__ = [
     "extract_rbac_risks", "parse_kube_objects", "parse_helm_template",
     "parse_kube_score", "parse_kube_linter", "parse_polaris",
     "kubectl_dryrun_spec", "helm_template_spec", "kube_score_spec",
-    "kube_linter_spec", "polaris_spec", "grade_iac",
+    "kube_linter_spec", "polaris_spec", "grade_iac", "grade_kpi", "grade_cfg",
     "Stage", "StageResult", "run_stage", "inner_loop_stage", "precommit_stage", "premerge_stage",
     "postmerge_stage",
     "Action", "Diagnosis", "classify_issue", "triage", "quarantine_severity", "enrich_diagnoses",

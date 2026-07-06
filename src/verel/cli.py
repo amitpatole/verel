@@ -1,12 +1,17 @@
 """`verel` — the unified command line for the framework.
 
-Subcommands (each lazily imports what it needs, so `verel doctor` works on a minimal install):
-  verel doctor                         check the environment (python, git, ollama, sight, tools)
+Subcommands (each lazily imports what it needs, so `verel doctor` works on a minimal install;
+run `verel <command> --help` for flags):
+  verel doctor                         check the environment (python, git, graders, sandbox, keys)
   verel loop  <artifact> [--backend]   run the ultracode visual loop (agent fix + AgentVision)
   verel fleet <goal> --artifacts a b   LLM manager fan-out → workers fix each artifact
-  verel ci    <check|heal|...> --repo  agent-run CI (delegates to `python -m verel.ci`)
+  verel ci    <check|precommit|iac|telecom…> --repo   agent-run CI (delegates to `verel-ci`)
   verel heal  --repo PATH              self-healing CI: failing tests → agent fixes → pass
-  verel verify <receipt.json>          verify a run-receipt (ed25519 = publicly verifiable; §11)
+  verel verify <receipt.json>          verify a run-receipt (ed25519 = publicly verifiable)
+  verel verify-access <policy>         opt-in effective cloud-access verifier (online)
+  verel serve  [--repo]                REST gate + PR webhook (fail-closed bind policy)
+  verel mcp install                    expose Verel over the Model Context Protocol
+  verel rules  --target FILE           write the Verel-gate instruction for any agent
   verel version
 """
 
@@ -133,10 +138,16 @@ async def _fleet(args) -> int:
 
 
 def _heal(args) -> int:
+    from .agents.llm import LLMError
     from .ci import inner_loop_stage, self_heal
 
     stage = inner_loop_stage(args.repo, with_lint=False)
-    res = self_heal(args.repo, stage, max_rounds=args.max_rounds)
+    try:
+        res = self_heal(args.repo, stage, max_rounds=args.max_rounds)
+    except LLMError as e:  # agentic features need an LLM key — a config problem, not a crash
+        print(f"-- {e}\n   `verel heal` needs an LLM; run `verel doctor` to check your key setup.",
+              file=sys.stderr)
+        return 2
     for r in res.rounds:
         print(f"  round {r.n}: {r.verdict}  actions={r.actions}  changed={r.changed}")
     print(f"healed={res.healed} terminated_on={res.terminated_on}")

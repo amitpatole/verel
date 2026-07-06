@@ -111,6 +111,8 @@ pytest grader, the ci-medic classifies the failures, an agent patches the **sour
 tests), and the stage re-gates — round after round — until the *graders themselves* return green.
 
 ```bash
+# the examples/ dir is in the git repo, not the wheel — clone it first:
+git clone https://github.com/amitpatole/verel && cd verel
 # default LLM is Ollama Cloud (~/.config/ollama/key); set VEREL_LLM_PROVIDER=openai to switch
 python examples/demo_selfheal.py
 ```
