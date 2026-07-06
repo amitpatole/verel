@@ -238,7 +238,7 @@ recall budget=12 → used=8, dropped=2 (fenced)</pre>
 
 <section id="eyesbrain"><div class="wrap">
   <div class="sech"><div class="k">Eyes &amp; Brain</div><h2>Two systems, one nervous system</h2>
-    <p><a href="https://huggingface.co/spaces/amitpatole/AgentVision" target="_blank">AgentVision</a> is the eyes; Verel is the brain. The eyes perceive a rendered artifact and grade it &mdash; including <em>does it match what we set out to build?</em> &mdash; then hand a clean signal up the optic nerve. The brain decides with grader attestation, and only verified work compounds into memory. The eyes can also <strong>watch over time</strong> &mdash; temporal verification of playback / loading / liveness for streaming UIs, video and live dashboards. A deterministic video <em>stall</em> gates the bus to FAIL, and verified playback compounds into memory. They ship and version independently (<code>pip install agentvision</code>, <code>pip install verel</code>), but in sync.</p></div>
+    <p><a href="https://huggingface.co/spaces/amitpatole/AgentVision" target="_blank">AgentVision</a> is the eyes; Verel is the brain. The eyes perceive a rendered artifact and grade it &mdash; including <em>does it match what we set out to build?</em> &mdash; then hand a clean signal up the optic nerve. The brain decides with grader attestation, and only verified work compounds into memory. The eyes can also <strong>watch over time</strong> &mdash; temporal verification of playback / loading / liveness for streaming UIs, live dashboards, and now <strong>local video files &amp; animated GIFs</strong> graded frame-by-frame. A deterministic video <em>stall</em> or a <em>dead/static export</em> gates the bus to FAIL, and verified playback compounds into memory. They ship and version independently (<code>pip install agentvision</code>, <code>pip install verel</code>), but in sync.</p></div>
   <img class="diagram" src="https://raw.githubusercontent.com/amitpatole/verel/main/media/unified-architecture.png" alt="Eyes and Brain - AgentVision perceives and grades intent; Verel decides and compounds verified work into memory"/>
 </div></section>
 
@@ -271,7 +271,7 @@ recall budget=12 → used=8, dropped=2 (fenced)</pre>
   <div id="hmap"></div>
   <p class="mnote">Top countries by 30-day PyPI downloads &middot; snapshot 2026-06-25</p>
 </div></section>
-<section><div class="wrap"><div class="sech"><div class="k">Adopt</div><h2>Drop it into your workflow &amp; agents</h2></div><p>CI gate in one step (<code>uses: amitpatole/verel@v0.48.0</code>) — tests + lint + types in one verdict — a pre-commit hook, or <code>verel-ci check</code> in any script. For agents: <code>verel-mcp</code> exposes the verdict bus + memory, with AgentVision as the eyes.</p></div></section>
+<section><div class="wrap"><div class="sech"><div class="k">Adopt</div><h2>Drop it into your workflow &amp; agents</h2></div><p>CI gate in one step (<code>uses: amitpatole/verel@v1.8.0</code>) — tests + lint + types in one verdict — a pre-commit hook, or <code>verel-ci check</code> in any script. For agents: <code>verel-mcp</code> exposes the verdict bus + memory, with AgentVision as the eyes.</p></div></section>
 <footer>
   <p>Verel gates its own development with its own verdict bus. © Amit Patole · eyes by
      <a href="https://github.com/amitpatole/agent-vision" style="color:var(--acc-ink)">AgentVision</a></p>
