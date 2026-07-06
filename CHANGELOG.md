@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.7.2 — adoption P2 polish (CLI help + docs completeness)
+
+- `verel-ci --help` now populated (correct prog name + description + per-subcommand help; was mute).
+- `grade_kpi` / `grade_cfg` re-exported from `verel.ci` (parity with `grade_iac`).
+- `verel heal` with no LLM key prints a one-line hint + `verel doctor` pointer, not a traceback.
+- Docs completeness: cli.md gains the telecom subcommands + passthrough; usage.md → install-extras;
+  tutorial `examples/` clone note; try-it `known_backends()` output corrected.
+
 ## 1.7.1 — adoption: first-run usability + portability
 
 Fixes from a three-angle adoption audit (portability / first-run / CLI-docs). The golden path was

@@ -48,16 +48,22 @@ verel doctor
 A representative run:
 
 ```text
-verel 1.7.1
+verel 1.7.2
+  — core grading (no key / no network needed):
   OK python 3.11.9
   OK git
-  -- ollama cloud key (~/.config/ollama/key)
-  -- openai key (fallback)
-  OK agentvision (eyes) — `pip install verel[sight]`
-  OK ruff (lint grader)
-  OK mypy (typecheck grader)
-  -- mem0 (rented memory backend) — `pip install verel[mem0]`
-  -> memory backend: local  (available: local, remote, postgres, lancedb, redis)
+  OK pytest (test grader — required) — `pip install verel[dev]`   [/…/python]
+  OK ruff (lint grader) — `pip install verel[dev]`
+  OK mypy (typecheck grader) — `pip install verel[dev]`
+  — sandbox tier (untrusted-code isolation; Linux-only, fails closed elsewhere):
+  OK bubblewrap (container sandbox — Linux only)
+  ...
+  — agentic features (`verel heal` / `loop` / `fleet` — needs an LLM key):
+  -- ollama cloud key (~/.config/ollama/key or OLLAMA_API_KEY)
+  ...
+  -> memory backend: local  (available: lancedb, local, postgres, redis, remote)
+
+  next: `verel-ci check --repo .` — grade a repo into one signed verdict (no key needed).
 ```
 
 > Representative output — the exact `OK`/`--` marks and version reflect your machine.
