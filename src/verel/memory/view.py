@@ -162,6 +162,51 @@ def rejected_key(text: str) -> str:
     return canon_value(text)[:200]
 
 
+# Canonical bounds for supersession bookkeeping — ONE definition all backends import, so the
+# anti-laundering + DoS-bounding behaviour cannot drift per-backend again (the negative-eval sweep
+# found lance/redis with unbounded chains and pg/lance/redis/mem0 missing the rejected ledger).
+MAX_CORRECTIONS = 20
+MAX_REJECTED_VALUES = 50
+_PRIOR_TEXT_CAP = 200
+
+
+def supersede_detail(existing: MemoryRecord, record: MemoryRecord, *, ts: float) -> None:
+    """The CANONICAL supersede bookkeeping, shared by every backend's write() interference path.
+
+    Mutates `record` (the incoming replacement) in place:
+    - appends `existing` to a BOUNDED correction chain (length- and per-entry-capped, so repeated
+      supersessions of attacker-length values can't inflate detail_json — round-11 Finding B);
+    - resets support/strength (a new value earns its own corroboration);
+    - carries the DURABLE `rejected_values` ledger forward, adding `existing`'s value when it was
+      REJECTED — so supersede-then-restate can't launder a rejected value back to promotable
+      (round-7 C1). The promotion gate consults this ledger."""
+    chain = [*existing.detail.get("corrections", []),
+             {"text": existing.text[:_PRIOR_TEXT_CAP], "ec": existing.epistemic_confidence,
+              "ts": existing.created_ts, "superseded_at": ts}][-MAX_CORRECTIONS:]
+    record.support_count = 1
+    record.retrieval_strength = 1.0
+    rejected = list(existing.detail.get("rejected_values", []))
+    if existing.trust == Trust.REJECTED:
+        rv = rejected_key(existing.text)
+        if rv not in rejected:
+            rejected.append(rv)
+    record.with_detail(corrections=chain, superseded=existing.text[:_PRIOR_TEXT_CAP],
+                       rejected_values=rejected[-MAX_REJECTED_VALUES:])
+
+
+def record_rejection(r: MemoryRecord) -> bool:
+    """Append `r.text`'s bounded canonical key to `r`'s `rejected_values` ledger (in place).
+    Returns True when the ledger changed (caller must persist `r`). Shared by every backend's
+    contradict → REJECTED transition so the anti-laundering ledger exists on all of them."""
+    rejected = list(r.detail.get("rejected_values", []))
+    cv = rejected_key(r.text)
+    if cv in rejected:
+        return False
+    rejected.append(cv)
+    r.with_detail(rejected_values=rejected[-MAX_REJECTED_VALUES:])
+    return True
+
+
 def relevance(query: str, record: MemoryRecord) -> float:
     """Lexical token-overlap relevance (shared by all backends; embeddings are the v2
     upgrade behind the same interface)."""

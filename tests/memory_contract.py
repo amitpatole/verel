@@ -17,7 +17,7 @@ in-tree backends, and each external-backend test module reuses it against a live
 from __future__ import annotations
 
 from verel.memory import MemoryKind, MemoryRecord, Trust
-from verel.memory.view import MemoryView
+from verel.memory.view import MAX_CORRECTIONS, MemoryView, rejected_key
 
 
 def make_fact(text="use max-width:100%", subject="card", predicate="width", scope="repo:x"):
@@ -102,6 +102,70 @@ def check_recall_excludes_rejected(mem: MemoryView) -> None:
     assert all(h.id != r.id for h in mem.recall("max-width card width", scope="repo:x"))
 
 
+# ---- negative evals: what memory must NOT do (rejected = durable, un-launderable) ----
+def _reject(mem: MemoryView, record_id: str) -> None:
+    for _ in range(5):
+        mem.contradict(record_id)  # drive trust to REJECTED via the backend's own path
+    assert mem.get(record_id).trust == Trust.REJECTED
+
+
+def check_rejected_reassert_does_not_resurrect(mem: MemoryView) -> None:
+    """Re-stating a REJECTED value must not raise its confidence/support or reset its decay
+    (round-6 M2) — and it must stay invisible to recall."""
+    r = mem.write(make_fact())
+    _reject(mem, r.id)
+    before = mem.get(r.id)
+    again = mem.write(make_fact())  # the same rejected claim, re-asserted
+    assert again.trust == Trust.REJECTED
+    after = mem.get(r.id)
+    assert after.trust == Trust.REJECTED
+    assert after.epistemic_confidence <= before.epistemic_confidence
+    assert after.support_count == before.support_count
+    assert all(h.id != r.id for h in mem.recall("max-width card width", scope="repo:x"))
+
+
+def check_rejection_populates_durable_ledger(mem: MemoryView) -> None:
+    """The contradict → REJECTED transition must brand the VALUE in `rejected_values`, on every
+    backend — the ledger the promotion gate and operator review consult (round-7 C1)."""
+    r = mem.write(make_fact())
+    _reject(mem, r.id)
+    ledger = mem.get(r.id).detail.get("rejected_values", [])
+    assert rejected_key(make_fact().text) in ledger
+
+
+def check_supersede_carries_rejected_ledger(mem: MemoryView) -> None:
+    """Supersede-then-restate must not launder a rejected value: the ledger travels across
+    supersessions, so the restated value arrives already branded (round-7 C1)."""
+    r = mem.write(make_fact(text="the lie"))
+    _reject(mem, r.id)
+    mem.write(make_fact(text="a throwaway value"))       # supersede the rejected record
+    assert rejected_key("the lie") in mem.get(r.id).detail.get("rejected_values", [])
+    mem.write(make_fact(text="the lie"))                 # restate the once-rejected value
+    fresh = mem.get(r.id)
+    assert rejected_key("the lie") in fresh.detail.get("rejected_values", [])
+
+
+def check_rejected_tombstone_survives_decay_and_stays_hidden(mem: MemoryView) -> None:
+    """A REJECTED record is a durable tombstone: decay/prune must not erase it (that would reopen
+    the launder, round-8), and it must remain invisible to recall afterwards."""
+    r = mem.write(make_fact())
+    _reject(mem, r.id)
+    mem.decay(now=10_000_000.0)
+    tomb = mem.get(r.id)
+    assert tomb is not None and tomb.trust == Trust.REJECTED
+    assert all(h.id != r.id for h in mem.recall("max-width card width", scope="repo:x"))
+
+
+def check_correction_chain_is_bounded(mem: MemoryView) -> None:
+    """Repeated supersessions must not grow one record's detail without bound (round-11 B) —
+    the chain is capped at the shared MAX_CORRECTIONS on every backend."""
+    r = mem.write(make_fact(text="v0"))
+    for i in range(1, MAX_CORRECTIONS + 10):
+        mem.write(make_fact(text=f"v{i}"))
+    chain = mem.get(r.id).detail.get("corrections", [])
+    assert 0 < len(chain) <= MAX_CORRECTIONS
+
+
 # ---- decay / prune ----------------------------------------------------------
 def _weak(subject, predicate, *, trust=Trust.CANDIDATE, support=1, ec=0.3, rs=0.1):
     rec = make_fact(text="weak", subject=subject, predicate=predicate)
@@ -150,6 +214,11 @@ CONTRACT_CHECKS = [
     check_different_text_supersedes_with_correction_chain,
     check_apply_replica_verbatim_and_idempotent,
     check_recall_excludes_rejected,
+    check_rejected_reassert_does_not_resurrect,
+    check_rejection_populates_durable_ledger,
+    check_supersede_carries_rejected_ledger,
+    check_rejected_tombstone_survives_decay_and_stays_hidden,
+    check_correction_chain_is_bounded,
     check_decay_prunes_only_on_exact_conjunction,
     check_decay_leaves_confidence_invariant,
     check_pinned_exempt_from_decay,

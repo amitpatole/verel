@@ -35,6 +35,8 @@ from .view import (
     make_id,
     make_key,
     rank,
+    record_rejection,
+    supersede_detail,
 )
 from .view import (
     relevance as _relevance,
@@ -216,6 +218,10 @@ class LanceMemory(MemoryView):
             existing = self._get(record.id)
             if existing is not None:
                 if existing.text.strip().lower() == record.text.strip().lower():
+                    if existing.trust == Trust.REJECTED:
+                        # a REJECTED claim re-asserted is STILL rejected — never raise its
+                        # confidence/support or reset its decay (round-6 M2; parity with local)
+                        return existing
                     existing.support_count += 1
                     existing.epistemic_confidence = min(1.0, existing.epistemic_confidence + 0.1)
                     existing.retrieval_strength = 1.0
@@ -227,12 +233,9 @@ class LanceMemory(MemoryView):
                     existing.with_detail(volatile=False)
                     self._upsert(existing)
                     return existing
-                chain = [*existing.detail.get("corrections", []),
-                         {"text": existing.text, "ec": existing.epistemic_confidence,
-                          "ts": existing.created_ts, "superseded_at": ts}]
-                record.support_count = 1
-                record.retrieval_strength = 1.0
-                record.with_detail(corrections=chain, superseded=existing.text)
+                # supersede: the CANONICAL shared bookkeeping (view.supersede_detail) — bounded
+                # chain (round-11 B) + durable rejected-value ledger carry (round-7 C1).
+                supersede_detail(existing, record, ts=ts)
             self._upsert(record)
             return record
 
@@ -316,6 +319,9 @@ class LanceMemory(MemoryView):
             r = self._adjust(record_id, ec=-delta)
             if r is not None and r.epistemic_confidence < 0.2:
                 r = self._adjust(record_id, trust=Trust.REJECTED)
+                if r is not None and record_rejection(r):
+                    # persist the rejected-value ledger — supersede/restate can't launder (round-7 C1)
+                    self._upsert(r)
             return r
 
     def promote(self, record_id):

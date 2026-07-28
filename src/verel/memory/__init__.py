@@ -7,6 +7,7 @@ drop-in behind the same `MemoryView` Protocol.
 
 from __future__ import annotations
 
+from .audit import AuditedMemory, MemoryAudit
 from .consolidate import (
     cluster_records,
     consolidate_across_scopes,
@@ -46,6 +47,14 @@ from .replicated import (
     ReplicationError,
     ReplicationStatus,
     version_of,
+)
+from .review import (
+    RejectedApprovalError,
+    approve,
+    pending,
+    reject,
+    render_line,
+    render_record,
 )
 from .revise import Revision, contradicts, propagate_revision, revise_with_counterexample
 from .share import AuthorTrust, BeliefImport, author_of, import_belief
@@ -105,6 +114,14 @@ __all__ = [
     "version_of",
     "FailureLedger",
     "regression_report",
+    "AuditedMemory",
+    "MemoryAudit",
+    "pending",
+    "approve",
+    "reject",
+    "render_line",
+    "render_record",
+    "RejectedApprovalError",
     "LocalMemory",
     "load_backend",
     "known_backends",

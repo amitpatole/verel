@@ -134,6 +134,40 @@ OK  ed25519  runner=ed25519:Ab3kQ1z9_xYwTuVe  [public-verifiable]
   (`VEREL_TRUSTED_KEYS` overrides the dir). An untrusted `key_id` can't verify itself into trust. The
   same check is the **`verel_verify`** MCP tool. See [Configuration](configuration.md#receipts-signing-trusted-keys).
 
+### Review memory as a human (`verel memory`) — resolve the candidate queue
+
+Facts enter memory as **CANDIDATE** and normally earn **VERIFIED** through the attested promotion
+gate or multi-principal corroboration. `verel memory` is the third path: a **human** reviews the
+queue and decides. It is CLI-only **by design** — an agent must not be able to approve its own
+facts over MCP.
+
+```bash
+verel memory pending                    # list CANDIDATE facts awaiting review
+verel memory show <id>                  # one record: correction chain, ledger, review metadata
+verel memory approve <id>               # CANDIDATE -> VERIFIED on your authority (recorded)
+verel memory reject <id> --reason "…"   # durable tombstone — never recalled or re-promoted
+verel memory audit                      # the hash-chained mutation log (who changed what, when)
+verel memory audit --verify             # verify the audit chain end-to-end
+```
+```text
+$ verel memory pending
+0a9fa204672c8e62  candidate  ec=0.50 sup=1  [repo:demo]  api port: 8080
+(1 candidate(s) awaiting review; approve with `verel memory approve <id>`, …)
+$ verel memory approve 0a9fa204672c8e62
+OK  0a9fa204672c8e62 -> verified (reviewed by amitpatole, audited)
+$ verel memory audit --verify
+OK  audit chain: ok  (~/.config/verel/memory_audit.jsonl)
+```
+
+- **Approve fails closed against laundering**: a REJECTED record — or a restated value still branded
+  in its carried `rejected_values` ledger — is refused with exit 1. Rejection is durable.
+- **Every mutation is audited**: approve/reject (and every trust-layer mutation made through the
+  CLI) appends `{actor, action, before, after}` to a hash-chained, tamper-evident log
+  (`VEREL_MEMORY_AUDIT`, default `~/.config/verel/memory_audit.jsonl`).
+- **Terminal-safe**: listings render through the shared canonical text transform, so a stored fact
+  can't smuggle ANSI/control sequences into your terminal and spoof what you approve.
+- Uses the backend from `VEREL_MEMORY_BACKEND` (default `local`), same as everything else.
+
 ### Plug Verel into your agent (one line)
 
 Make any MCP-host agent (Claude Code/Desktop, Cursor, Cline, Continue, Windsurf…) gate its own

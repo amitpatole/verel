@@ -171,6 +171,21 @@ attested — never a one-off say-so), and recall them token-budgeted and verifie
 
 ::: verel.memory.recall
 
+### Operator review — the human-in-the-loop path
+
+List the CANDIDATE queue, approve to VERIFIED on human authority, or reject into a durable
+tombstone — with laundering refused fail-closed and terminal-safe rendering. Surfaced as
+[`verel memory`](cli.md#review-memory-as-a-human-verel-memory-resolve-the-candidate-queue).
+
+::: verel.memory.review
+
+### Mutation audit — who changed what, when
+
+`AuditedMemory` wraps any backend and appends every trust-layer mutation
+(`{actor, action, before, after}`) to a hash-chained, tamper-evident JSONL log.
+
+::: verel.memory.audit
+
 ### Backends — local & hosted
 
 The default zero-dependency SQLite store, plus the hosted brain: a `MemoryServer` over HTTP and a

@@ -42,6 +42,8 @@ from .view import (
     make_id,
     make_key,
     rank,
+    record_rejection,
+    supersede_detail,
 )
 from .view import (
     relevance as _relevance,
@@ -230,6 +232,10 @@ class RedisMemory(MemoryView):
         def mutate(existing):
             if existing is not None:
                 if existing.text.strip().lower() == record.text.strip().lower():
+                    if existing.trust == Trust.REJECTED:
+                        # a REJECTED claim re-asserted is STILL rejected — never raise its
+                        # confidence/support or reset its decay (round-6 M2; parity with local)
+                        return existing
                     existing.support_count += 1
                     existing.epistemic_confidence = min(1.0, existing.epistemic_confidence + 0.1)
                     existing.retrieval_strength = 1.0
@@ -240,12 +246,9 @@ class RedisMemory(MemoryView):
                         existing.with_detail(**record.detail)
                     existing.with_detail(volatile=False)
                     return existing
-                chain = [*existing.detail.get("corrections", []),
-                         {"text": existing.text, "ec": existing.epistemic_confidence,
-                          "ts": existing.created_ts, "superseded_at": ts}]
-                record.support_count = 1
-                record.retrieval_strength = 1.0
-                record.with_detail(corrections=chain, superseded=existing.text)
+                # supersede: the CANONICAL shared bookkeeping (view.supersede_detail) — bounded
+                # chain (round-11 B) + durable rejected-value ledger carry (round-7 C1).
+                supersede_detail(existing, record, ts=ts)
             return record
 
         return self._atomic(record.id, mutate) or record  # mutate never returns None for write
@@ -360,6 +363,8 @@ class RedisMemory(MemoryView):
             r.epistemic_confidence = max(0.0, r.epistemic_confidence - delta)
             if r.epistemic_confidence < 0.2:
                 r.trust = Trust.REJECTED
+                # ledger inside the SAME atomic mutate — supersede/restate can't launder (round-7 C1)
+                record_rejection(r)
             return r
 
         return self._atomic(record_id, mutate)

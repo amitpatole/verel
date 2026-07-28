@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased — memory trust-layer: human review, mutation audit, cross-backend negative evals
+
+Closes the gaps a third-party assessment (agent-memory-atlas) correctly identified, and fixes the
+real cross-backend drift the new negative-eval sweep surfaced.
+
+- **Human review (`verel memory`).** `pending` / `show` / `approve` / `reject` — the human-in-the-loop
+  path that resolves CANDIDATE facts. CLI-only by design (an agent can't approve its own facts over
+  MCP). Approve fails closed on REJECTED records AND on restated once-rejected values still branded
+  in the carried `rejected_values` ledger (anti-laundering). Terminal-safe rendering via the shared
+  canonical text transform (no ANSI/control smuggling into the review terminal).
+- **Mutation audit (`verel.memory.audit`).** `AuditedMemory` wraps any backend and appends every
+  trust-layer mutation (`{actor, action, before, after}`, bounded snapshots) to `MemoryAudit` — a
+  hash-chained, tamper-evident JSONL log (`VEREL_MEMORY_AUDIT`, default
+  `~/.config/verel/memory_audit.jsonl`). `verel memory audit [--verify]` shows/verifies it. Recall
+  reinforcement is deliberately not logged (reachability bookkeeping, not belief mutation).
+- **Cross-backend anti-laundering fixes.** The negative-eval sweep found postgres/lancedb/redis/mem0
+  missing LocalMemory's guards; all four now share ONE canonical implementation
+  (`view.supersede_detail` / `view.record_rejection`): re-asserting a REJECTED value no longer raises
+  its confidence/support (round-6 M2), the contradict → REJECTED transition populates the durable
+  `rejected_values` ledger, the ledger is carried across supersessions (round-7 C1), and correction
+  chains are bounded at the shared `MAX_CORRECTIONS` (lance/redis were unbounded — round-11 B).
+- **Negative evals.** Five new cross-backend contract checks (rejected re-assert can't resurrect;
+  rejection populates the ledger; supersede carries the ledger; the tombstone survives decay and
+  stays hidden; chains are bounded) run over every backend, plus a dedicated
+  `tests/test_memory_negative_eval.py` covering every LocalMemory recall variant (FTS5/BM25,
+  token-overlap fallback, embedder/cosine), the budgeted prompt renderer, and verbatim-query recall.
+
 ## Unreleased — QuineOS foundation (DC-01..DC-05)
 
 - **DC-01 + DC-02: Crash-atomic hash-chained receipt store (`ReceiptStore`).** `begin(action_id)` writes a WAL entry atomically before any grader runs; `commit()` writes the receipt via `os.replace()` (atomic rename) and chains it to its predecessor with `prev_hash = SHA-256(prev_receipt)`. `verify_chain()` detects any tampered or missing link. Root directory via `QUINE_RECEIPT_STORE` (default `~/.local/share/quine/receipts`). New exports: `verel.verdict.ReceiptStore`.

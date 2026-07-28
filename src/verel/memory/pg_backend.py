@@ -47,6 +47,8 @@ from .view import (
     make_id,
     make_key,
     rank,
+    record_rejection,
+    supersede_detail,
 )
 from .view import (
     relevance as _relevance,
@@ -61,7 +63,6 @@ _COLS_SQL = ", ".join(_COLS)  # constant column list — never built from user i
 
 _RECALL_SCAN_CAP = 5000   # bound the no-embedder candidate scan so a huge brain can't OOM the client
 _MAX_RECALL_K = 1000      # clamp caller-supplied k so an unbounded LIMIT can't OOM the client
-_MAX_CHAIN = 50           # bound the supersession correction-chain so a hot key can't inflate one row
 _VALIDATING_TLS = ("verify-full", "verify-ca")
 
 # jsonb views of the opaque detail_json TEXT, for the set-based decay. Every expression is TOTAL —
@@ -322,6 +323,10 @@ class PostgresMemory(MemoryView):
             existing = self._get(cur, record.id)
             if existing is not None:
                 if existing.text.strip().lower() == record.text.strip().lower():
+                    if existing.trust == Trust.REJECTED:
+                        # a REJECTED claim re-asserted is STILL rejected — never raise its
+                        # confidence/support or reset its decay (round-6 M2; parity with local)
+                        return existing
                     existing.support_count += 1
                     existing.epistemic_confidence = min(1.0, existing.epistemic_confidence + 0.1)
                     existing.retrieval_strength = 1.0
@@ -333,13 +338,9 @@ class PostgresMemory(MemoryView):
                     existing.with_detail(volatile=False)
                     self._upsert(cur, existing)
                     return existing
-                # different value → supersede, keeping a BOUNDED correction chain (newest last).
-                chain = [*existing.detail.get("corrections", []),
-                         {"text": existing.text, "ec": existing.epistemic_confidence,
-                          "ts": existing.created_ts, "superseded_at": ts}][-_MAX_CHAIN:]
-                record.support_count = 1
-                record.retrieval_strength = 1.0
-                record.with_detail(corrections=chain, superseded=existing.text)
+                # different value → supersede: the CANONICAL shared bookkeeping (view.supersede_detail)
+                # — bounded chain (round-11 B) + durable rejected-value ledger carry (round-7 C1).
+                supersede_detail(existing, record, ts=ts)
             self._upsert(cur, record)
             return record
 
@@ -439,6 +440,9 @@ class PostgresMemory(MemoryView):
         r = self._adjust(record_id, ec=-delta)
         if r is not None and r.epistemic_confidence < 0.2:
             r = self._adjust(record_id, trust=Trust.REJECTED)
+            if r is not None and record_rejection(r):
+                # persist the rejected-value ledger so supersede/restate can't launder it (round-7 C1)
+                r = self.annotate(record_id, rejected_values=r.detail["rejected_values"]) or r
         return r
 
     def promote(self, record_id):

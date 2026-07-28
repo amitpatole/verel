@@ -26,7 +26,8 @@ from .view import (
     make_id,
     make_key,
     rank,
-    rejected_key,
+    record_rejection,
+    supersede_detail,
 )
 from .view import (
     relevance as _relevance,
@@ -57,10 +58,6 @@ def _fts_match(query: str) -> str:
     terms = [t[:_FTS_MAX_TERMLEN] for t in _FTS_WORD.findall(query.lower())[:_FTS_MAX_TERMS]]
     return " OR ".join(f'"{t}"' for t in terms)
 
-# Bound per-record detail growth so repeated supersessions can't inflate one record's detail_json to
-# megabytes (round-11 Finding B): keep the most recent N corrections and a bounded rejected-value ledger.
-_MAX_CORRECTIONS = 20
-_MAX_REJECTED_VALUES = 50
 
 
 class LocalMemory(MemoryView):
@@ -213,27 +210,10 @@ class LocalMemory(MemoryView):
                 existing.with_detail(volatile=False)  # re-assertion confirms a volatile memory
                 self._upsert(existing)
                 return existing
-            # different value for the same key -> supersede (interference): keep a correction
-            # chain so the history is queryable, not just overwritten. BOUNDED (round-11 Finding B): cap
-            # the chain length and truncate each stored prior value, so N supersessions of large values
-            # can't grow one record's detail_json to megabytes (re-parsed on every recall) — a storage/
-            # CPU-amplification DoS an attacker drives via repeated writes.
-            chain = [*existing.detail.get("corrections", []),
-                     {"text": existing.text[:200], "ec": existing.epistemic_confidence,
-                      "ts": existing.created_ts, "superseded_at": ts}][-_MAX_CORRECTIONS:]
-            record.support_count = 1
-            record.retrieval_strength = 1.0
-            # Carry a DURABLE set of rejected VALUES forward across supersessions: a value that was
-            # graded REJECTED must not be launderable by supersede-then-restate (REJECTED → supersede
-            # with a throwaway value → restate the rejected value as a fresh CANDIDATE). The promotion
-            # gate consults this so a once-rejected value stays un-promotable (round-7 C1).
-            rejected = list(existing.detail.get("rejected_values", []))
-            if existing.trust == Trust.REJECTED:
-                rv = rejected_key(existing.text)   # bounded canonical key, matching the gate (round-9/12)
-                if rv not in rejected:
-                    rejected.append(rv)
-            record.with_detail(corrections=chain, superseded=existing.text[:200],
-                               rejected_values=rejected[-_MAX_REJECTED_VALUES:])
+            # different value for the same key -> supersede (interference): the CANONICAL shared
+            # bookkeeping (view.supersede_detail) — bounded correction chain (round-11 Finding B) +
+            # the durable rejected-value ledger carried forward (round-7 C1).
+            supersede_detail(existing, record, ts=ts)
         self._upsert(record)
         self._set_vector(record.id, self._embed_text(record))  # no-op without an embedder
         return record
@@ -334,13 +314,9 @@ class LocalMemory(MemoryView):
         r = self._adjust(record_id, ec=-delta)
         if r is not None and r.epistemic_confidence < 0.2:
             r = self._adjust(record_id, trust=Trust.REJECTED)
-            if r is not None:   # record the rejected VALUE so a later supersede/restate can't launder it
-                rejected = list(r.detail.get("rejected_values", []))
-                cv = rejected_key(r.text)
-                if cv not in rejected:
-                    rejected.append(cv)
-                    r.with_detail(rejected_values=rejected[-_MAX_REJECTED_VALUES:])
-                    self._upsert(r)
+            if r is not None and record_rejection(r):
+                # record the rejected VALUE so a later supersede/restate can't launder it
+                self._upsert(r)
         return r
 
     def promote(self, record_id):

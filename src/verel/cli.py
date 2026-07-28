@@ -154,6 +154,90 @@ def _heal(args) -> int:
     return 0 if res.healed else 1
 
 
+def _memory(args) -> int:
+    """Operator review of the memory trust layer — the human-in-the-loop path that resolves
+    CANDIDATE facts. CLI-only by design: an agent must not be able to approve its own facts over
+    MCP. Every mutation is appended to the hash-chained memory audit log with the operator as actor."""
+    import os
+
+    from .memory import (
+        AuditedMemory,
+        MemoryAudit,
+        MemoryKind,
+        RejectedApprovalError,
+        approve,
+        load_backend,
+        pending,
+        reject,
+        render_line,
+        render_record,
+    )
+
+    try:
+        import getpass
+        operator = getpass.getuser()
+    except Exception:
+        operator = "operator"
+    audit = MemoryAudit.from_env()
+
+    if args.memory_cmd == "audit":
+        if args.verify:
+            ok, reason = audit.verify()
+            print(("OK  " if ok else "-- ") + f"audit chain: {reason}  ({audit.path})")
+            return 0 if ok else 1
+        entries = audit.entries(args.record_id or None)
+        for e in entries[-args.limit:]:
+            b = (e.get("before") or {}).get("trust", "—")
+            a = (e.get("after") or {}).get("trust", "—")
+            print(f"{e.get('ts', 0):.0f}  {e.get('actor', '?'):<20} {e.get('action', '?'):<12} "
+                  f"{e.get('record_id', '?')}  {b} -> {a}")
+        print(f"({len(entries)} entr{'y' if len(entries) == 1 else 'ies'} total, {audit.path})")
+        return 0
+
+    backend = os.environ.get("VEREL_MEMORY_BACKEND", "local")
+    try:
+        mem = AuditedMemory(load_backend(backend), audit, actor=f"cli:{operator}")
+    except Exception as e:
+        print(f"-- could not load memory backend {backend!r}: {type(e).__name__}: {e}")
+        return 2
+
+    if args.memory_cmd == "pending":
+        kind = MemoryKind(args.kind) if args.kind else None
+        recs = pending(mem, scope=args.scope, kind=kind, limit=args.limit)
+        for r in recs:
+            print(render_line(r, width=args.width))
+        print(f"({len(recs)} candidate(s) awaiting review; "
+              f"approve with `verel memory approve <id>`, reject with `verel memory reject <id>`)")
+        return 0
+    if args.memory_cmd == "show":
+        rec = mem.get(args.id)
+        if rec is None:
+            print(f"-- no record {args.id!r}")
+            return 1
+        print(render_record(rec))
+        return 0
+    if args.memory_cmd == "approve":
+        try:
+            rec = approve(mem, args.id, reviewed_by=operator)
+        except RejectedApprovalError as e:
+            print(f"-- refused: {e}")
+            return 1
+        if rec is None:
+            print(f"-- no record {args.id!r}")
+            return 1
+        print(f"OK  {rec.id} -> {rec.trust.value} (reviewed by {operator}, audited)")
+        return 0
+    if args.memory_cmd == "reject":
+        rec = reject(mem, args.id, reviewed_by=operator, reason=args.reason)
+        if rec is None:
+            print(f"-- no record {args.id!r}")
+            return 1
+        print(f"OK  {rec.id} -> {rec.trust.value} (durable tombstone — this value can no longer "
+              f"be recalled or re-promoted)")
+        return 0
+    return 2
+
+
 def _verify(args) -> int:
     """Verify a receipt with NO trust in its producer: ed25519 needs only a trusted public key,
     so a stranger can confirm an agent's `gate` verdict was real. Exit 0 iff valid."""
@@ -303,6 +387,26 @@ def main(argv=None) -> int:
     ci = sub.add_parser("ci", help="agent-run CI (delegates to verel.ci)")
     ci.add_argument("ci_args", nargs=argparse.REMAINDER)
 
+    mm = sub.add_parser("memory", help="operator review of the memory trust layer "
+                                       "(list/approve/reject CANDIDATE facts; audit log)")
+    mmsub = mm.add_subparsers(dest="memory_cmd", required=True)
+    mp = mmsub.add_parser("pending", help="list CANDIDATE facts awaiting human review")
+    mp.add_argument("--scope", help="filter to one scope (e.g. repo:x)")
+    mp.add_argument("--kind", help="filter to one kind (fact|design_rule|schema|failure|skill)")
+    mp.add_argument("--limit", type=int, default=50)
+    mp.add_argument("--width", type=int, default=100, help="max line width for the listing")
+    msh = mmsub.add_parser("show", help="show one record: chain, ledger, review metadata")
+    msh.add_argument("id")
+    map_ = mmsub.add_parser("approve", help="promote a CANDIDATE to VERIFIED on human authority")
+    map_.add_argument("id")
+    mrj = mmsub.add_parser("reject", help="reject a fact — durable tombstone, never recalled again")
+    mrj.add_argument("id")
+    mrj.add_argument("--reason", default="", help="recorded in the record + audit log")
+    mau = mmsub.add_parser("audit", help="show or verify the hash-chained memory mutation log")
+    mau.add_argument("--record-id", help="filter entries to one record id")
+    mau.add_argument("--limit", type=int, default=50)
+    mau.add_argument("--verify", action="store_true", help="verify the hash chain end-to-end")
+
     vf = sub.add_parser("verify", help="verify a run-receipt (ed25519 = publicly verifiable)")
     vf.add_argument("receipt", help="path to a receipt JSON file")
     vf.add_argument("--require-public", action="store_true",
@@ -354,6 +458,8 @@ def main(argv=None) -> int:
     if args.cmd == "ci":
         from .ci.__main__ import main as ci_main
         return ci_main(args.ci_args)
+    if args.cmd == "memory":
+        return _memory(args)
     if args.cmd == "verify":
         return _verify(args)
     if args.cmd == "mcp":

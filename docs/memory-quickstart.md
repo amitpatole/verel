@@ -75,6 +75,10 @@ python demo_memory.py     # offline, no API key
   every prompt. Measured: a 40-fact brain drops from **679 → 135 tokens/turn (80% less)** at a 100-token
   budget, hallucinations excluded. See the [cost breakdown](comparison.md#cost-what-graded-budgeted-recall-saves)
   and run `python examples/demo_token_savings.py`.
+- **A human review queue + audit trail** — `verel memory pending / approve / reject` lets a human
+  resolve candidates (CLI-only, so an agent can't approve its own facts), and every trust-layer
+  mutation lands in a hash-chained audit log (`verel memory audit --verify`). See
+  [CLI → Review memory as a human](cli.md#review-memory-as-a-human-verel-memory-resolve-the-candidate-queue).
 
 ## Use your real LLM
 
