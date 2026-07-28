@@ -4,29 +4,24 @@
 Aggregates public adoption metrics and serves an auto-refreshing dashboard:
   * PyPI downloads — lifetime total (pepy.tech), last day/week/month + OS & Python
     breakdown (pypistats), current version (PyPI).
+  * ghcr.io — total pulls of the container image and the OCI Helm chart (from the
+    package pages; the REST API doesn't expose pull counts), plus GitHub release
+    asset downloads.
   * GitHub — stars / forks / watchers / open issues, clone & view traffic, and the
     referring sites ("where" repo traffic comes from) via the traffic API.
 
 This is a MAINTAINER tool, not part of the shipped `verel` package — it tracks the author's own
 projects' adoption (and reads GitHub *traffic* data, which needs push access via local `gh` auth), so
 it has no use for someone who installs verel. It lives under `tools/` (not packaged) and may be
-extracted into its own project later. It does reuse `verel.transport` for a fail-closed bind, so run it
-in an environment where `verel` is installed.
+extracted into its own project later. Pure stdlib — no verel install needed to run it.
 
-Run:  python tools/metrics_dashboard.py             # loopback http://127.0.0.1:8042 (zero-config)
-      VEREL_DASHBOARD_HOST=0.0.0.0 VEREL_DASHBOARD_TOKEN=… \
-        VEREL_DASHBOARD_CERT=cert.pem VEREL_DASHBOARD_KEY=key.pem python tools/metrics_dashboard.py
+Run:  python tools/metrics_dashboard.py       # binds 0.0.0.0:8042 — plain http, no auth
+Open  http://<LAN-ip>:8042
 
-Open  https://<host>:8042  (loopback default is plain http for the local case).
-
-Security (same fail-closed posture as the rest of Verel, via `verel.transport`):
-  * Loopback (127.0.0.1/::1) is zero-config: plain http, no token. A ROUTABLE bind
-    (anything else, incl. 0.0.0.0) REQUIRES both an auth token AND TLS, or it
-    refuses to start — a metrics dashboard is read-only but the GitHub-traffic data
-    is account-scoped, so it isn't served to the open network unauthenticated.
-  * Auth is a bearer token (Authorization: Bearer …) or `?token=…` for a browser;
-    constant-time compared. TLS handshake runs off the accept loop; connections are
-    capped (global + per-IP) — the §15.4/§15.5 transport hardening, reused.
+This serves plain unauthenticated HTTP on the LAN by deliberate choice: it is a read-only
+board of aggregate public counts for home-network use. Do NOT port-forward it to the
+internet — the GitHub traffic numbers are account-scoped. Set HOST=127.0.0.1 for
+loopback-only.
 
 Notes
   * GitHub data uses your local `gh` auth (gh CLI must be logged in). Traffic
@@ -34,36 +29,30 @@ Notes
   * Country-level PyPI geography is NOT available from any free API (it lives in
     the Google BigQuery `pypi.file_downloads` dataset). The OS/Python split is the
     client breakdown; GitHub referrers are the closest "from where" signal.
-  * Stdlib only (+ verel.transport). No secrets are served — only aggregate counts.
+  * Stdlib only. No secrets are served — only aggregate counts.
 """
 
 # ruff: noqa: E501 — the embedded HTML/CSS dashboard template has intentionally long lines
 from __future__ import annotations
 
-import hmac
 import json
 import os
+import re
 import subprocess
 import threading
 import time
 import urllib.error
 import urllib.request
-from http.server import BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 
-from verel.transport import (
-    TLSThreadingHTTPServer,
-    build_server_context,
-    enforce_bind_policy,
-    is_loopback,
-    scheme,
-)
-
-# (PyPI package name, GitHub owner/repo, display label)
+# (PyPI package name, GitHub owner/repo, display label,
+#  ghcr packages {kind: package-name} — HTML-page-scraped for pull totals)
 PROJECTS = [
-    ("verel", "amitpatole/verel", "Verel 🧠"),
-    ("agentvision", "amitpatole/agent-vision", "AgentVision 👁️"),
+    ("verel", "amitpatole/verel", "Verel 🧠",
+     {"image": "verel", "chart": "charts/verel"}),
+    ("agentvision", "amitpatole/agent-vision", "AgentVision 👁️", {}),
 ]
 REFRESH = int(os.environ.get("REFRESH", "600"))  # seconds between live re-fetches
 PORT = int(os.environ.get("PORT", "8042"))  # 8042 dodges the LMDS docker-compose port range
@@ -97,6 +86,17 @@ def _get(url: str, timeout: float = 15.0, retries: int = 2) -> dict | None:
         except Exception:  # noqa: BLE001 — a dead source degrades to None, never crashes the board
             return None
     return None
+
+
+def _get_text(url: str, timeout: float = 15.0) -> str | None:
+    if not url.lower().startswith("https://"):
+        return None
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": _UA})
+        with urllib.request.urlopen(req, timeout=timeout) as r:  # nosec B310 — https-only, fixed hosts
+            return r.read(2_000_000).decode("utf-8", "replace")  # bounded read
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _gh(path: str) -> dict | list | None:
@@ -157,6 +157,42 @@ def pypi_metrics(pkg: str) -> dict:
     return out
 
 
+_LAST_GHCR: dict[str, dict] = {}  # last good ghcr/asset numbers — survive a failed scrape
+
+
+def _ghcr_total_pulls(owner: str, package: str) -> int | None:
+    """Total pulls of a ghcr.io package, scraped from its public GitHub package page.
+
+    The Packages REST/GraphQL APIs expose NO download count for container registries —
+    the page's "Total downloads" figure is the only public source of the pull count.
+    """
+    url = f"https://github.com/users/{owner}/packages/container/package/{package.replace('/', '%2F')}"
+    html = _get_text(url)
+    if not html:
+        return None
+    m = re.search(r'Total downloads</span>\s*<h3 title="([\d,]+)"', html)
+    return int(m.group(1).replace(",", "")) if m else None
+
+
+def release_asset_downloads(repo: str) -> int | None:
+    """Sum of download_count across all GitHub release assets (e.g. attached wheels)."""
+    rels = _as_list(_gh(f"repos/{repo}/releases?per_page=100"))
+    if not rels:
+        return None
+    return sum(a.get("download_count", 0) for r in rels for a in _as_dict(r).get("assets", []))
+
+
+def ghcr_metrics(repo: str, packages: dict[str, str]) -> dict:
+    """{image: pulls, chart: pulls, assets: downloads} for one project (None when unavailable)."""
+    owner = repo.split("/")[0]
+    new: dict = {kind: _ghcr_total_pulls(owner, pkg) for kind, pkg in packages.items()}
+    new["assets"] = release_asset_downloads(repo)
+    prev = _LAST_GHCR.get(repo, {})
+    out = {k: (prev.get(k) if v is None else v) for k, v in new.items()}
+    _LAST_GHCR[repo] = out
+    return out
+
+
 def github_metrics(repo: str) -> dict:
     r = _as_dict(_gh(f"repos/{repo}"))
     clones = _as_dict(_gh(f"repos/{repo}/traffic/clones"))
@@ -173,10 +209,11 @@ def github_metrics(repo: str) -> dict:
 
 def collect() -> dict:
     data: dict = {"ts": time.strftime("%Y-%m-%d %H:%M:%S"), "projects": []}
-    for pkg, repo, label in PROJECTS:
+    for pkg, repo, label, ghcr_pkgs in PROJECTS:
         data["projects"].append({
             "label": label, "pkg": pkg, "repo": repo,
             "pypi": pypi_metrics(pkg), "github": github_metrics(repo),
+            "ghcr": ghcr_metrics(repo, ghcr_pkgs),
         })
     return data
 
@@ -211,7 +248,7 @@ def _bars(d: dict[str, int], limit: int = 5) -> str:
 
 
 _COUNTRY_CACHE = Path(__file__).resolve().parent / "country_cache.json"
-_LABELS = {pkg: label for pkg, _repo, label in PROJECTS}
+_LABELS = {pkg: label for pkg, _repo, label, _ghcr in PROJECTS}
 
 _MAP_HEAD = '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/jsvectormap@1.5.3/dist/css/jsvectormap.min.css">'
 _MAP_LIBS = ('<script src="https://cdn.jsdelivr.net/npm/jsvectormap@1.5.3/dist/js/jsvectormap.min.js"></script>'
@@ -297,9 +334,18 @@ def trend_payload(d: dict) -> dict | None:
 def render(d: dict) -> str:
     cards = ""
     for p in d["projects"]:
-        py, gh = p["pypi"], p["github"]
+        py, gh, gc = p["pypi"], p["github"], p.get("ghcr", {})
         refs = "".join(f'<li>{(r or "direct")} · <b>{_n(c)}</b></li>' for r, c in gh["referrers"]) \
             or '<li class="muted">no referrers in the last 14 days</li>'
+        ghcr_section = ""
+        if any(v is not None for v in gc.values()):
+            cells = ""
+            if "image" in gc:
+                cells += f'<div class="stat"><b>{_n(gc["image"])}</b><span>image pulls (ghcr)</span></div>'
+            if "chart" in gc:
+                cells += f'<div class="stat"><b>{_n(gc["chart"])}</b><span>Helm chart pulls (ghcr)</span></div>'
+            cells += f'<div class="stat"><b>{_n(gc.get("assets"))}</b><span>release-asset dl</span></div>'
+            ghcr_section = f'<h3>Container image &amp; chart</h3><div class="grid3">{cells}</div>'
         cards += f"""
         <section class="card">
           <h2>{p['label']} <span class="v">v{py['version'] or '?'}</span></h2>
@@ -310,6 +356,7 @@ def render(d: dict) -> str:
             <div class="stat"><b>{_n(py['week'])}</b><span>last week</span></div>
             <div class="stat"><b>{_n(py['month'])}</b><span>last month</span></div>
           </div>
+          {ghcr_section}
           <div class="cols">
             <div><h3>By OS (PyPI client)</h3>{_bars(py['systems'])}</div>
             <div><h3>By Python</h3>{_bars(py['python'])}</div>
@@ -383,80 +430,50 @@ h3 a{{color:var(--acc2);text-transform:none;letter-spacing:0}}
 <div class="cards">{cards}</div>
 {chart_section}
 {map_section}
-<p class="ts" style="margin-top:18px">PyPI downloads via pepy.tech + pypistats · GitHub via the traffic API · country map via BigQuery <code>pypi.file_downloads</code> (refreshed daily).</p>
+<p class="ts" style="margin-top:18px">PyPI downloads via pepy.tech + pypistats · image/chart pulls via the ghcr package pages · GitHub via the traffic API · country map via BigQuery <code>pypi.file_downloads</code> (refreshed daily).</p>
 </div>{chart_embed}{map_embed}</body></html>"""
 
 
-def _make_handler(token: str | None):
-    class Handler(BaseHTTPRequestHandler):
-        protocol_version = "HTTP/1.1"
-        timeout = 30  # drop a slow/idle client rather than pinning a worker (slowloris guard)
+class Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    timeout = 30  # drop a slow/idle client rather than pinning a worker (slowloris guard)
 
-        def log_message(self, *_a):  # quiet
-            pass
+    def log_message(self, *_a):  # quiet
+        pass
 
-        def _authed(self) -> bool:
-            if token is None:                       # loopback zero-config: no token required
-                return True
-            # Authorization: Bearer <token>, or ?token=<token> for a browser. Constant-time compare.
-            presented = ""
-            auth = self.headers.get("Authorization", "")
-            if auth.startswith("Bearer "):
-                presented = auth[len("Bearer "):]
-            else:
-                q = parse_qs(urlparse(self.path).query)
-                presented = (q.get("token") or [""])[0]
-            return hmac.compare_digest(presented, token)
+    def do_GET(self):  # noqa: N802
+        d = cached()
+        if urlparse(self.path).path.startswith("/api/metrics"):
+            body = json.dumps(d, indent=2).encode()
+            ctype = "application/json"
+        else:
+            body = render(d).encode()
+            ctype = "text/html; charset=utf-8"
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
-        def do_GET(self):  # noqa: N802
-            if not self._authed():
-                body = b'{"error":"unauthorized"}'
-                self.send_response(401)
-                self.send_header("WWW-Authenticate", "Bearer")
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-                return
-            d = cached()
-            if urlparse(self.path).path.startswith("/api/metrics"):
-                body = json.dumps(d, indent=2).encode()
-                ctype = "application/json"
-            else:
-                body = render(d).encode()
-                ctype = "text/html; charset=utf-8"
-            self.send_response(200)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
 
-    return Handler
+def _lan_ip() -> str:
+    import socket
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("192.0.2.1", 1))  # no packet sent — just picks the outbound interface
+            return s.getsockname()[0]
+    except Exception:  # noqa: BLE001
+        return "127.0.0.1"
 
 
 def main() -> int:
-    # Operator env only (never a request arg). Loopback default = zero-config; a routable bind must be
-    # both authenticated AND encrypted or `enforce_bind_policy` refuses to start (fail closed).
-    host = os.environ.get("VEREL_DASHBOARD_HOST", "127.0.0.1")
-    token = os.environ.get("VEREL_DASHBOARD_TOKEN") or None
-    certfile = os.environ.get("VEREL_DASHBOARD_CERT") or None
-    keyfile = os.environ.get("VEREL_DASHBOARD_KEY") or None
-
-    ssl_context = build_server_context(certfile, keyfile, None)
-    try:
-        enforce_bind_policy(host, auth_token=token, tls=ssl_context is not None,
-                            service="metrics dashboard")
-    except ValueError as e:
-        print(f"\n  refusing to start: {e}\n")
-        return 2
-
-    httpd = TLSThreadingHTTPServer((host, PORT), _make_handler(token), ssl_context=ssl_context,
-                                   max_connections=64, max_per_ip=(None if is_loopback(host) else 8))
+    # Plain unauthenticated HTTP for the home LAN — see the module docstring. HOST=127.0.0.1
+    # restricts to loopback; do not expose this bind beyond the local network.
+    host = os.environ.get("HOST", "0.0.0.0")  # nosec B104 — LAN-only maintainer tool, deliberate
+    httpd = ThreadingHTTPServer((host, PORT), Handler)
     threading.Thread(target=cached, daemon=True).start()     # warm the cache in the background
-    sch = scheme(ssl_context is not None)
-    shown = "127.0.0.1" if is_loopback(host) else host
-    print(f"\n  Live metrics dashboard:  {sch}://{shown}:{PORT}"
-          f"{'  (token required)' if token else ''}")
+    shown = _lan_ip() if host == "0.0.0.0" else host
+    print(f"\n  Live metrics dashboard:  http://{shown}:{PORT}   (LAN, no auth)")
     print("  JSON at /api/metrics  ·  Ctrl-C to stop\n")
     try:
         httpd.serve_forever()
