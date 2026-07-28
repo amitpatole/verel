@@ -253,6 +253,21 @@ class Percept(BaseModel):
     stabilized: bool | None = None
 
 
+class ReceiptKind(str, Enum):
+    """Two-tier receipt model for QuineOS (design change DC-04).
+
+    COMMITTED — irreversible actions. Synchronously blocking: nothing advances until the receipt is
+    durably written. Non-revocable. The gate MUST complete before the caller gets a response.
+
+    OPTIMISTIC — advisory / read-only / idempotent actions. Signed asynchronously; revocable if a
+    later grader invalidates it. Use for actions where the cost of the blocking round-trip exceeds
+    the risk of the action. The caller may proceed before the receipt is committed, but must honour
+    a subsequent REVOKE from the store.
+    """
+    COMMITTED = "committed"
+    OPTIMISTIC = "optimistic"
+
+
 class GateResult(BaseModel):
     verdict: Verdict
     reason: str = ""
@@ -297,6 +312,10 @@ class GateReceipt(BaseModel):
     ceiling_clamped: bool = False  # an advisory finding was held back from gating a destructive act
     subject: str = ""  # additional ATTESTED context bound into the signature (e.g. a sight percept's
     #                    image_ref + matches_intent) — so trust-implying output fields aren't unsigned
+    # Two-tier receipt model (DC-04): COMMITTED for irreversible actions (sync-blocking, non-revocable);
+    # OPTIMISTIC for advisory/read-only/idempotent actions (async, revocable). Default COMMITTED so the
+    # gate is safe when the caller doesn't specify — opt DOWN to OPTIMISTIC explicitly, never up.
+    receipt_kind: ReceiptKind = ReceiptKind.COMMITTED
     # envelope signature (same tiers as RunReceipt) — binds the verdict so it can't be faked
     alg: str = "hmac-sha256"
     runner_identity: str = ""
@@ -308,9 +327,12 @@ class GateReceipt(BaseModel):
         # then `alg` (anti-downgrade); fingerprint transitively binds every grader line. `ceiling_clamped`
         # and `subject` are bound too — they carry trust-implying facts (a held-back advisory finding; a
         # percept's image_ref/matches_intent), so a relayed receipt can't flip them undetected (round 2).
+        # receipt_kind bound AFTER ceiling_clamped — it determines whether the receipt is revocable,
+        # so an attacker must not be able to flip COMMITTED→OPTIMISTIC on an existing signature.
         return canonical_payload("gatereceipt", self.alg, self.issued_by, self.verdict.value,
                                  self.fingerprint, self.runner_identity,
-                                 str(int(self.ceiling_clamped)), self.subject)
+                                 str(int(self.ceiling_clamped)), self.subject,
+                                 self.receipt_kind.value)
 
 
 class GateReceiptVerification(BaseModel):

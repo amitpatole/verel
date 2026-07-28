@@ -18,11 +18,7 @@ into one signing payload (canonical, length-prefixed to prevent delimiter inject
 report — strip an issue, swap the verdict, point it at a different diff — and the signature no longer
 verifies.
 
-**Algorithms.** The default is **HMAC-SHA256** (a shared secret within one trust domain). Install
-[`verel[attest]`](install-extras.md) for **ed25519** publicly-verifiable receipts a *second party* checks
-with only your public key. Verification is always **constant-time** (`hmac.compare_digest`), and the
-algorithm is bound into the signed payload so a signature can't be downgraded. An ed25519 verification
-with PyNaCl absent **fails closed** — it returns `false`, never a silent pass.
+**Algorithms.** The default is `attest="auto"` — **ed25519** when [`verel[attest]`](install-extras.md) is installed, **HMAC-SHA256** otherwise. `auto` never silently downgrades an explicit request: if you pass `attest="ed25519"` and PyNaCl is absent, the call raises `MissingAttestationDep` rather than falling back to HMAC (a fallback would strip the public-verifiability guarantee you asked for). Verification is always **constant-time** (`hmac.compare_digest`), and the algorithm is bound into the signed payload so a signature can't be downgraded. An ed25519 verification with PyNaCl absent **fails closed** — it returns `false`, never a silent pass.
 
 **Keys are never a hardcoded default.** The HMAC secret resolves from `VEREL_RUNNER_SECRET`, else a
 persisted per-installation random key under `~/.config/verel/`, else an ephemeral per-process key (which

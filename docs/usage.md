@@ -529,9 +529,10 @@ advisory ceiling as everywhere else). The response carries `verdict`, `observati
 
 #### `verel_build_tool` — let the agent build its own tool (needs an LLM key)
 
-`detect → scaffold → test → register`. The MCP path **requires the container isolation tier** (bwrap
-netns + read-only fs + seccomp) and fails closed without it — it runs LLM-authored code, so it never
-falls back to the weaker subprocess tier.
+`detect → scaffold → test → register`. The MCP path **requires two things to be true** before any code runs:
+
+1. **Operator opt-in:** set `VEREL_ALLOW_BUILD_TOOL=1`. This is the operator's explicit signal that code execution over MCP is authorized. Without it, `dispatch()` returns an error and the tool is never called. A missing env var produces: `"verel_build_tool is a privileged tool … Set VEREL_ALLOW_BUILD_TOOL=1 to explicitly authorize it."`.
+2. **Container isolation tier:** bwrap `--unshare-all` no-network, read-only fs, seccomp. Fails closed without bwrap — it runs LLM-authored code and never falls back to the weaker subprocess tier.
 
 | Arg | Req? | Meaning |
 |---|---|---|

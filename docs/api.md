@@ -92,6 +92,40 @@ resolution that makes a verdict publicly re-checkable.
 
 ::: verel.verdict.keys
 
+### Receipt kind — two-tier model (`ReceiptKind`)
+
+`GateReceipt` carries a `receipt_kind` field (bound into the signature — flipping it invalidates the HMAC):
+
+| Value | Meaning |
+|---|---|
+| `COMMITTED` (default) | Irreversible actions. Synchronously blocking — nothing advances until the receipt is durably written. Non-revocable. |
+| `OPTIMISTIC` | Advisory / read-only / idempotent actions. Signed asynchronously; revocable if a later grader contradicts it. |
+
+```python
+from verel.verdict import ReceiptKind
+receipt = build_gate_receipt(verdict, reports)
+assert receipt.receipt_kind == ReceiptKind.COMMITTED  # default — safe for destructive actions
+```
+
+### Crash-atomic receipt store (`ReceiptStore`)
+
+`ReceiptStore` persists receipts to disk with two invariants:
+
+- **WAL before grading (DC-01):** `begin(action_id)` writes a pending entry atomically before any grader runs. A crash between `begin()` and `commit()` leaves the WAL in place; `check_pending()` surfaces the gap.
+- **Hash-chain (DC-02):** `commit()` writes via `os.replace()` (atomic rename) and chains each receipt to its predecessor with `prev_hash = SHA-256(prev_receipt)`. `verify_chain()` walks the store and detects any tampered or missing link.
+
+```python
+from verel.verdict import ReceiptStore
+
+store = ReceiptStore()          # defaults to QUINE_RECEIPT_STORE or ~/.local/share/quine/receipts
+store.begin("action-42")        # WAL written — grading starts
+receipt = gate(reports)         # grader executes
+h = store.commit(receipt, "action-42")   # atomic write, WAL cleared
+ok, reason = store.verify_chain()        # confirm chain is intact
+```
+
+::: verel.verdict.store
+
 ## Fleet — agents managing agents
 
 Fan a goal out into independent subtasks, run workers in isolated git worktrees under a single-writer

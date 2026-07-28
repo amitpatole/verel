@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased — QuineOS foundation (DC-01..DC-05)
+
+- **DC-01 + DC-02: Crash-atomic hash-chained receipt store (`ReceiptStore`).** `begin(action_id)` writes a WAL entry atomically before any grader runs; `commit()` writes the receipt via `os.replace()` (atomic rename) and chains it to its predecessor with `prev_hash = SHA-256(prev_receipt)`. `verify_chain()` detects any tampered or missing link. Root directory via `QUINE_RECEIPT_STORE` (default `~/.local/share/quine/receipts`). New exports: `verel.verdict.ReceiptStore`.
+- **DC-03: `attest="auto"` is now the default** for `build_gate_receipt` and `mint_report_receipt` (was `"hmac"`). `auto` resolves to ed25519 when PyNaCl is installed, HMAC-SHA256 otherwise. Explicit `attest="ed25519"` now **fails closed** (`MissingAttestationDep`) when PyNaCl is absent — it no longer silently downgrades to HMAC.
+- **DC-04: `ReceiptKind` two-tier model.** `GateReceipt` gains a `receipt_kind` field: `COMMITTED` (default — irreversible, sync-blocking, non-revocable) and `OPTIMISTIC` (advisory/read-only/idempotent, async, revocable). The field is bound into `signing_payload()` — flipping `COMMITTED→OPTIMISTIC` invalidates the HMAC signature. New export: `verel.verdict.ReceiptKind`.
+- **DC-05: MCP per-tool ACL for code-execution tools.** `verel_build_tool` now requires `VEREL_ALLOW_BUILD_TOOL=1` (operator opt-in). Absent env var → structured error, tool never dispatched. `_PRIVILEGED_TOOLS` dict and `_check_tool_authz()` in `mcp_server.py`; checked in `dispatch()` before any fn call.
+
 ## 1.8.0 — eyes grade motion (video/GIF) over time
 
 - **Sight sense now grades local motion media.** With AgentVision 0.11, `perceive()` and

@@ -28,7 +28,7 @@ from .models import (
 
 
 def mint_report_receipt(report: Report, *, suite_sha: str, inputs_digest: str,
-                        coverage_assertion: str, attest: str = "hmac",
+                        coverage_assertion: str, attest: str = "auto",
                         runner_identity: str = "sight-runner") -> RunReceipt:
     """Attach a signed RunReceipt to `report`, binding its graded outcome. Used by senses (e.g. sight)
     that produce Reports outside the CI grader path but still need attestation (§4). `attest`: "hmac"
@@ -36,7 +36,13 @@ def mint_report_receipt(report: Report, *, suite_sha: str, inputs_digest: str,
     rr = RunReceipt(suite_sha=suite_sha, inputs_digest=inputs_digest,
                     coverage_assertion=coverage_assertion, runner_identity=runner_identity,
                     result_digest=report_result_digest(report), signature="")
-    if attest == "ed25519":
+    if attest == "ed25519" and not keys.available():
+        # Fail closed: explicit ed25519 must never silently downgrade to HMAC — that strips the
+        # public-verifiability guarantee the caller explicitly required. (DC-03)
+        raise keys.MissingAttestationDep(
+            "attest='ed25519' requires PyNaCl — install with `pip install verel[attest]`")
+    resolved = "ed25519" if (attest in ("auto", "ed25519") and keys.available()) else "hmac-sha256"
+    if resolved == "ed25519":
         keys.attest_self(rr)
     else:
         rr.signature = sign_receipt(rr)
@@ -69,7 +75,7 @@ def _fingerprint(verdict: Verdict, graders: list[GraderAttestation]) -> str:
 
 
 def build_gate_receipt(verdict: Verdict, reports: list[Report], *, issued_by: str | None = None,
-                       attest: str = "hmac", subject: str = "") -> GateReceipt:
+                       attest: str = "auto", subject: str = "") -> GateReceipt:
     """Assemble the gate-level receipt from a stage's reports (each carrying its signed RunReceipt)
     and SIGN the envelope (`attest`: "hmac" in-domain, or "ed25519" publicly verifiable). The
     envelope signature binds the aggregate verdict + the grader set — the grader receipts alone
@@ -86,7 +92,14 @@ def build_gate_receipt(verdict: Verdict, reports: list[Report], *, issued_by: st
     clamped = any(_was_clamped(r) for r in reports)
     gr = GateReceipt(issued_by=issued_by, verdict=verdict, fingerprint=_fingerprint(verdict, graders),
                      graders=graders, ceiling_clamped=clamped, subject=subject)
-    if attest == "ed25519":
+    # DC-03: resolve "auto" → ed25519 when available, hmac otherwise. "auto" is the new default so
+    # cross-domain receipts are publicly verifiable without callers having to opt in explicitly.
+    # Explicit "ed25519" fails closed when PyNaCl is absent — never silently downgrades to HMAC.
+    if attest == "ed25519" and not keys.available():
+        raise keys.MissingAttestationDep(
+            "attest='ed25519' requires PyNaCl — install with `pip install verel[attest]`")
+    resolved = "ed25519" if (attest in ("auto", "ed25519") and keys.available()) else "hmac-sha256"
+    if resolved == "ed25519":
         keys.attest_self(gr)                  # duck-typed: stamps ed25519 identity + signs the envelope
     else:
         gr.alg = "hmac-sha256"

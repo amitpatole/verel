@@ -45,12 +45,14 @@ from .models import (
     IssueKind,
     Observation,
     Percept,
+    ReceiptKind,
     ReceiptVerification,
     Report,
     RunReceipt,
     Severity,
     Verdict,
 )
+from .store import ReceiptStore
 
 __all__ = [
     "ADVISORY_CEIL",
@@ -89,6 +91,8 @@ __all__ = [
     "IssueKind",
     "Observation",
     "Percept",
+    "ReceiptKind",
+    "ReceiptStore",
     "ReceiptVerification",
     "Report",
     "RunReceipt",

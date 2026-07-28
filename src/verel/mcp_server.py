@@ -31,6 +31,23 @@ _MAX_QUERY = 4_000
 _MAX_TEXT = 20_000
 _MAX_FIELD = 512
 
+# DC-05: Per-tool ACL — tools that run arbitrary code require an explicit operator opt-in via env var.
+# The MCP caller is untrusted; an agent must not be able to trigger code execution without the operator
+# having explicitly opted in. The env var is the operator's signal: "I know this tool runs code."
+# Fail closed: absent env var → structured error, tool never dispatched.
+_PRIVILEGED_TOOLS: dict[str, str] = {
+    "verel_build_tool": "VEREL_ALLOW_BUILD_TOOL",
+}
+
+
+def _check_tool_authz(name: str) -> str | None:
+    """Return an error message if `name` is a privileged tool whose gate env var is unset, else None."""
+    env_var = _PRIVILEGED_TOOLS.get(name)
+    if env_var and not os.environ.get(env_var):
+        return (f"{name} is a privileged tool that runs LLM/remote-supplied code under OS isolation. "
+                f"Set {env_var}=1 to explicitly authorize it.")
+    return None
+
 
 def _err(msg: str) -> dict:
     return {"error": msg}
@@ -829,6 +846,10 @@ def dispatch(name: str, args: dict) -> dict:
     and the exception TYPE — never str(e) — so a stray exception can't leak a path/secret."""
     if name not in TOOLS:
         return _err(f"unknown tool {name!r}; known: {sorted(TOOLS)}")
+    # DC-05: per-tool ACL — privileged tools (code execution) require explicit operator opt-in.
+    authz_err = _check_tool_authz(name)
+    if authz_err:
+        return _err(authz_err)
     try:
         return TOOLS[name]["fn"](args or {})
     except Exception as e:  # host-boundary backstop — a tool bug must not kill the connection

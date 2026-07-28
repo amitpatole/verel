@@ -70,6 +70,8 @@ out of the box.
 | [`VEREL_REGISTRY_SECRET`](#secrets-key-files) | Signing secret for skill-registry artifacts. | persisted per-install key |
 | [`VEREL_TOOL_SECRET`](#secrets-key-files) | Signs tool-smith skill-registry artifacts (own trust domain). | persisted per-install key |
 | [`XDG_CONFIG_HOME`](#secrets-key-files) | Relocates the whole config dir (keys, brain.db, lance). | `~/.config` |
+| `VEREL_ALLOW_BUILD_TOOL` | Set to `1` to authorize `verel_build_tool` over MCP. The tool runs LLM-authored code under OS isolation; absent = tool refused at dispatch (operator opt-in required). | — |
+| `QUINE_RECEIPT_STORE` | Root directory for the crash-atomic `ReceiptStore` (WAL + hash-chain). Used by QuineOS and any caller that commits receipts to disk. | `~/.local/share/quine/receipts` |
 
 ## Memory backend
 
