@@ -38,6 +38,16 @@ real cross-backend drift the new negative-eval sweep surfaced.
   (M1–M3). Corrected the audit docstring's over-claimed "tamper-evident" to state precisely what
   `verify()` detects (in-place edits, middle deletion, torn lines) and what it does not (tail
   truncation, full re-forge — use `ReceiptStore` for a signed chain).
+- **Security hardening (adversarial red-team, round 2).** Round-1 pushed the guard into `promote()`;
+  round 2 found two more launder doors that bypass `promote()` entirely. Closed both at the write
+  primitive: (A, Critical) `apply_replica` — the verbatim-upsert replication path, wire-reachable via
+  `/apply` even in signed mode with the cluster credential — could upsert a REJECTED value as
+  VERIFIED with an emptied ledger; now `view.guard_replica` unions the durable ledger from any record
+  already at that id (a replica can't drop a local rejection) and forces a once-rejected value back to
+  a REJECTED tombstone. (C-2, High) `annotate(rejected_values=[])` then `demote` then `promote`
+  laundered via the metadata path; the wire `/annotate` now strips the reserved ledger keys, and
+  `demote` refuses to un-reject a tombstone on every backend (rejection is durable). Regression-pinned
+  cross-backend (3 new contract checks) and over real HTTP (`tests/test_hosted_launder.py`).
 
 ## Unreleased — QuineOS foundation (DC-01..DC-05)
 

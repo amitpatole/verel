@@ -211,7 +211,10 @@ def _make_handler(store: MemoryView, lock: threading.Lock, token: str | None,
                       "/pin": store.pin, "/unpin": store.unpin}[self.path]
                 return self._send(200, {"record": _rec_json(fn(b["id"]))})
             if self.path == "/annotate":
-                r = store.annotate(b["id"], **b.get("detail", {}))
+                # UNTRUSTED wire input must not write the append-only rejection ledger — else a caller
+                # clears it (annotate(rejected_values=[])) and launders a rejected value (round-14/C-2).
+                from .view import drop_reserved_detail
+                r = store.annotate(b["id"], **drop_reserved_detail(b.get("detail", {})))
                 return self._send(200, {"record": _rec_json(r)})
             if self.path == "/set_flags":
                 r = store.set_flags(b["id"], pinned=b.get("pinned"), volatile=b.get("volatile"),

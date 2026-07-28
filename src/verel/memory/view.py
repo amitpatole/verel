@@ -180,6 +180,47 @@ def _cap_ledger(rejected: list[str]) -> tuple[list[str], bool]:
     return rejected[-MAX_REJECTED_VALUES:], len(rejected) > MAX_REJECTED_VALUES
 
 
+LEDGER_KEYS = ("rejected_values", "rejected_saturated")
+
+
+def drop_reserved_detail(detail: dict) -> dict:
+    """Strip the security-critical ledger keys from an UNTRUSTED detail update. The rejected-value
+    ledger is append-only via `record_rejection`/`supersede_detail`/`guard_replica`; a caller must
+    never clear it through a metadata write (round-14/C-2: annotate(rejected_values=[]) then
+    demote then promote laundered a rejected value). Applied at the untrusted wire boundary only —
+    trusted in-process callers (e.g. pg's contradict persisting the ledger) call annotate directly."""
+    return {k: v for k, v in detail.items() if k not in LEDGER_KEYS}
+
+
+def guard_replica(existing: MemoryRecord | None, record: MemoryRecord) -> None:
+    """Anti-laundering guard for the verbatim-upsert replication primitive `apply_replica`
+    (round-14/A). `apply_replica` writes trust + detail AS-IS, bypassing `promote()`; a hostile
+    replication peer (or any /apply caller) could otherwise upsert a REJECTED value as VERIFIED with
+    an empty ledger. This mutates the incoming `record` so a replica can NEVER:
+      (1) drop a local rejection — the durable ledger from any record already at this id is UNIONED
+          into the incoming record (and the saturation flag OR'd), never replaced; and
+      (2) resurrect a rejected value — if the incoming value's own key is in the merged ledger it is
+          forced back to REJECTED (a durable tombstone: not recallable, not promotable — downgrading
+          only to CANDIDATE would still surface the lie in recall); and
+      (3) arrive VERIFIED on a SATURATED key — a new (not-individually-rejected) value on a key with
+          too many rejections may exist as a CANDIDATE but can't be verified over the wire.
+    A legitimate replica of a never-rejected value is untouched (empty merged ledger → not blocked)."""
+    if existing is not None:
+        merged = list(dict.fromkeys([*existing.detail.get("rejected_values", []),
+                                     *record.detail.get("rejected_values", [])]))
+        capped, saturated = _cap_ledger(merged)
+        saturated = (saturated or bool(existing.detail.get("rejected_saturated"))
+                     or bool(record.detail.get("rejected_saturated")))
+        if capped:
+            record.with_detail(rejected_values=capped)
+        if saturated:
+            record.with_detail(rejected_saturated=True)
+    if rejected_key(record.text) in record.detail.get("rejected_values", []):
+        record.trust = Trust.REJECTED  # this exact value was rejected — restore the tombstone
+    elif record.trust == Trust.VERIFIED and record.detail.get("rejected_saturated"):
+        record.trust = Trust.CANDIDATE  # saturated key: can't arrive verified over the wire
+
+
 def is_launder_blocked(r: MemoryRecord) -> bool:
     """The SINGLE anti-laundering guard every promotion path must inherit (round-13/C1+C2).
 

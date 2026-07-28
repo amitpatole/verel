@@ -201,6 +201,51 @@ def check_legit_candidate_still_promotes(mem: MemoryView) -> None:
     assert mem.get(r.id).trust == Trust.VERIFIED
 
 
+def check_apply_replica_cannot_launder_rejected(mem: MemoryView) -> None:
+    """The verbatim-upsert replication primitive must not let a peer resurrect a rejected value:
+    a replica of a once-rejected value (even trust=VERIFIED, empty detail) is forced back to a
+    REJECTED tombstone — not recallable, not promotable (round-14/A)."""
+    r = mem.write(make_fact())
+    _reject(mem, r.id)
+    laundered = make_fact()
+    laundered.id = r.id
+    laundered.trust = Trust.VERIFIED  # hostile peer claims verified, drops the ledger
+    mem.apply_replica(laundered)
+    after = mem.get(r.id)
+    assert after.trust == Trust.REJECTED  # forced back to tombstone, not VERIFIED/CANDIDATE
+    assert after.detail.get("rejected_values")  # local ledger preserved, not dropped
+    assert all(h.id != r.id for h in mem.recall("max-width card width", scope="repo:x"))
+
+
+def check_apply_replica_preserves_local_ledger(mem: MemoryView) -> None:
+    """A replica carrying a DIFFERENT (never-rejected) value at a rejected key keeps the local
+    ledger, so the once-rejected value stays un-promotable afterwards (round-14/A)."""
+    r = mem.write(make_fact(text="old lie"))
+    _reject(mem, r.id)
+    newval = make_fact(text="a fresh distinct value")
+    newval.id = r.id
+    newval.trust = Trust.VERIFIED
+    mem.apply_replica(newval)
+    after = mem.get(r.id)
+    assert after.trust == Trust.VERIFIED           # a genuinely new value may be verified
+    assert rejected_key("old lie") in after.detail.get("rejected_values", [])  # ledger preserved
+
+
+def check_demote_cannot_unreject(mem: MemoryView) -> None:
+    """Rejection is durable: demote must not move a REJECTED tombstone back to a recallable
+    candidate (round-14/C-2). Walking back a VERIFIED promotion is still allowed."""
+    r = mem.write(make_fact())
+    _reject(mem, r.id)
+    mem.demote(r.id)
+    assert mem.get(r.id).trust == Trust.REJECTED
+    assert all(h.id != r.id for h in mem.recall("max-width card width", scope="repo:x"))
+    # sanity: demote still works on a legitimately VERIFIED record
+    g = mem.write(make_fact(text="fine", subject="ok", predicate="q"))
+    mem.promote(g.id)
+    mem.demote(g.id)
+    assert mem.get(g.id).trust == Trust.CANDIDATE
+
+
 def check_correction_chain_is_bounded(mem: MemoryView) -> None:
     """Repeated supersessions must not grow one record's detail without bound (round-11 B) —
     the chain is capped at the shared MAX_CORRECTIONS on every backend."""
@@ -267,6 +312,9 @@ CONTRACT_CHECKS = [
     check_promote_refuses_restated_once_rejected_value,
     check_ledger_saturation_blocks_promotion,
     check_legit_candidate_still_promotes,
+    check_apply_replica_cannot_launder_rejected,
+    check_apply_replica_preserves_local_ledger,
+    check_demote_cannot_unreject,
     check_correction_chain_is_bounded,
     check_decay_prunes_only_on_exact_conjunction,
     check_decay_leaves_confidence_invariant,

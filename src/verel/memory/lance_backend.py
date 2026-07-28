@@ -32,6 +32,7 @@ from .view import (
     MemoryView,
     Trust,
     apply_decay,
+    guard_replica,
     is_launder_blocked,
     make_id,
     make_key,
@@ -246,6 +247,7 @@ class LanceMemory(MemoryView):
         record.id = record.id or make_id(record.subj_pred_key)
         with self._lock:
             self._check_open()
+            guard_replica(self._get(record.id), record)  # anti-laundering (round-14/A)
             self._upsert(record)
         return record
 
@@ -339,6 +341,11 @@ class LanceMemory(MemoryView):
         return self._adjust(record_id, trust=Trust.VERIFIED, confirm=True)
 
     def demote(self, record_id):
+        with self._lock:
+            self._check_open()
+            r = self._get(record_id)
+        if r is not None and r.trust == Trust.REJECTED:
+            return r  # rejection is durable (round-14/C-2)
         return self._adjust(record_id, trust=Trust.CANDIDATE)
 
     def annotate(self, record_id: str, **detail) -> MemoryRecord | None:

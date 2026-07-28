@@ -23,6 +23,7 @@ from .view import (
     MemoryView,
     Trust,
     apply_decay,
+    guard_replica,
     is_launder_blocked,
     make_id,
     make_key,
@@ -226,6 +227,8 @@ class LocalMemory(MemoryView):
         if not record.subj_pred_key:
             record.subj_pred_key = make_key(record.subject, record.predicate, record.scope)
         record.id = record.id or make_id(record.subj_pred_key)
+        # anti-laundering: a replica can't drop the local rejection ledger or verify a rejected value
+        guard_replica(self.get(record.id), record)
         self._upsert(record)
         self._set_vector(record.id, self._embed_text(record))
         return record
@@ -331,6 +334,11 @@ class LocalMemory(MemoryView):
         return self._adjust(record_id, trust=Trust.VERIFIED, confirm=True)
 
     def demote(self, record_id):
+        # rejection is durable: demote must not un-reject a tombstone back to a recallable candidate
+        # (round-14/C-2). Walking back a VERIFIED promotion stays allowed.
+        r = self.get(record_id)
+        if r is not None and r.trust == Trust.REJECTED:
+            return r
         return self._adjust(record_id, trust=Trust.CANDIDATE)
 
     def annotate(self, record_id: str, **detail) -> MemoryRecord | None:

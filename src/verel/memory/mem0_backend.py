@@ -31,6 +31,7 @@ from .view import (
     MemoryView,
     Trust,
     apply_decay,
+    guard_replica,
     is_launder_blocked,
     make_id,
     make_key,
@@ -148,6 +149,7 @@ class Mem0Memory(MemoryView):
         if not record.subj_pred_key:
             record.subj_pred_key = make_key(record.subject, record.predicate, record.scope)
         record.id = record.id or make_id(record.subj_pred_key)
+        guard_replica(self.get(record.id), record)  # anti-laundering (round-14/A)
         self._persist(record, self._mem0_id_for(record.id))
         return record
 
@@ -214,6 +216,9 @@ class Mem0Memory(MemoryView):
         return self._adjust(record_id, trust=Trust.VERIFIED, confirm=True)
 
     def demote(self, record_id):
+        r = self.get(record_id)
+        if r is not None and r.trust == Trust.REJECTED:
+            return r  # rejection is durable (round-14/C-2)
         return self._adjust(record_id, trust=Trust.CANDIDATE)
 
     def annotate(self, record_id, **detail):

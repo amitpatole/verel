@@ -39,6 +39,7 @@ from .view import (
     MemoryView,
     Trust,
     apply_decay,
+    guard_replica,
     is_launder_blocked,
     make_id,
     make_key,
@@ -258,7 +259,12 @@ class RedisMemory(MemoryView):
         if not record.subj_pred_key:
             record.subj_pred_key = make_key(record.subject, record.predicate, record.scope)
         record.id = record.id or make_id(record.subj_pred_key)
-        return self._atomic(record.id, lambda _existing: record) or record
+
+        def mutate(existing):
+            guard_replica(existing, record)  # anti-laundering, inside the atomic section (round-14/A)
+            return record
+
+        return self._atomic(record.id, mutate) or record
 
     def get(self, record_id: str) -> MemoryRecord | None:
         try:
@@ -381,6 +387,9 @@ class RedisMemory(MemoryView):
         return self._adjust(record_id, trust=Trust.VERIFIED, confirm=True)
 
     def demote(self, record_id):
+        r = self.get(record_id)
+        if r is not None and r.trust == Trust.REJECTED:
+            return r  # rejection is durable (round-14/C-2)
         return self._adjust(record_id, trust=Trust.CANDIDATE)
 
     def annotate(self, record_id: str, **detail) -> MemoryRecord | None:

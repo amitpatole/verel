@@ -44,6 +44,7 @@ from .view import (
     MemoryRecord,
     MemoryView,
     Trust,
+    guard_replica,
     is_launder_blocked,
     make_id,
     make_key,
@@ -351,6 +352,8 @@ class PostgresMemory(MemoryView):
         record.id = record.id or make_id(record.subj_pred_key)
         with self._txn(dict_rows=False) as cur:
             self._lock(cur, record.id)
+            # anti-laundering: merge the durable ledger + refuse a replica verifying a rejected value
+            guard_replica(self._get(cur, record.id), record)
             self._upsert(cur, record)
         return record
 
@@ -463,6 +466,9 @@ class PostgresMemory(MemoryView):
         return self._adjust(record_id, trust=Trust.VERIFIED, confirm=True)
 
     def demote(self, record_id):
+        r = self.get(record_id)
+        if r is not None and r.trust == Trust.REJECTED:
+            return r  # rejection is durable (round-14/C-2)
         return self._adjust(record_id, trust=Trust.CANDIDATE)
 
     def annotate(self, record_id: str, **detail) -> MemoryRecord | None:
