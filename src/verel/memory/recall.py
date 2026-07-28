@@ -99,8 +99,17 @@ def recall_as_of(mem: MemoryView, query: str, *, as_of: float, scope: str | None
     drops as-of results into a prompt must fence them as untrusted DATA exactly as it would `recall`
     output.
     """
+    # Scope semantics match `recall`: a scoped query also sees `global` facts. Two backend-filtered
+    # queries + a de-dupe (not a full-store scan) so global isn't silently omitted from as-of results.
+    records = mem.all(scope=scope, kind=kind)
+    if scope is not None and scope != "global":
+        records = [*records, *mem.all(scope="global", kind=kind)]
     out: list[tuple[MemoryRecord, float]] = []
-    for r in mem.all(scope=scope, kind=kind):
+    seen: set[str] = set()
+    for r in records:
+        if r.id in seen:
+            continue
+        seen.add(r.id)
         snap = value_as_of(r, as_of)
         if snap is None or is_launder_blocked(snap):
             continue  # ledger-aware: exclude any value ever graded false, current OR reconstructed

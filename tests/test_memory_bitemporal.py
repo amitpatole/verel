@@ -110,6 +110,17 @@ def test_non_finite_interval_bounds_never_match():
     assert value_as_of(m.get("p"), 500.0) is None
 
 
+def test_recall_as_of_includes_global_scope():
+    """Scope semantics match recall(): a scoped as-of query also surfaces global facts (round-15
+    round-2/E1 — as-of previously omitted global). No double-count when the scope IS global."""
+    m = LocalMemory(":memory:")
+    m.write(MemoryRecord(kind=MemoryKind.FACT, subject="policy", predicate="retention",
+                         text="90 days", scope="global"), ts=100.0)
+    hits = recall_as_of(m, "policy retention", as_of=200.0, scope="repo:x")
+    assert [h.text for h in hits] == ["90 days"]
+    assert len(recall_as_of(m, "policy retention", as_of=200.0, scope="global")) == 1  # no dup
+
+
 def test_apply_replica_preserves_explicit_valid_time():
     """Replication mirrors a leader's valid-time verbatim (a follower must not rewrite history)."""
     m = LocalMemory(":memory:")
