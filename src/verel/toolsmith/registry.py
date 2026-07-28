@@ -18,6 +18,7 @@ import hashlib
 import hmac
 import signal
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -84,7 +85,9 @@ def load_callable(tool: ToolRecord, *, timeout_s: int = 2):
         raise ValueError(f"tool {tool.name!r} failed signature verification — refusing to load")
 
     bi = __builtins__ if isinstance(__builtins__, dict) else vars(__builtins__)
-    safe_builtins = {
+    # annotate as dict[str, Any]: a newer mypy otherwise infers Literal keys from the comprehension
+    # and rejects the "__import__" assignment below (the key isn't in that Literal union).
+    safe_builtins: dict[str, Any] = {
         k: bi[k]
         for k in ("range", "len", "min", "max", "abs", "sum", "sorted", "enumerate", "zip",
                   "map", "filter", "round", "int", "float", "str", "bool", "list", "dict",
