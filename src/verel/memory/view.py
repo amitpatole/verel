@@ -374,10 +374,15 @@ def correction_chain(r: MemoryRecord) -> list[dict]:
 
 def _interval_contains(valid_from: float, valid_to: float, t: float) -> bool:
     """Is wall-clock `t` inside the half-open validity interval [valid_from, valid_to)? `valid_to == 0`
-    means OPEN (still valid). A non-finite `t` (NaN/inf) never matches — fail-safe."""
+    means OPEN (still valid). Fail-safe on non-finite inputs: a NaN/inf query time, a non-finite
+    lower bound, or a non-finite (NaN/inf) upper bound never matches — so a hostile replica that plants
+    `valid_to = +inf` ("valid forever") or a NaN bound can't make a value match every as-of query
+    (round-15/F3)."""
     import math
 
-    if not math.isfinite(t):  # NaN/inf guard
+    if not math.isfinite(t) or not math.isfinite(valid_from):
+        return False
+    if valid_to != 0.0 and not math.isfinite(valid_to):  # 0.0 == open is fine; inf/nan bound is not
         return False
     return valid_from <= t and (valid_to == 0.0 or t < valid_to)
 
@@ -391,14 +396,29 @@ def value_as_of(r: MemoryRecord, t: float) -> MemoryRecord | None:
     vf = r.valid_from or r.created_ts
     if _interval_contains(vf, r.valid_to, t):
         return r
-    for c in r.detail.get("corrections", []):
-        cvf = c.get("valid_from", c.get("ts", 0.0)) or 0.0
-        cvt = c.get("valid_to", c.get("superseded_at", 0.0)) or 0.0
+    corrections = r.detail.get("corrections", [])
+    if not isinstance(corrections, list):
+        return None  # a hostile replica can plant a non-list `corrections`; ignore it (round-15/F2)
+    # Cap the read-side walk: MAX_CORRECTIONS is enforced at WRITE, but apply_replica stores the chain
+    # verbatim, so a peer could plant a huge chain — bound the scan regardless (round-15/F2).
+    for c in corrections[-MAX_CORRECTIONS:]:
+        if not isinstance(c, dict):
+            continue  # skip malformed (non-dict) entries rather than crashing
+        try:
+            cvf = float(c.get("valid_from", c.get("ts", 0.0)) or 0.0)
+            cvt = float(c.get("valid_to", c.get("superseded_at", 0.0)) or 0.0)
+        except (TypeError, ValueError):
+            continue  # non-numeric bounds → skip (fail-safe)
+        if cvt == 0.0:
+            continue  # a chain entry is a CLOSED interval (it was superseded); no close time → malformed
         if _interval_contains(cvf, cvt, t):
+            try:
+                ec = float(c.get("ec", r.epistemic_confidence))
+            except (TypeError, ValueError):
+                ec = r.epistemic_confidence
             return r.model_copy(update={
-                "text": str(c.get("text", "")),
-                "valid_from": cvf, "valid_to": cvt,
-                "epistemic_confidence": float(c.get("ec", r.epistemic_confidence)),
+                "text": str(c.get("text", "")), "valid_from": cvf, "valid_to": cvt,
+                "epistemic_confidence": ec,
             })
     return None
 

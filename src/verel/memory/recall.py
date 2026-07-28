@@ -18,8 +18,8 @@ from .view import (
     MemoryKind,
     MemoryRecord,
     MemoryView,
-    Trust,
     canonical_text,
+    is_launder_blocked,
     rank,
     relevance,
     value_as_of,
@@ -86,21 +86,24 @@ def recall_as_of(mem: MemoryView, query: str, *, as_of: float, scope: str | None
     Deliberate properties:
     - **Read-only time travel:** does NOT reinforce retrieval_strength (it isn't "using" the memory now)
       and does NOT mutate anything.
-    - **Rejected keys are excluded entirely** (current trust REJECTED → skipped), so a value later
-      graded false can't be resurfaced into a prompt through a historical query. The legitimate
-      changed-over-time case never involves rejection, so this exclusion costs nothing there. The full
-      superseded history remains inspectable via the correction chain / audit for explicit review.
+    - **Never surfaces an ever-rejected value** — the reconstructed value is checked with the ledger-aware
+      `is_launder_blocked` (not just "is the CURRENT record rejected"), so a value graded false and then
+      superseded by a benign correction can't be resurfaced from the chain by a historical query
+      (round-15/F1). The legitimate changed-over-time case never involves rejection, so this costs
+      nothing there; the full superseded history remains inspectable via the chain / audit for review.
     - **O(n) scan** over the scoped records: as-of is an analytical query, not the hot path, so matching
       against the reconstructed (possibly historical) text — which a BM25 index over CURRENT text can't
       do — is worth the scan.
+
+    Returns raw `MemoryRecord`s (like `recall`, not the fenced `recall_budgeted.text`): a caller that
+    drops as-of results into a prompt must fence them as untrusted DATA exactly as it would `recall`
+    output.
     """
     out: list[tuple[MemoryRecord, float]] = []
     for r in mem.all(scope=scope, kind=kind):
-        if r.trust == Trust.REJECTED:
-            continue
         snap = value_as_of(r, as_of)
-        if snap is None:
-            continue
+        if snap is None or is_launder_blocked(snap):
+            continue  # ledger-aware: exclude any value ever graded false, current OR reconstructed
         rel = relevance(query, snap)
         if rel > 0.0:
             out.append((snap, rel))

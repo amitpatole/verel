@@ -74,6 +74,42 @@ def test_recall_as_of_ignores_non_finite_timestamps():
         assert recall_as_of(m, "server region", as_of=bad, scope="repo:x") == []
 
 
+def test_recall_as_of_excludes_ledgered_value_after_supersede():
+    """round-15/F1: a value graded false then superseded by a benign correction must NOT be
+    resurrected from the chain by a historical query — recall_as_of is ledger-aware, not just
+    current-trust-aware."""
+    m = LocalMemory(":memory:")
+    r = m.write(make_fact(text="passwords in plaintext", subject="s", predicate="p"), ts=100.0)
+    for _ in range(6):
+        m.contradict(r.id)
+    m.write(make_fact(text="passwords are hashed", subject="s", predicate="p"), ts=600.0)  # correction
+    assert m.get(r.id).trust == Trust.CANDIDATE  # current record is a benign candidate
+    hits = recall_as_of(m, "passwords plaintext", as_of=200.0, scope="repo:x")
+    assert all("plaintext" not in h.text for h in hits)
+
+
+def test_value_as_of_tolerates_malformed_corrections():
+    """round-15/F2: a hostile replica plants a non-list / non-dict / non-numeric corrections blob;
+    value_as_of must skip it, not crash."""
+    for bad in ("notalist", [None], [123], [{"valid_from": "nan", "valid_to": "x", "ec": "z"}], [{}]):
+        m = LocalMemory(":memory:")
+        m.apply_replica(MemoryRecord(id="e", kind=MemoryKind.FACT, subject="server", predicate="region",
+                                     text="cur", scope="repo:x", trust=Trust.VERIFIED,
+                                     valid_from=1000.0, valid_to=2000.0, created_ts=1000.0,
+                                     detail_json=__import__("json").dumps({"corrections": bad})))
+        assert recall_as_of(m, "server region", as_of=500.0, scope="repo:x") == []  # no crash
+
+
+def test_non_finite_interval_bounds_never_match():
+    """round-15/F3: a valid_to of +inf (or a NaN bound) must not make a value 'valid forever'."""
+    m = LocalMemory(":memory:")
+    m.apply_replica(MemoryRecord(id="p", kind=MemoryKind.FACT, subject="server", predicate="region",
+                                 text="poison forever", scope="repo:x", trust=Trust.VERIFIED,
+                                 valid_from=1.0, valid_to=float("inf"), created_ts=1.0))
+    assert recall_as_of(m, "server region", as_of=9e9, scope="repo:x") == []
+    assert value_as_of(m.get("p"), 500.0) is None
+
+
 def test_apply_replica_preserves_explicit_valid_time():
     """Replication mirrors a leader's valid-time verbatim (a follower must not rewrite history)."""
     m = LocalMemory(":memory:")

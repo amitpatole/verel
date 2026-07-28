@@ -18,6 +18,13 @@
   postgres `ADD COLUMN IF NOT EXISTS`, lancedb `add_columns` with a tolerant read); old rows read with
   `valid_from = 0` and fall back to `created_ts`. Carried across all five backends
   (local/postgres/lancedb/redis/mem0).
+- **Security hardening (adversarial red-team of the new surface).** (F1, High) `recall_as_of` checked
+  only the record's *current* trust, so supersede-then-restate let a historical query reconstruct a
+  once-rejected value from the chain; it now uses the ledger-aware `is_launder_blocked`, excluding any
+  value ever graded false (current or reconstructed). (F2, Med) a hostile replica's malformed
+  `detail_json` corrections (non-list / non-dict / non-numeric bounds) crashed `value_as_of`; it now
+  skips malformed entries and bounds the read-side chain walk. (F3) a `valid_to = +inf` (or NaN) bound
+  no longer makes a value "valid forever" — non-finite interval bounds fail safe.
 
 ## Unreleased — memory trust-layer: human review, mutation audit, cross-backend negative evals
 
