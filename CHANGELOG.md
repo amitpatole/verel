@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — consolidation observability + memory self-assessment (atlas method, dogfooded)
+## 1.9.1 — consolidation observability + memory self-assessment (atlas method, dogfooded)
 
 - **Consolidation observability.** The induction pass (`consolidate_failures` / `induce_schemas` /
   `consolidate_across_scopes`) used to silently drop clusters that were too small or whose LLM reply
