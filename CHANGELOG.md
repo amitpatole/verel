@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased — bi-temporal memory (valid-time + as-of recall)
+## 1.9.0 — memory: human review, mutation audit, negative evals, bi-temporal (atlas 7/7)
+
+This release closes every gap a third-party assessment (agent-memory-atlas) identified in Verel's
+memory subsystem — human review, mutation audit, negative evals, and bi-temporal — taking it from 3/7
+to 7/7 on that rubric, and hardens the new surfaces through repeated adversarial red-team rounds. It
+also lands the QuineOS receipt-store foundation (DC-01..DC-05). All additions are backward compatible;
+the new memory columns migrate in place on first open.
+
+### Bi-temporal memory (valid-time + as-of recall)
 
 - **Bi-temporal data model.** `MemoryRecord` gains `valid_from`/`valid_to` (valid-time: when a value
   became / ceased to be true in the world) alongside the existing `created_ts` (transaction-time:
@@ -26,7 +34,7 @@
   skips malformed entries and bounds the read-side chain walk. (F3) a `valid_to = +inf` (or NaN) bound
   no longer makes a value "valid forever" — non-finite interval bounds fail safe.
 
-## Unreleased — memory trust-layer: human review, mutation audit, cross-backend negative evals
+### Memory trust-layer: human review, mutation audit, cross-backend negative evals
 
 Closes the gaps a third-party assessment (agent-memory-atlas) correctly identified, and fixes the
 real cross-backend drift the new negative-eval sweep surfaced.
@@ -75,7 +83,7 @@ real cross-backend drift the new negative-eval sweep surfaced.
   `demote` refuses to un-reject a tombstone on every backend (rejection is durable). Regression-pinned
   cross-backend (3 new contract checks) and over real HTTP (`tests/test_hosted_launder.py`).
 
-## Unreleased — QuineOS foundation (DC-01..DC-05)
+### QuineOS foundation (DC-01..DC-05)
 
 - **DC-01 + DC-02: Crash-atomic hash-chained receipt store (`ReceiptStore`).** `begin(action_id)` writes a WAL entry atomically before any grader runs; `commit()` writes the receipt via `os.replace()` (atomic rename) and chains it to its predecessor with `prev_hash = SHA-256(prev_receipt)`. `verify_chain()` detects any tampered or missing link. Root directory via `QUINE_RECEIPT_STORE` (default `~/.local/share/quine/receipts`). New exports: `verel.verdict.ReceiptStore`.
 - **DC-03: `attest="auto"` is now the default** for `build_gate_receipt` and `mint_report_receipt` (was `"hmac"`). `auto` resolves to ed25519 when PyNaCl is installed, HMAC-SHA256 otherwise. Explicit `attest="ed25519"` now **fails closed** (`MissingAttestationDep`) when PyNaCl is absent — it no longer silently downgrades to HMAC.

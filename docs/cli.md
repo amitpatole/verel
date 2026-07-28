@@ -23,6 +23,7 @@ Verel ships **four** console scripts:
 | `heal` | Self-healing CI — failing tests → an agent fixes → green. |
 | `ci` | Delegate to `verel-ci` (agent-run CI). |
 | `verify` | Verify a run-receipt — `ed25519` receipts are publicly verifiable (see below). |
+| `memory` | Human review of the memory trust layer — `pending` / `show` / `approve` / `reject` the CANDIDATE queue, and `audit` the hash-chained mutation log (see [below](#review-memory-as-a-human-verel-memory-resolve-the-candidate-queue)). |
 | `verify-access` | **Opt-in, online.** Query what the cloud *actually* grants (AWS IAM Access Analyzer / GCP Policy Analyzer / Azure role assignments). Needs cloud read creds from `~/.config`; **not** part of the offline gate. |
 | `serve` | Run the REST gate server over a repo (`POST /gate`, `POST /github`). |
 | `mcp install` | Print the `verel-mcp` server config + where each agent host expects it. |
@@ -48,7 +49,7 @@ verel doctor
 A representative run:
 
 ```text
-verel 1.8.0
+verel 1.9.0
   — core grading (no key / no network needed):
   OK python 3.11.9
   OK git
