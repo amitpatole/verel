@@ -69,7 +69,7 @@ offline examples in `examples/`) run with no key at all.
 | **CLI** | `verel …` | `doctor` · `loop` · `fleet` · `heal` · `ci` |
 | **CI CLI / git hook** | `verel-ci …` | a verdict-bus gate in CI or a pre-commit hook |
 | **MCP server** | `verel-mcp` | exposing gate / recall / build-tool / ci-check to an MCP host |
-| **GitHub Action** | `amitpatole/verel@v1.9.1` | failing a build on a FAIL verdict |
+| **GitHub Action** | `amitpatole/verel@v1.9.2` | failing a build on a FAIL verdict |
 | **pre-commit** | `.pre-commit-hooks.yaml` | gating commits |
 
 ### CLI reference
@@ -98,7 +98,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: amitpatole/verel@v1.9.1
+      - uses: amitpatole/verel@v1.9.2
         with:
           repo: .
           install: "-e .[dev]"      # your project deps so its tests import
@@ -107,7 +107,7 @@ jobs:
 ```yaml
 # .pre-commit-config.yaml
 - repo: https://github.com/amitpatole/verel
-  rev: v1.9.1
+  rev: v1.9.2
   hooks: [{ id: verel-precommit }]
 ```
 

@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.9.2 — fix: `verel memory rubric` self-assessment is install-independent
+
+- **`verel memory rubric` now reports 7/7 from a pip install, not just a checkout.** In 1.9.1 the
+  negative-eval probe required finding the committed test file on disk; a wheel doesn't ship `tests/`,
+  so an installed `verel memory rubric` under-reported **6/7**. The atlas assesses the *source repo*,
+  so the score must reflect the code, not the install method: the probe is now install-location-aware
+  — strict in a source checkout (the committed suite must be present, a real regression guard), and
+  from a wheel it proves the behaviour (a rejected value is provably absent from recall) and cites the
+  committed suite as living upstream. Both paths report 7/7.
+
 ## 1.9.1 — consolidation observability + memory self-assessment (atlas method, dogfooded)
 
 - **Consolidation observability.** The induction pass (`consolidate_failures` / `induce_schemas` /
