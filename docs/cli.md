@@ -149,6 +149,7 @@ verel memory approve <id>               # CANDIDATE -> VERIFIED on your authorit
 verel memory reject <id> --reason "…"   # durable tombstone — never recalled or re-promoted
 verel memory audit                      # the hash-chained mutation log (who changed what, when)
 verel memory audit --verify             # verify the audit chain end-to-end
+verel memory rubric                     # self-assess vs the agent-memory-atlas rubric (7 binary dims)
 ```
 ```text
 $ verel memory pending
@@ -160,6 +161,9 @@ $ verel memory audit --verify
 OK  audit chain: ok  (~/.config/verel/memory_audit.jsonl)
 ```
 
+- **Self-assessment**: `verel memory rubric` runs live behavioural probes for each of the seven
+  [agent-memory-atlas](https://neoneye.github.io/agent-memory-atlas/) dimensions and prints a
+  code-grounded scorecard (Verel is 7/7). See [Memory self-assessment](memory-atlas-self-assessment.md).
 - **Approve fails closed against laundering**: a REJECTED record — or a restated value still branded
   in its carried `rejected_values` ledger — is refused with exit 1. Rejection is durable.
 - **Every mutation is audited**: approve/reject (and every trust-layer mutation made through the

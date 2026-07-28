@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased — consolidation observability + memory self-assessment (atlas method, dogfooded)
+
+- **Consolidation observability.** The induction pass (`consolidate_failures` / `induce_schemas` /
+  `consolidate_across_scopes`) used to silently drop clusters that were too small or whose LLM reply
+  wouldn't parse. New `ConsolidationStats` (optional `stats=` arg on each) makes the drop reasons
+  visible — `inputs_seen`, `clusters_found`, `clusters_too_small`, `llm_calls`, `parse_failures`,
+  `written` — and every pass logs an INFO summary plus a WARNING when replies were unparseable, so an
+  operator can tell "no failures" from "the LLM returned junk N times".
+- **Memory self-assessment (`verel memory rubric`).** We internalised the agent-memory-atlas's own
+  method: `verel.memory.rubric` re-implements each of the seven binary rubric dimensions as a **live
+  behavioural probe** against `LocalMemory(":memory:")`, so each mark is earned by demonstrated
+  behaviour (with code-grounded evidence + a proof string), not claimed. Verel self-assesses **7/7**;
+  the assessment is a pinned regression test (`tests/test_memory_rubric.py`) that flips a mark to a
+  dash if a capability regresses. New doc: `docs/memory-atlas-self-assessment.md` (the atlas per-repo
+  report, applied to ourselves).
+
 ## 1.9.0 — memory: human review, mutation audit, negative evals, bi-temporal (atlas 7/7)
 
 This release closes every gap a third-party assessment (agent-memory-atlas) identified in Verel's

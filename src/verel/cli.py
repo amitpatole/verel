@@ -174,6 +174,12 @@ def _memory(args) -> int:
     )
     from .memory.view import canonical_text as _s  # terminal-safe: strips ANSI/control/newline
 
+    if args.memory_cmd == "rubric":
+        from .memory.rubric import assess
+        assessment = assess()
+        print(assessment.render())
+        return 0 if assessment.score == len(assessment.results) else 1
+
     try:
         import getpass
         operator = getpass.getuser()
@@ -408,6 +414,8 @@ def main(argv=None) -> int:
     mau.add_argument("--record-id", help="filter entries to one record id")
     mau.add_argument("--limit", type=int, default=50)
     mau.add_argument("--verify", action="store_true", help="verify the hash chain end-to-end")
+    mmsub.add_parser("rubric", help="self-assess the memory against the agent-memory-atlas rubric "
+                                    "(7 binary dimensions, live behavioural probes)")
 
     vf = sub.add_parser("verify", help="verify a run-receipt (ed25519 = publicly verifiable)")
     vf.add_argument("receipt", help="path to a receipt JSON file")

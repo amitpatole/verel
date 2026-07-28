@@ -19,15 +19,55 @@ injectable so the whole module is tested offline.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections import Counter, defaultdict
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from ..agents import llm
 from .embed import cosine
 from .view import MemoryKind, MemoryRecord, MemoryView, Trust
 
 _WORD = re.compile(r"[a-z0-9-]+")
+_log = logging.getLogger("verel.memory.consolidate")
+
+
+@dataclass
+class ConsolidationStats:
+    """Observability for an induction pass (§5.5). Consolidation SILENTLY drops clusters that are
+    too small or whose LLM reply won't parse — so an operator otherwise can't tell "5 failures, 0
+    rules" from "the LLM returned junk 5 times". These counters make the drop reasons visible; the
+    invariant `inputs_seen ≥ clusters_found` and `written = clusters_found − too_small − parse_failures`
+    holds, so a run reconciles."""
+
+    scope: str = ""
+    kind: str = ""  # what was consolidated: "failure" | "design_rule" | "schema"
+    inputs_seen: int = 0        # source records fed in (failures / rules / schemas)
+    clusters_found: int = 0
+    clusters_too_small: int = 0  # below min_cluster / min_size — no induction attempted
+    llm_calls: int = 0          # clusters that DID reach the LLM
+    parse_failures: int = 0     # LLM replies that produced no usable rule/schema (dropped silently)
+    written: int = 0            # rules/schemas actually committed (all as CANDIDATE)
+
+    def summary(self) -> str:
+        return (f"consolidate[{self.kind}] scope={self.scope!r}: {self.inputs_seen} in → "
+                f"{self.clusters_found} clusters ({self.clusters_too_small} too small, "
+                f"{self.llm_calls} induced, {self.parse_failures} unparseable) → {self.written} written")
+
+    def as_dict(self) -> dict:
+        return {"scope": self.scope, "kind": self.kind, "inputs_seen": self.inputs_seen,
+                "clusters_found": self.clusters_found, "clusters_too_small": self.clusters_too_small,
+                "llm_calls": self.llm_calls, "parse_failures": self.parse_failures,
+                "written": self.written}
+
+    def _log(self) -> None:
+        _log.info(self.summary())
+        if self.parse_failures:
+            # a silent-drop tail the operator should see: the LLM produced junk for N clusters.
+            _log.warning("consolidate[%s] scope=%r: %d cluster(s) yielded NO rule — the LLM reply "
+                         "was unparseable/malformed and was dropped (tune the prompt or model)",
+                         self.kind, self.scope, self.parse_failures)
 
 # A chat function: (messages) -> text. Injectable so tests run offline.
 ChatFn = Callable[[list[dict]], str]
@@ -128,19 +168,27 @@ def consolidate_failures(
     semantic: bool = False,
     cluster_threshold: float = 0.6,
     ts: float = 0.0,
+    stats: ConsolidationStats | None = None,
 ) -> list[MemoryRecord]:
     """Cluster FAILURE records within `scope` and synthesize a candidate, structured DesignRule
     per cluster of size >= `min_cluster`. `semantic=True` refines each failure-kind bucket by
-    meaning (needs a backend with a real embedder); the default clusters by kind, deterministically."""
+    meaning (needs a backend with a real embedder); the default clusters by kind, deterministically.
+
+    Pass a `ConsolidationStats` to observe why a pass yielded N rules (clusters too small vs LLM
+    replies that wouldn't parse); the stats are also logged (INFO summary + WARNING on parse drops)."""
     chat = chat or _default_chat
     failures = list(mem.all(scope=scope, kind=MemoryKind.FAILURE))
     vof = _vector_of(mem) if semantic else None
     clusters = cluster_records(failures, vector_of=vof, threshold=cluster_threshold)
+    st = stats if stats is not None else ConsolidationStats()
+    st.scope, st.kind, st.inputs_seen, st.clusters_found = scope, "failure", len(failures), len(clusters)
 
     written: list[MemoryRecord] = []
     for group in clusters:
         if len(group) < min_cluster:
+            st.clusters_too_small += 1
             continue
+        st.llm_calls += 1
         # the cluster's dominant failure kind labels the rule (covers_kind), even if mixed.
         covers_kind = Counter(r.detail.get("kind", "other") for r in group).most_common(1)[0][0]
         examples = "\n".join(f"- {r.text}" for r in group[:8])
@@ -149,6 +197,7 @@ def consolidate_failures(
             {"role": "user", "content": f"Failure kind: {covers_kind}\nExamples:\n{examples}"},
         ]))
         if parsed is None:
+            st.parse_failures += 1
             continue
         text = (f"{parsed['condition']} → {parsed['action']}"
                 if parsed["condition"] else parsed["action"])
@@ -174,6 +223,8 @@ def consolidate_failures(
             cluster_size=len(group),
         )
         written.append(mem.write(rule, ts=ts))
+    st.written = len(written)
+    st._log()
     return written
 
 
@@ -191,18 +242,24 @@ def _sources_at(mem: MemoryView, scope: str, source_order: int) -> list[MemoryRe
 
 
 def _induce_level(mem: MemoryView, scope: str, *, source_order: int, min_size: int,
-                  chat: ChatFn, semantic: bool, threshold: float, ts: float) -> list[MemoryRecord]:
+                  chat: ChatFn, semantic: bool, threshold: float, ts: float,
+                  stats: ConsolidationStats | None = None) -> list[MemoryRecord]:
     """Induce one schema level: cluster the order-`source_order` records and synthesize an
     order-`source_order+1` SCHEMA per cluster of size >= `min_size`."""
     sources = _sources_at(mem, scope, source_order)
     vof = _vector_of(mem) if semantic else None
     clusters = cluster_records(sources, vector_of=vof, threshold=threshold)
     target_order = source_order + 1
+    st = stats if stats is not None else ConsolidationStats()
+    st.scope, st.kind = scope, "schema"
+    st.inputs_seen, st.clusters_found = len(sources), len(clusters)
 
     written: list[MemoryRecord] = []
     for group in clusters:
         if len(group) < min_size:
+            st.clusters_too_small += 1
             continue
+        st.llm_calls += 1
         listing = "\n".join(f"- {r.subject}: {r.text}" for r in group[:10])
         parsed = _parse_schema(chat([
             {"role": "system", "content": _SCHEMA_SYSTEM},
@@ -210,6 +267,7 @@ def _induce_level(mem: MemoryView, scope: str, *, source_order: int, min_size: i
                                         f"\n{listing}"},
         ]))
         if parsed is None:
+            st.parse_failures += 1
             continue
         schema = MemoryRecord(
             kind=MemoryKind.SCHEMA, subject=parsed["subject"], predicate="schema",
@@ -222,6 +280,8 @@ def _induce_level(mem: MemoryView, scope: str, *, source_order: int, min_size: i
             subsumes=[r.id for r in group], cluster_size=len(group),
         )
         written.append(mem.write(schema, ts=ts))
+    st.written = len(written)
+    st._log()
     return written
 
 
@@ -234,12 +294,13 @@ def induce_schemas(
     semantic: bool = False,
     cluster_threshold: float = 0.55,
     ts: float = 0.0,
+    stats: ConsolidationStats | None = None,
 ) -> list[MemoryRecord]:
     """Cluster DesignRules and induce one level of order-2 SCHEMAs (principles). Candidate +
     inferred — they earn trust the same way. `semantic=True` splits rules into themes."""
     return _induce_level(mem, scope, source_order=1, min_size=min_rules,
                          chat=chat or _default_chat, semantic=semantic,
-                         threshold=cluster_threshold, ts=ts)
+                         threshold=cluster_threshold, ts=ts, stats=stats)
 
 
 def induce_hierarchy(
@@ -282,6 +343,7 @@ def consolidate_across_scopes(
     semantic: bool = False,
     cluster_threshold: float = 0.6,
     ts: float = 0.0,
+    stats: ConsolidationStats | None = None,
 ) -> list[MemoryRecord]:
     """Gather FAILUREs across several `scopes`, cluster them, and induce a DesignRule in
     `target_scope` ONLY for clusters whose evidence spans >= `min_scopes` distinct scopes — a
@@ -291,12 +353,17 @@ def consolidate_across_scopes(
     failures = [r for s in scopes for r in mem.all(scope=s, kind=MemoryKind.FAILURE)]
     clusters = cluster_records(failures, vector_of=_vector_of(mem) if semantic else None,
                                threshold=cluster_threshold)
+    st = stats if stats is not None else ConsolidationStats()
+    st.scope, st.kind = target_scope, "failure"
+    st.inputs_seen, st.clusters_found = len(failures), len(clusters)
 
     written: list[MemoryRecord] = []
     for group in clusters:
         spans = sorted({r.scope for r in group})
         if len(group) < min_cluster or len(spans) < min_scopes:
-            continue  # not cross-cutting enough to generalize
+            st.clusters_too_small += 1  # not cross-cutting enough (size or scope-span) to generalize
+            continue
+        st.llm_calls += 1
         covers_kind = Counter(r.detail.get("kind", "other") for r in group).most_common(1)[0][0]
         examples = "\n".join(f"- ({r.scope}) {r.text}" for r in group[:8])
         parsed = _parse_rule(chat([
@@ -305,6 +372,7 @@ def consolidate_across_scopes(
                                         f"{len(spans)} repos)\nExamples:\n{examples}"},
         ]))
         if parsed is None:
+            st.parse_failures += 1
             continue
         text = (f"{parsed['condition']} → {parsed['action']}"
                 if parsed["condition"] else parsed["action"])
@@ -321,6 +389,8 @@ def consolidate_across_scopes(
             spans=spans, cross_scope=True,  # generalizes across these scopes
         )
         written.append(mem.write(rule, ts=ts))
+    st.written = len(written)
+    st._log()
     return written
 
 

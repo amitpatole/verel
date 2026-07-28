@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from .audit import AuditedMemory, MemoryAudit
 from .consolidate import (
+    ConsolidationStats,
     cluster_records,
     consolidate_across_scopes,
     consolidate_failures,
@@ -57,6 +58,7 @@ from .review import (
     render_record,
 )
 from .revise import Revision, contradicts, propagate_revision, revise_with_counterexample
+from .rubric import DimensionResult, RubricAssessment, assess
 from .share import AuthorTrust, BeliefImport, author_of, import_belief
 from .view import (
     MemoryKind,
@@ -87,6 +89,7 @@ __all__ = [
     "induce_hierarchy",
     "consolidate_across_scopes",
     "cluster_records",
+    "ConsolidationStats",
     "revise_with_counterexample",
     "propagate_revision",
     "contradicts",
@@ -124,6 +127,9 @@ __all__ = [
     "render_line",
     "render_record",
     "RejectedApprovalError",
+    "assess",
+    "RubricAssessment",
+    "DimensionResult",
     "LocalMemory",
     "load_backend",
     "known_backends",
