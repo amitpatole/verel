@@ -90,8 +90,15 @@ class MemoryRecord(BaseModel):
     epistemic_confidence: float = 0.5  # moved ONLY by corroborate/contradict
     retrieval_strength: float = 1.0  # power-law decay; reset on recall
     support_count: int = 1
-    created_ts: float = 0.0
+    created_ts: float = 0.0  # TRANSACTION-time: when this value was written to the store
     last_recall_ts: float = 0.0
+    # VALID-time (bi-temporal, distinct from transaction-time): when the value became / ceased to be
+    # true in the world. `valid_from` defaults to `created_ts` (we assume a fact is valid from when we
+    # learned it, unless the caller knows better); `valid_to == 0.0` is an OPEN interval (still valid).
+    # Superseding a value stamps its `valid_to`; the correction chain preserves prior intervals so an
+    # as-of query can reconstruct what was believed at any past wall-clock time. See `value_as_of`.
+    valid_from: float = 0.0
+    valid_to: float = 0.0
     detail_json: str = "{}"
 
     @property
@@ -246,12 +253,19 @@ def supersede_detail(existing: MemoryRecord, record: MemoryRecord, *, ts: float)
     - resets support/strength (a new value earns its own corroboration);
     - carries the DURABLE `rejected_values` ledger forward, adding `existing`'s value when it was
       REJECTED — so supersede-then-restate can't launder a rejected value back to promotable
-      (round-7 C1). The promotion gate consults this ledger."""
+      (round-7 C1). The promotion gate consults this ledger;
+    - stamps VALID-time (bi-temporal): the superseded value's interval closes at `ts` (recorded in
+      its chain entry), and the incoming value's `valid_from` opens at `ts` unless the caller set it.
+    """
+    existing_vf = existing.valid_from or existing.created_ts
     chain = [*existing.detail.get("corrections", []),
              {"text": existing.text[:_PRIOR_TEXT_CAP], "ec": existing.epistemic_confidence,
-              "ts": existing.created_ts, "superseded_at": ts}][-MAX_CORRECTIONS:]
+              "ts": existing.created_ts, "superseded_at": ts,
+              "valid_from": existing_vf, "valid_to": ts}][-MAX_CORRECTIONS:]
     record.support_count = 1
     record.retrieval_strength = 1.0
+    if not record.valid_from:
+        record.valid_from = ts  # the new value becomes true when it supersedes the old one
     rejected = list(existing.detail.get("rejected_values", []))
     if existing.trust == Trust.REJECTED:
         rv = rejected_key(existing.text)
@@ -356,6 +370,37 @@ def is_expired(r: MemoryRecord, now: float) -> bool:
 def correction_chain(r: MemoryRecord) -> list[dict]:
     """The history of values this record superseded (newest supersession last)."""
     return list(r.detail.get("corrections", []))
+
+
+def _interval_contains(valid_from: float, valid_to: float, t: float) -> bool:
+    """Is wall-clock `t` inside the half-open validity interval [valid_from, valid_to)? `valid_to == 0`
+    means OPEN (still valid). A non-finite `t` (NaN/inf) never matches — fail-safe."""
+    import math
+
+    if not math.isfinite(t):  # NaN/inf guard
+        return False
+    return valid_from <= t and (valid_to == 0.0 or t < valid_to)
+
+
+def value_as_of(r: MemoryRecord, t: float) -> MemoryRecord | None:
+    """Bi-temporal reconstruction: the version of `r`'s key whose VALID interval contained wall-clock
+    time `t` — the current value, or a superseded one recovered from the correction chain — or None if
+    the key held no value then. The returned record carries the historical text + that value's
+    [valid_from, valid_to) and confidence, so an as-of recall ranks the value that was actually
+    believed at `t`, not today's. Pure + backend-agnostic (the chain lives in detail_json)."""
+    vf = r.valid_from or r.created_ts
+    if _interval_contains(vf, r.valid_to, t):
+        return r
+    for c in r.detail.get("corrections", []):
+        cvf = c.get("valid_from", c.get("ts", 0.0)) or 0.0
+        cvt = c.get("valid_to", c.get("superseded_at", 0.0)) or 0.0
+        if _interval_contains(cvf, cvt, t):
+            return r.model_copy(update={
+                "text": str(c.get("text", "")),
+                "valid_from": cvf, "valid_to": cvt,
+                "epistemic_confidence": float(c.get("ec", r.epistemic_confidence)),
+            })
+    return None
 
 
 def effective_half_life(r: MemoryRecord, base_half_life_s: float) -> float:

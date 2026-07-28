@@ -14,7 +14,16 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from .view import MemoryKind, MemoryRecord, MemoryView, canonical_text
+from .view import (
+    MemoryKind,
+    MemoryRecord,
+    MemoryView,
+    Trust,
+    canonical_text,
+    rank,
+    relevance,
+    value_as_of,
+)
 
 TokenCount = Callable[[str], int]
 
@@ -62,6 +71,41 @@ class BudgetedRecall:
             lines.append(f"- (+{self.dropped} more lower-ranked memories omitted for budget)")
         lines.append(_FENCE_CLOSE)
         return "\n".join(lines)
+
+
+def recall_as_of(mem: MemoryView, query: str, *, as_of: float, scope: str | None = None,
+                 kind: MemoryKind | None = None, k: int = 5) -> list[MemoryRecord]:
+    """Bi-temporal recall — "what did we believe about this at wall-clock time `as_of`?"
+
+    For each key, reconstruct the value whose VALID interval [valid_from, valid_to) contained `as_of`
+    (the current value, or a superseded one recovered from the correction chain via `value_as_of`),
+    rank the reconstructed values by relevance to `query`, and return the top-k. The killer case is a
+    fact that legitimately CHANGED over time (e.g. "region = us-east" until June, "us-west" after):
+    an as-of March query returns the value that was actually true then, not today's.
+
+    Deliberate properties:
+    - **Read-only time travel:** does NOT reinforce retrieval_strength (it isn't "using" the memory now)
+      and does NOT mutate anything.
+    - **Rejected keys are excluded entirely** (current trust REJECTED → skipped), so a value later
+      graded false can't be resurfaced into a prompt through a historical query. The legitimate
+      changed-over-time case never involves rejection, so this exclusion costs nothing there. The full
+      superseded history remains inspectable via the correction chain / audit for explicit review.
+    - **O(n) scan** over the scoped records: as-of is an analytical query, not the hot path, so matching
+      against the reconstructed (possibly historical) text — which a BM25 index over CURRENT text can't
+      do — is worth the scan.
+    """
+    out: list[tuple[MemoryRecord, float]] = []
+    for r in mem.all(scope=scope, kind=kind):
+        if r.trust == Trust.REJECTED:
+            continue
+        snap = value_as_of(r, as_of)
+        if snap is None:
+            continue
+        rel = relevance(query, snap)
+        if rel > 0.0:
+            out.append((snap, rel))
+    out.sort(key=lambda sr: rank(sr[0], sr[1]), reverse=True)
+    return [s for s, _ in out[: max(1, k)]]
 
 
 def recall_budgeted(mem: MemoryView, query: str, *, token_budget: int, scope: str | None = None,

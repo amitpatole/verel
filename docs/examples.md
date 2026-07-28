@@ -328,6 +328,10 @@ is a runnable, real-output script in [`examples/`](https://github.com/amitpatole
 - **[`demo_token_savings.py`](https://github.com/amitpatole/verel/blob/main/examples/demo_token_savings.py)**
   — the cost angle (no key): budgeted graded-first recall cuts a 40-fact brain ~80% (679→135 tokens/turn,
   exact `tiktoken` counts), hallucinations excluded — you don't replay the whole brain into every prompt.
+- **[`demo_bitemporal.py`](https://github.com/amitpatole/verel/blob/main/examples/demo_bitemporal.py)**
+  — bi-temporal recall (no key): a fact that changed over time (`region = us-east` until June, `us-west`
+  after) keeps valid-time distinct from write-time, and `recall_as_of(as_of=March)` reconstructs what was
+  actually true then from the correction chain — not today's value.
 - **[`demo_memory_loop.py`](https://github.com/amitpatole/verel/blob/main/examples/demo_memory_loop.py)**
   — the fleet stops repeating mistakes: a real fix is recorded, marked `fixed` on pass, and consolidated
   into a candidate semantic rule.

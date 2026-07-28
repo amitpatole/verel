@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased — bi-temporal memory (valid-time + as-of recall)
+
+- **Bi-temporal data model.** `MemoryRecord` gains `valid_from`/`valid_to` (valid-time: when a value
+  became / ceased to be true in the world) alongside the existing `created_ts` (transaction-time:
+  when it was written). `valid_from` defaults to `created_ts`; a caller who knows a fact was true
+  earlier can backdate it. Superseding a value stamps its `valid_to` and opens the new value's
+  interval, and the correction chain preserves each prior interval.
+- **As-of recall.** `recall_as_of(mem, query, as_of=T, …)` reconstructs, for each key, the value whose
+  validity interval contained wall-clock `T` — the current value or a superseded one recovered from
+  the chain (`value_as_of`) — and ranks those by relevance. The motivating case is a fact that
+  legitimately changed over time (`region = us-east` until June, `us-west` after): an as-of March
+  query returns what was true then, not today's value. Read-only (no reinforcement); excludes
+  currently-rejected keys so a value graded false can't be resurfaced through a historical query;
+  non-finite timestamps fail safe.
+- **Migration.** New columns are added in place on open for existing stores (sqlite `ALTER TABLE`,
+  postgres `ADD COLUMN IF NOT EXISTS`, lancedb `add_columns` with a tolerant read); old rows read with
+  `valid_from = 0` and fall back to `created_ts`. Carried across all five backends
+  (local/postgres/lancedb/redis/mem0).
+
 ## Unreleased — memory trust-layer: human review, mutation audit, cross-backend negative evals
 
 Closes the gaps a third-party assessment (agent-memory-atlas) correctly identified, and fixes the

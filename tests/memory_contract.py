@@ -291,6 +291,48 @@ def check_pinned_exempt_from_decay(mem: MemoryView) -> None:
     assert mem.get(rec.id) is not None  # pinned ignores decay entirely
 
 
+# ---- bi-temporal valid-time ------------------------------------------------
+def check_valid_from_defaults_to_created(mem: MemoryView) -> None:
+    """A fresh write's valid-time opens at its transaction-time unless the caller backdates it."""
+    r = mem.write(make_fact(), ts=1234.0)
+    got = mem.get(r.id)
+    assert got.valid_from == got.created_ts == 1234.0
+    assert got.valid_to == 0.0  # open interval — still valid
+
+
+def check_supersede_stamps_valid_intervals(mem: MemoryView) -> None:
+    """Superseding a value closes its interval at the supersede ts and opens the new value's there,
+    with the prior interval preserved in the correction chain for as-of reconstruction."""
+    r = mem.write(make_fact(text="v1"), ts=100.0)
+    mem.write(make_fact(text="v2"), ts=600.0)
+    cur = mem.get(r.id)
+    assert cur.text == "v2" and cur.valid_from == 600.0 and cur.valid_to == 0.0
+    chain = cur.detail.get("corrections", [])
+    assert chain and chain[-1]["valid_from"] == 100.0 and chain[-1]["valid_to"] == 600.0
+
+
+def check_backdated_valid_from_is_preserved(mem: MemoryView) -> None:
+    """A caller who knows a fact was true earlier than it was learned can set valid_from; the store
+    keeps it (transaction-time created_ts still records when we learned it)."""
+    f = make_fact()
+    f.valid_from = 42.0  # "this was true since t=42", written at ts=999
+    r = mem.write(f, ts=999.0)
+    got = mem.get(r.id)
+    assert got.valid_from == 42.0 and got.created_ts == 999.0
+
+
+def check_recall_as_of_reconstructs_historical_value(mem: MemoryView) -> None:
+    from verel.memory import recall_as_of
+    mem.write(make_fact(text="us-east", subject="server", predicate="region"), ts=100.0)
+    mem.write(make_fact(text="us-west", subject="server", predicate="region"), ts=600.0)
+    at_march = recall_as_of(mem, "server region", as_of=300.0, scope="repo:x")
+    at_july = recall_as_of(mem, "server region", as_of=700.0, scope="repo:x")
+    before = recall_as_of(mem, "server region", as_of=50.0, scope="repo:x")
+    assert [h.text for h in at_march] == ["us-east"]
+    assert [h.text for h in at_july] == ["us-west"]
+    assert before == []  # the key did not exist yet
+
+
 # ---- protocol conformance ---------------------------------------------------
 def check_is_memoryview(mem: MemoryView) -> None:
     assert isinstance(mem, MemoryView)
@@ -316,6 +358,10 @@ CONTRACT_CHECKS = [
     check_apply_replica_preserves_local_ledger,
     check_demote_cannot_unreject,
     check_correction_chain_is_bounded,
+    check_valid_from_defaults_to_created,
+    check_supersede_stamps_valid_intervals,
+    check_backdated_valid_from_is_preserved,
+    check_recall_as_of_reconstructs_historical_value,
     check_decay_prunes_only_on_exact_conjunction,
     check_decay_leaves_confidence_invariant,
     check_pinned_exempt_from_decay,

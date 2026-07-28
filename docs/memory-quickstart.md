@@ -79,6 +79,10 @@ python demo_memory.py     # offline, no API key
   resolve candidates (CLI-only, so an agent can't approve its own facts), and every trust-layer
   mutation lands in a hash-chained audit log (`verel memory audit --verify`). See
   [CLI → Review memory as a human](cli.md#review-memory-as-a-human-verel-memory-resolve-the-candidate-queue).
+- **Bi-temporal recall** — every value carries valid-time (`valid_from`/`valid_to`) distinct from
+  when it was written, so `recall_as_of(mem, query, as_of=T)` answers *what did we believe at time T*.
+  A fact that changed over time (`region = us-east` until June, `us-west` after) reconstructs the
+  value that was actually true then, from the correction chain — not today's.
 
 ## Use your real LLM
 

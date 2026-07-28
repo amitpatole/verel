@@ -37,7 +37,7 @@ from .promotion import (
     PromotionResult,
     evaluate_rule,
 )
-from .recall import BudgetedRecall, recall_budgeted
+from .recall import BudgetedRecall, recall_as_of, recall_budgeted
 from .registry import known_backends, load_backend
 from .remember import RememberResult, remember_conversation
 from .replicated import (
@@ -71,6 +71,7 @@ from .view import (
     make_key,
     rank,
     should_prune,
+    value_as_of,
 )
 
 __all__ = [
@@ -79,6 +80,7 @@ __all__ = [
     "remember_conversation",
     "RememberResult",
     "recall_budgeted",
+    "recall_as_of",
     "BudgetedRecall",
     "consolidate_failures",
     "induce_schemas",
@@ -149,4 +151,5 @@ __all__ = [
     "is_volatile",
     "is_expired",
     "correction_chain",
+    "value_as_of",
 ]

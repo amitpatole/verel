@@ -63,7 +63,8 @@ def _to_metadata(r: MemoryRecord) -> dict:
         "subj_pred_key": r.subj_pred_key, "source": r.source, "trust": r.trust.value,
         "epistemic_confidence": r.epistemic_confidence, "retrieval_strength": r.retrieval_strength,
         "support_count": r.support_count, "created_ts": r.created_ts,
-        "last_recall_ts": r.last_recall_ts, "detail_json": r.detail_json,
+        "last_recall_ts": r.last_recall_ts, "valid_from": r.valid_from, "valid_to": r.valid_to,
+        "detail_json": r.detail_json,
         "provenance": "\x1f".join(r.provenance), "verel_id": r.id,
     }
 
@@ -86,6 +87,8 @@ def _from_mem0(row: dict) -> MemoryRecord:
         support_count=int(md.get("support_count", 1)),
         created_ts=float(md.get("created_ts", 0.0)),
         last_recall_ts=float(md.get("last_recall_ts", 0.0)),
+        valid_from=float(md.get("valid_from", 0.0)),
+        valid_to=float(md.get("valid_to", 0.0)),
         detail_json=md.get("detail_json", "{}"),
     )
 
@@ -118,6 +121,7 @@ class Mem0Memory(MemoryView):
             record.subj_pred_key = make_key(record.subject, record.predicate, record.scope)
         record.id = record.id or make_id(record.subj_pred_key)
         record.created_ts = record.created_ts or ts
+        record.valid_from = record.valid_from or record.created_ts
 
         existing = self.get(record.id)
         mem0_id = self._mem0_id_for(record.id)

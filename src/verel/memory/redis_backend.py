@@ -56,7 +56,8 @@ _MAX_RECALL_K = 1000    # clamp caller-supplied k
 _SCAN_CAP = 20000       # bound the index scan so a huge brain can't OOM the client
 _DELETE = object()  # sentinel a mutate() returns to delete (prune) the record
 
-_FLOAT_FIELDS = ("epistemic_confidence", "retrieval_strength", "created_ts", "last_recall_ts")
+_FLOAT_FIELDS = ("epistemic_confidence", "retrieval_strength", "created_ts", "last_recall_ts",
+                 "valid_from", "valid_to")
 _STR_FIELDS = ("id", "kind", "subject", "predicate", "text", "scope", "subj_pred_key", "source",
                "provenance", "trust", "detail_json")
 
@@ -149,6 +150,7 @@ class RedisMemory(MemoryView):
             "retrieval_strength": repr(float(r.retrieval_strength)),
             "support_count": str(int(r.support_count)),
             "created_ts": repr(float(r.created_ts)), "last_recall_ts": repr(float(r.last_recall_ts)),
+            "valid_from": repr(float(r.valid_from)), "valid_to": repr(float(r.valid_to)),
             "detail_json": r.detail_json,
         }
         if self.embedder is not None:
@@ -230,6 +232,7 @@ class RedisMemory(MemoryView):
             record.subj_pred_key = make_key(record.subject, record.predicate, record.scope)
         record.id = record.id or make_id(record.subj_pred_key)
         record.created_ts = record.created_ts or ts
+        record.valid_from = record.valid_from or record.created_ts
 
         def mutate(existing):
             if existing is not None:

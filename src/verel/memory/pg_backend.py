@@ -60,7 +60,7 @@ _log = logging.getLogger("verel.memory.pg")
 
 _COLS = ("id", "kind", "subject", "predicate", "text", "scope", "subj_pred_key", "source",
          "provenance", "trust", "epistemic_confidence", "retrieval_strength", "support_count",
-         "created_ts", "last_recall_ts", "detail_json")
+         "created_ts", "last_recall_ts", "valid_from", "valid_to", "detail_json")
 _COLS_SQL = ", ".join(_COLS)  # constant column list — never built from user input (keeps bandit B608 green)
 
 _RECALL_SCAN_CAP = 5000   # bound the no-embedder candidate scan so a huge brain can't OOM the client
@@ -243,6 +243,9 @@ class PostgresMemory(MemoryView):
                 "epistemic_confidence DOUBLE PRECISION, retrieval_strength DOUBLE PRECISION, "
                 "support_count INTEGER, created_ts DOUBLE PRECISION, last_recall_ts DOUBLE PRECISION, "
                 "detail_json TEXT)")
+            # bi-temporal valid-time columns (v-next); ADD IF NOT EXISTS migrates an existing table
+            cur.execute("ALTER TABLE memory ADD COLUMN IF NOT EXISTS valid_from DOUBLE PRECISION DEFAULT 0")
+            cur.execute("ALTER TABLE memory ADD COLUMN IF NOT EXISTS valid_to DOUBLE PRECISION DEFAULT 0")
             has_vector = False
             try:
                 cur.execute("SELECT 1 FROM pg_extension WHERE extname = 'vector'")
@@ -290,6 +293,7 @@ class PostgresMemory(MemoryView):
         vals = [r.id, r.kind.value, r.subject, r.predicate, r.text, r.scope, r.subj_pred_key,
                 r.source, "\x1f".join(r.provenance), r.trust.value, r.epistemic_confidence,
                 r.retrieval_strength, r.support_count, r.created_ts, r.last_recall_ts,
+                r.valid_from, r.valid_to,
                 _canonical_detail(r.detail_json)]  # canonical flags; never persist non-object JSON
         cols, ph = _COLS_SQL, ", ".join(["%s"] * len(_COLS))
         update = ", ".join(f"{c}=EXCLUDED.{c}" for c in _COLS if c != "id")
@@ -320,6 +324,7 @@ class PostgresMemory(MemoryView):
             record.subj_pred_key = make_key(record.subject, record.predicate, record.scope)
         record.id = record.id or make_id(record.subj_pred_key)
         record.created_ts = record.created_ts or ts
+        record.valid_from = record.valid_from or record.created_ts
         with self._txn() as cur:
             self._lock(cur, record.id)
             existing = self._get(cur, record.id)

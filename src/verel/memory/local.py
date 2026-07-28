@@ -37,7 +37,8 @@ from .view import (
 
 _COLS = (
     "id, kind, subject, predicate, text, scope, subj_pred_key, source, provenance, trust, "
-    "epistemic_confidence, retrieval_strength, support_count, created_ts, last_recall_ts, detail_json"
+    "epistemic_confidence, retrieval_strength, support_count, created_ts, last_recall_ts, "
+    "valid_from, valid_to, detail_json"
 )
 # `_COLS` qualified to the `m` alias, for the FTS5 JOIN recall query.
 _MCOLS = ", ".join(f"m.{c.strip()}" for c in _COLS.split(","))
@@ -85,12 +86,18 @@ class LocalMemory(MemoryView):
                 id TEXT PRIMARY KEY, kind TEXT, subject TEXT, predicate TEXT, text TEXT,
                 scope TEXT, subj_pred_key TEXT, source TEXT, provenance TEXT, trust TEXT,
                 epistemic_confidence REAL, retrieval_strength REAL, support_count INTEGER,
-                created_ts REAL, last_recall_ts REAL, detail_json TEXT, vector TEXT DEFAULT '')"""
+                created_ts REAL, last_recall_ts REAL,
+                valid_from REAL DEFAULT 0, valid_to REAL DEFAULT 0,
+                detail_json TEXT, vector TEXT DEFAULT '')"""
         )
-        # migrate older dbs that predate the vector column
+        # migrate older dbs that predate a column (each ALTER is idempotent-guarded by the cols set)
         cols = {r[1] for r in self._db.execute("PRAGMA table_info(memory)")}
         if "vector" not in cols:
             self._db.execute("ALTER TABLE memory ADD COLUMN vector TEXT DEFAULT ''")
+        if "valid_from" not in cols:  # bi-temporal columns (v-next); old rows read as 0 → created_ts
+            self._db.execute("ALTER TABLE memory ADD COLUMN valid_from REAL DEFAULT 0")
+        if "valid_to" not in cols:
+            self._db.execute("ALTER TABLE memory ADD COLUMN valid_to REAL DEFAULT 0")
         # FTS5 lexical index (v1.3.0): BM25 retrieval over subject+predicate+text, kept in sync on every
         # write/delete. Replaces the naive token-overlap signal with real term-weighted ranking + SQL-side
         # candidate filtering. Falls back to token-overlap if this sqlite build lacks FTS5 (portability).
@@ -165,11 +172,12 @@ class LocalMemory(MemoryView):
         vector = (row[0] if row else "") or ""
         self._db.execute(
             f"INSERT OR REPLACE INTO memory ({_COLS}, vector) VALUES "
-            "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 r.id, r.kind.value, r.subject, r.predicate, r.text, r.scope, r.subj_pred_key,
                 r.source, "\x1f".join(r.provenance), r.trust.value, r.epistemic_confidence,
-                r.retrieval_strength, r.support_count, r.created_ts, r.last_recall_ts, r.detail_json,
+                r.retrieval_strength, r.support_count, r.created_ts, r.last_recall_ts,
+                r.valid_from, r.valid_to, r.detail_json,
                 vector,
             ),
         )
@@ -187,6 +195,7 @@ class LocalMemory(MemoryView):
             record.subj_pred_key = make_key(record.subject, record.predicate, record.scope)
         record.id = record.id or make_id(record.subj_pred_key)
         record.created_ts = record.created_ts or ts
+        record.valid_from = record.valid_from or record.created_ts  # valid-time defaults to when learned
 
         existing = self.get(record.id)
         if existing is not None:

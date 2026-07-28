@@ -49,7 +49,8 @@ _MAX_RECALL_K = 1000   # clamp caller-supplied k so an unbounded fetch can't OOM
 _SCAN_CAP = 5000       # bound the no-embedder full scan
 _SCALAR_FIELDS = ("id", "kind", "subject", "predicate", "text", "scope", "subj_pred_key", "source",
                   "provenance", "trust", "epistemic_confidence", "retrieval_strength",
-                  "support_count", "created_ts", "last_recall_ts", "detail_json")
+                  "support_count", "created_ts", "last_recall_ts", "valid_from", "valid_to",
+                  "detail_json")
 
 
 def _lit(value: str) -> str:
@@ -103,6 +104,7 @@ class LanceMemory(MemoryView):
             ("trust", pa.string()), ("epistemic_confidence", pa.float64()),
             ("retrieval_strength", pa.float64()), ("support_count", pa.int64()),
             ("created_ts", pa.float64()), ("last_recall_ts", pa.float64()),
+            ("valid_from", pa.float64()), ("valid_to", pa.float64()),
             ("detail_json", pa.string()),
         ]
         if self._dim:  # a fixed-dim vector column only when an embedder is configured
@@ -119,6 +121,14 @@ class LanceMemory(MemoryView):
         import pyarrow as pa
 
         schema = tbl.schema
+        # bi-temporal columns (v-next): add to a pre-existing dataset so old datasets keep opening.
+        missing = {c: "CAST(0.0 AS double)" for c in ("valid_from", "valid_to")
+                   if c not in schema.names}
+        if missing:
+            try:
+                tbl.add_columns(missing)
+            except Exception:  # noqa: BLE001 — best-effort; _row_to_record reads tolerantly regardless
+                pass
         persisted = (schema.field("vector").type.list_size
                      if "vector" in schema.names
                      and pa.types.is_fixed_size_list(schema.field("vector").type) else 0)
@@ -150,7 +160,8 @@ class LanceMemory(MemoryView):
 
     # ---- (de)serialization ----
     def _row_to_record(self, row: dict) -> MemoryRecord:
-        d = {k: row[k] for k in _SCALAR_FIELDS}
+        # tolerant read: a pre-migration row lacks valid_from/valid_to → omit them, model defaults 0.0
+        d = {k: row[k] for k in _SCALAR_FIELDS if k in row}
         d["provenance"] = d["provenance"].split("\x1f") if d["provenance"] else []
         d["trust"] = Trust(d["trust"])
         d["kind"] = MemoryKind(d["kind"])
@@ -164,6 +175,7 @@ class LanceMemory(MemoryView):
             "epistemic_confidence": float(r.epistemic_confidence),
             "retrieval_strength": float(r.retrieval_strength), "support_count": int(r.support_count),
             "created_ts": float(r.created_ts), "last_recall_ts": float(r.last_recall_ts),
+            "valid_from": float(r.valid_from), "valid_to": float(r.valid_to),
             "detail_json": r.detail_json,
         }
         if self._dim:
@@ -215,6 +227,7 @@ class LanceMemory(MemoryView):
             record.subj_pred_key = make_key(record.subject, record.predicate, record.scope)
         record.id = record.id or make_id(record.subj_pred_key)
         record.created_ts = record.created_ts or ts
+        record.valid_from = record.valid_from or record.created_ts
         with self._lock:
             self._check_open()
             existing = self._get(record.id)
