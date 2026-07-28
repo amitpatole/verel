@@ -156,6 +156,51 @@ def check_rejected_tombstone_survives_decay_and_stays_hidden(mem: MemoryView) ->
     assert all(h.id != r.id for h in mem.recall("max-width card width", scope="repo:x"))
 
 
+def check_promote_refuses_rejected_value(mem: MemoryView) -> None:
+    """The primitive `promote()` must refuse a REJECTED value directly — the guard lives in the
+    primitive so every caller (CLI review, MCP remember, PromotionGate) inherits it (round-13/C1)."""
+    r = mem.write(make_fact())
+    _reject(mem, r.id)
+    mem.promote(r.id)  # attempt to launder straight through the primitive
+    assert mem.get(r.id).trust == Trust.REJECTED  # refused — never VERIFIED
+    assert all(h.id != r.id for h in mem.recall("max-width card width", scope="repo:x"))
+
+
+def check_promote_refuses_restated_once_rejected_value(mem: MemoryView) -> None:
+    """A once-rejected value, superseded then restated back to CANDIDATE, is still un-promotable via
+    the primitive because the durable ledger is consulted (round-13/C1)."""
+    r = mem.write(make_fact(text="the lie"))
+    _reject(mem, r.id)
+    mem.write(make_fact(text="throwaway"))     # supersede -> CANDIDATE, ledger carried
+    mem.write(make_fact(text="the lie"))       # restate the once-rejected value
+    assert mem.get(r.id).trust == Trust.CANDIDATE
+    mem.promote(r.id)
+    assert mem.get(r.id).trust != Trust.VERIFIED  # ledger blocks the restated value
+
+
+def check_ledger_saturation_blocks_promotion(mem: MemoryView) -> None:
+    """Rejecting more distinct values than the ledger can hold must NOT evict the target off the
+    front and let it launder — the key SATURATES and all promotions are blocked (round-13/C3)."""
+    from verel.memory.view import MAX_REJECTED_VALUES
+    target = mem.write(make_fact(text="the target lie"))
+    _reject(mem, target.id)
+    for i in range(MAX_REJECTED_VALUES + 5):   # supersede-reject enough distinct values to overflow
+        mem.write(make_fact(text=f"decoy value {i}"))
+        _reject(mem, target.id)
+    mem.write(make_fact(text="the target lie"))  # restate the (now evicted from the list) target
+    assert mem.get(target.id).detail.get("rejected_saturated") is True
+    mem.promote(target.id)
+    assert mem.get(target.id).trust != Trust.VERIFIED  # saturated key can't be promoted
+
+
+def check_legit_candidate_still_promotes(mem: MemoryView) -> None:
+    """The guard must not over-block: a never-rejected CANDIDATE promotes normally."""
+    r = mem.write(make_fact(text="genuinely fine"))
+    assert mem.get(r.id).trust == Trust.CANDIDATE
+    mem.promote(r.id)
+    assert mem.get(r.id).trust == Trust.VERIFIED
+
+
 def check_correction_chain_is_bounded(mem: MemoryView) -> None:
     """Repeated supersessions must not grow one record's detail without bound (round-11 B) —
     the chain is capped at the shared MAX_CORRECTIONS on every backend."""
@@ -218,6 +263,10 @@ CONTRACT_CHECKS = [
     check_rejection_populates_durable_ledger,
     check_supersede_carries_rejected_ledger,
     check_rejected_tombstone_survives_decay_and_stays_hidden,
+    check_promote_refuses_rejected_value,
+    check_promote_refuses_restated_once_rejected_value,
+    check_ledger_saturation_blocks_promotion,
+    check_legit_candidate_still_promotes,
     check_correction_chain_is_bounded,
     check_decay_prunes_only_on_exact_conjunction,
     check_decay_leaves_confidence_invariant,

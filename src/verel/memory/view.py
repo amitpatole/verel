@@ -170,6 +170,32 @@ MAX_REJECTED_VALUES = 50
 _PRIOR_TEXT_CAP = 200
 
 
+def _cap_ledger(rejected: list[str]) -> tuple[list[str], bool]:
+    """Cap the rejected-value ledger and report SATURATION. Once more than MAX_REJECTED_VALUES
+    distinct values have been rejected on one key, we can't store them all — so instead of silently
+    evicting a value off the front (which would let that once-rejected value launder back to
+    promotable, round-13/C3), the caller sets a durable `rejected_saturated` flag that blocks ALL
+    future promotions of the key. A key with 50+ distinct rejected values is implausible in honest
+    use; over-blocking it is the fail-safe direction."""
+    return rejected[-MAX_REJECTED_VALUES:], len(rejected) > MAX_REJECTED_VALUES
+
+
+def is_launder_blocked(r: MemoryRecord) -> bool:
+    """The SINGLE anti-laundering guard every promotion path must inherit (round-13/C1+C2).
+
+    A record must not become VERIFIED if its value was ever REJECTED on this key. True when the
+    record is currently REJECTED, its value's key is in the durable `rejected_values` ledger, or the
+    ledger has SATURATED (fail-safe overblock). Pushing this into the `promote()` primitive means
+    every caller — CLI review, MCP `verel_remember`, the `PromotionGate` — is guarded, instead of
+    each re-implementing (and some forgetting) the check."""
+    if r.trust == Trust.REJECTED:
+        return True
+    d = r.detail
+    if d.get("rejected_saturated"):
+        return True
+    return rejected_key(r.text) in d.get("rejected_values", [])
+
+
 def supersede_detail(existing: MemoryRecord, record: MemoryRecord, *, ts: float) -> None:
     """The CANONICAL supersede bookkeeping, shared by every backend's write() interference path.
 
@@ -190,8 +216,13 @@ def supersede_detail(existing: MemoryRecord, record: MemoryRecord, *, ts: float)
         rv = rejected_key(existing.text)
         if rv not in rejected:
             rejected.append(rv)
+    capped, saturated = _cap_ledger(rejected)
+    # saturation is MONOTONIC — once set on the key it is carried across every supersession.
+    saturated = saturated or bool(existing.detail.get("rejected_saturated"))
     record.with_detail(corrections=chain, superseded=existing.text[:_PRIOR_TEXT_CAP],
-                       rejected_values=rejected[-MAX_REJECTED_VALUES:])
+                       rejected_values=capped)
+    if saturated:
+        record.with_detail(rejected_saturated=True)
 
 
 def record_rejection(r: MemoryRecord) -> bool:
@@ -203,7 +234,10 @@ def record_rejection(r: MemoryRecord) -> bool:
     if cv in rejected:
         return False
     rejected.append(cv)
-    r.with_detail(rejected_values=rejected[-MAX_REJECTED_VALUES:])
+    capped, saturated = _cap_ledger(rejected)
+    r.with_detail(rejected_values=capped)
+    if saturated or r.detail.get("rejected_saturated"):
+        r.with_detail(rejected_saturated=True)  # monotonic fail-safe overblock (round-13/C3)
     return True
 
 

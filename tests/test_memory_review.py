@@ -102,6 +102,30 @@ def test_render_is_terminal_safe():
         assert "​" not in out and "‮" not in out
 
 
+def test_render_sanitizes_hostile_record_id():
+    """A replication peer stores id VERBATIM via apply_replica — render must not print it raw
+    (round-13/M1)."""
+    from verel.memory.view import MemoryKind, MemoryRecord
+    mem = LocalMemory(":memory:")
+    hostile_id = "\x1b[31mSPOOF\x1b[0m\nfake-approved"
+    mem.apply_replica(MemoryRecord(id=hostile_id, kind=MemoryKind.FACT, subject="s",
+                                   predicate="p", text="t", scope="repo:x"))
+    got = mem.get(hostile_id)
+    for out in (render_line(got), render_record(got)):
+        assert "\x1b" not in out and "\n" not in out.split(": ", 1)[-1].splitlines()[0]
+
+
+def test_render_sanitizes_numeric_sibling_fields_in_detail():
+    """ec / superseded_at / reviewed_ts live in free-form detail_json and are attacker-controllable
+    strings, not guaranteed numbers — render must sanitize them (round-13/M2)."""
+    mem = LocalMemory(":memory:")
+    r = mem.write(make_fact())
+    mem.annotate(r.id, corrections=[{"text": "old", "ec": "\x1b[31mANSI\ninj", "superseded_at": "\x1b[2J"}],
+                 review="approved", reviewed_by="a", reviewed_ts="\x1b[31m\nSPOOF")
+    out = render_record(mem.get(r.id))
+    assert "\x1b" not in out
+
+
 def test_reviewer_and_reason_are_bounded():
     mem, recs = _mem_with_candidates(1)
     r = reject(mem, recs[0].id, reviewed_by="x" * 10_000, reason="y" * 10_000)

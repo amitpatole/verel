@@ -172,6 +172,7 @@ def _memory(args) -> int:
         render_line,
         render_record,
     )
+    from .memory.view import canonical_text as _s  # terminal-safe: strips ANSI/control/newline
 
     try:
         import getpass
@@ -187,10 +188,11 @@ def _memory(args) -> int:
             return 0 if ok else 1
         entries = audit.entries(args.record_id or None)
         for e in entries[-args.limit:]:
-            b = (e.get("before") or {}).get("trust", "—")
-            a = (e.get("after") or {}).get("trust", "—")
-            print(f"{e.get('ts', 0):.0f}  {e.get('actor', '?'):<20} {e.get('action', '?'):<12} "
-                  f"{e.get('record_id', '?')}  {b} -> {a}")
+            b = _s(str((e.get("before") or {}).get("trust", "—")))
+            a = _s(str((e.get("after") or {}).get("trust", "—")))
+            # actor/action/record_id can carry attacker-controlled strings (round-13/M3) — sanitize
+            print(f"{e.get('ts', 0):.0f}  {_s(str(e.get('actor', '?'))):<20} "
+                  f"{_s(str(e.get('action', '?'))):<12} {_s(str(e.get('record_id', '?')))}  {b} -> {a}")
         print(f"({len(entries)} entr{'y' if len(entries) == 1 else 'ies'} total, {audit.path})")
         return 0
 
@@ -225,14 +227,14 @@ def _memory(args) -> int:
         if rec is None:
             print(f"-- no record {args.id!r}")
             return 1
-        print(f"OK  {rec.id} -> {rec.trust.value} (reviewed by {operator}, audited)")
+        print(f"OK  {_s(rec.id)} -> {rec.trust.value} (reviewed by {operator}, audited)")
         return 0
     if args.memory_cmd == "reject":
         rec = reject(mem, args.id, reviewed_by=operator, reason=args.reason)
         if rec is None:
             print(f"-- no record {args.id!r}")
             return 1
-        print(f"OK  {rec.id} -> {rec.trust.value} (durable tombstone — this value can no longer "
+        print(f"OK  {_s(rec.id)} -> {rec.trust.value} (durable tombstone — this value can no longer "
               f"be recalled or re-promoted)")
         return 0
     return 2

@@ -3,11 +3,20 @@
 Closes the "mutation audit" gap: correction chains (view.py `corrections`) preserve WHAT a record
 used to say, but not WHO/WHAT changed it. `MemoryAudit` records every mutation as
 `{seq, ts, actor, action, record_id, before, after}`, hash-chained (each entry commits to its
-predecessor via SHA-256) so the log is tamper-evident — the same WORM discipline as
+predecessor via SHA-256) so in-place tampering is detectable — a lighter cousin of the WORM discipline in
 `verel.verdict.store.ReceiptStore`, applied to memory.
 
 `AuditedMemory` wraps ANY `MemoryView` backend (local/postgres/lancedb/redis/mem0/remote) and logs
 mutations at the Protocol seam, so no backend needs changes and every backend gets the same audit.
+
+Honest scope of the tamper-evidence (it is NOT a signed log like `verel.verdict.ReceiptStore`):
+`verify()` detects **in-place edits** (any altered field breaks that entry's hash) and **middle
+deletions / torn writes** (a broken prev_hash link or an unparseable line). It does NOT detect
+**tail truncation** (dropping the last N entries leaves a still-consistent prefix) or a **full
+re-forge** by an attacker who can rewrite the whole file (no external signed head to anchor against).
+This is a local integrity log — an attacker with write access to it already has write access to the
+brain store itself — so this is defense-in-depth, not a trust boundary. For a signed, WORM receipt
+chain use `ReceiptStore`.
 
 What is (and isn't) audited — a deliberate line:
 - Audited: `write`, `apply_replica`, `corroborate`, `contradict`, `promote`, `demote`, `annotate`,
@@ -20,7 +29,7 @@ Entry fields are BOUNDED (actor/action/record_id truncated; before/after snapsho
 `canonical_text` 120-char preview + counters, never the raw value) so attacker-length fact text
 cannot bloat one entry. Appends are plain JSONL `a`-mode writes: a torn line does not corrupt prior
 entries and is DETECTED by `verify()` (fail-visible, like ReceiptStore). Multi-process appenders can
-fork the chain; ordering is best-effort but every entry remains tamper-evident.
+fork the chain; ordering is best-effort but in-place edits to any committed entry stay detectable.
 """
 
 from __future__ import annotations

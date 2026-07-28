@@ -39,6 +39,7 @@ from .view import (
     MemoryView,
     Trust,
     apply_decay,
+    is_launder_blocked,
     make_id,
     make_key,
     rank,
@@ -370,6 +371,13 @@ class RedisMemory(MemoryView):
         return self._atomic(record_id, mutate)
 
     def promote(self, record_id):
+        # anti-laundering guard in the primitive so every caller inherits it (round-13/C1+C2).
+        # is_launder_blocked reads only MONOTONIC state, so this pre-check is race-safe.
+        r = self.get(record_id)
+        if r is None:
+            return None
+        if is_launder_blocked(r):
+            return r  # refuse — trust unchanged
         return self._adjust(record_id, trust=Trust.VERIFIED, confirm=True)
 
     def demote(self, record_id):

@@ -97,9 +97,19 @@ def render_line(r: MemoryRecord, *, width: int = 100) -> str:
     head = canonical_text(f"{r.subject} {r.predicate}".strip())
     body = canonical_text(r.text)
     label = f"{head}: {body}" if head else body
-    line = (f"{r.id}  {r.trust.value:<9}  ec={r.epistemic_confidence:.2f} "
-            f"sup={r.support_count}  [{canonical_text(r.scope)}]  {label}")
+    # r.id is content-addressed hex for normal writes, but apply_replica stores it VERBATIM from a
+    # (possibly hostile) replication peer — so canonicalize it too (round-13/M1), never trust it raw.
+    line = (f"{_s(r.id)}  {r.trust.value:<9}  ec={r.epistemic_confidence:.2f} "
+            f"sup={r.support_count}  [{_s(r.scope)}]  {label}")
     return line[: max(40, width)]
+
+
+def _s(value: object) -> str:
+    """Terminal-safe render of ANY field that reaches the operator's screen — including ones the
+    code ASSUMES are numeric (`ec`, `superseded_at`, `reviewed_ts`) but that live in the free-form
+    `detail_json` and are attacker-controllable strings (round-13/M1+M2). Everything printed goes
+    through this or `canonical_text`, so no stored value can smuggle ANSI/control/newline into review."""
+    return canonical_text(str(value))
 
 
 def render_record(r: MemoryRecord) -> str:
@@ -107,28 +117,28 @@ def render_record(r: MemoryRecord) -> str:
     the rejected-value ledger — what an operator needs to decide, nothing raw."""
     d = r.detail
     lines = [
-        f"id:         {r.id}",
+        f"id:         {_s(r.id)}",
         f"kind:       {r.kind.value}",
         f"trust:      {r.trust.value}",
-        f"scope:      {canonical_text(r.scope)}",
-        f"subject:    {canonical_text(r.subject)}",
-        f"predicate:  {canonical_text(r.predicate)}",
-        f"text:       {canonical_text(r.text)}",
+        f"scope:      {_s(r.scope)}",
+        f"subject:    {_s(r.subject)}",
+        f"predicate:  {_s(r.predicate)}",
+        f"text:       {_s(r.text)}",
         f"confidence: {r.epistemic_confidence:.3f}   support: {r.support_count}   "
         f"strength: {r.retrieval_strength:.3f}",
-        f"source:     {canonical_text(r.source)}   created_ts: {r.created_ts}",
+        f"source:     {_s(r.source)}   created_ts: {r.created_ts}",
     ]
     if r.provenance:
-        lines.append("provenance: " + ", ".join(canonical_text(p)[:80] for p in r.provenance[:10]))
+        lines.append("provenance: " + ", ".join(_s(p)[:80] for p in r.provenance[:10]))
     for c in d.get("corrections", []):
-        lines.append(f"superseded: {canonical_text(str(c.get('text', '')))[:120]} "
-                     f"(ec={c.get('ec')}, at={c.get('superseded_at')})")
+        lines.append(f"superseded: {_s(c.get('text', ''))[:120]} "
+                     f"(ec={_s(c.get('ec'))}, at={_s(c.get('superseded_at'))})")
     if d.get("rejected_values"):
-        lines.append(f"rejected ledger: {len(d['rejected_values'])} value(s) permanently blocked")
+        note = " (SATURATED — key blocked)" if d.get("rejected_saturated") else ""
+        lines.append(f"rejected ledger: {len(d['rejected_values'])} value(s) permanently blocked{note}")
     if d.get("review"):
-        lines.append(f"review:     {canonical_text(str(d.get('review')))} "
-                     f"by {canonical_text(str(d.get('reviewed_by', '?')))} "
-                     f"at {d.get('reviewed_ts')}")
+        lines.append(f"review:     {_s(d.get('review'))} "
+                     f"by {_s(d.get('reviewed_by', '?'))} at {_s(d.get('reviewed_ts'))}")
         if d.get("review_reason"):
-            lines.append(f"reason:     {canonical_text(str(d['review_reason']))}")
+            lines.append(f"reason:     {_s(d['review_reason'])}")
     return "\n".join(lines)

@@ -44,6 +44,7 @@ from .view import (
     MemoryRecord,
     MemoryView,
     Trust,
+    is_launder_blocked,
     make_id,
     make_key,
     rank,
@@ -441,11 +442,24 @@ class PostgresMemory(MemoryView):
         if r is not None and r.epistemic_confidence < 0.2:
             r = self._adjust(record_id, trust=Trust.REJECTED)
             if r is not None and record_rejection(r):
-                # persist the rejected-value ledger so supersede/restate can't launder it (round-7 C1)
+                # persist the rejected-value ledger so supersede/restate can't launder it (round-7 C1).
+                # NOTE the deliberate two-transaction split (unlike lance/redis' single critical section):
+                # annotate() re-acquires the SAME per-key advisory lock and re-reads current state before
+                # writing, and record_rejection is idempotent (dedups on rejected_key). So a concurrent
+                # corroborate slipping between the two txns cannot lose the ledger entry or clear REJECTED
+                # (corroborate never touches trust) — the value stays un-launderable. Worst case is a
+                # transient ec>=0.2-while-REJECTED read, which no gate consults (recall/promote key on
+                # trust + the ledger, not ec).
                 r = self.annotate(record_id, rejected_values=r.detail["rejected_values"]) or r
         return r
 
     def promote(self, record_id):
+        # anti-laundering guard in the primitive so every caller inherits it (round-13/C1+C2)
+        r = self.get(record_id)
+        if r is None:
+            return None
+        if is_launder_blocked(r):
+            return r  # refuse — trust unchanged
         return self._adjust(record_id, trust=Trust.VERIFIED, confirm=True)
 
     def demote(self, record_id):

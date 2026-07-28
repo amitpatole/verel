@@ -23,6 +23,7 @@ from .view import (
     MemoryView,
     Trust,
     apply_decay,
+    is_launder_blocked,
     make_id,
     make_key,
     rank,
@@ -320,6 +321,13 @@ class LocalMemory(MemoryView):
         return r
 
     def promote(self, record_id):
+        # THE anti-laundering guard, in the primitive so every caller inherits it (round-13/C1+C2):
+        # a value ever REJECTED on this key (ledger or saturated) is never promotable to VERIFIED.
+        r = self.get(record_id)
+        if r is None:
+            return None
+        if is_launder_blocked(r):
+            return r  # refuse — trust unchanged (still candidate/rejected)
         return self._adjust(record_id, trust=Trust.VERIFIED, confirm=True)
 
     def demote(self, record_id):

@@ -26,6 +26,18 @@ real cross-backend drift the new negative-eval sweep surfaced.
   stays hidden; chains are bounded) run over every backend, plus a dedicated
   `tests/test_memory_negative_eval.py` covering every LocalMemory recall variant (FTS5/BM25,
   token-overlap fallback, embedder/cosine), the budgeted prompt renderer, and verbatim-query recall.
+- **Security hardening (adversarial red-team, round 1).** Closed a laundering class the review path
+  guarded but the primitive did not: the anti-laundering check now lives in `promote()` itself
+  (`view.is_launder_blocked`), so every caller inherits it — the MCP `verel_remember` fact-attestation
+  path (C2) and `PromotionGate` (which previously called `promote()` unguarded) can no longer
+  resurrect a once-rejected value. Added a fail-safe **ledger saturation** flag: rejecting more than
+  `MAX_REJECTED_VALUES` distinct values on one key no longer evicts the target off the front (which
+  laundered it) — the key saturates and all promotions are blocked (C3). Canonicalized every operator-
+  facing print sink (record id, correction `ec`/`superseded_at`, `reviewed_ts`, audit `actor`/
+  `action`/`record_id`) so a stored value can't smuggle ANSI/control/newline into the review terminal
+  (M1–M3). Corrected the audit docstring's over-claimed "tamper-evident" to state precisely what
+  `verify()` detects (in-place edits, middle deletion, torn lines) and what it does not (tail
+  truncation, full re-forge — use `ReceiptStore` for a signed chain).
 
 ## Unreleased — QuineOS foundation (DC-01..DC-05)
 

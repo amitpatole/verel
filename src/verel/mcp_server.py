@@ -619,7 +619,10 @@ def _tool_remember(args: dict) -> dict:
     written = mem.write(rec)
     if fact_attested:
         written = mem.promote(written.id) or written   # fact-bound attestation → verified
-        reason = "verified by a fact-bound attestation"
+        # promote() refuses a once-rejected value (round-13/C2): an attestation must NOT resurrect a
+        # value a human/grader previously rejected. Report honestly on the ACTUAL resulting trust.
+        reason = ("verified by a fact-bound attestation" if written.trust == Trust.VERIFIED
+                  else "attestation refused — this value was previously rejected (stays as-is)")
     elif written.trust == Trust.VERIFIED:
         reason = "corroborated an existing verified belief"   # same-text re-assertion of a verified fact
     elif ev_ok:
