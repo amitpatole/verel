@@ -49,7 +49,7 @@ verel doctor
 A representative run:
 
 ```text
-verel 1.9.3
+verel 1.9.4
   — core grading (no key / no network needed):
   OK python 3.11.9
   OK git

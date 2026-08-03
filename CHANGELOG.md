@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.9.4 — fix: the memory audit chain follows the store
 
 - **The memory audit chain now follows the store** (default-behaviour change, fixes an
   audit-pollution footgun). `verel memory` against a non-default `VEREL_MEMORY_STORE` used to
