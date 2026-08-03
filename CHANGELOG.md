@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **The memory audit chain now follows the store** (default-behaviour change, fixes an
+  audit-pollution footgun). `verel memory` against a non-default `VEREL_MEMORY_STORE` used to
+  append its mutations to the operator's *global* `~/.config/verel/memory_audit.jsonl` — so a
+  temp/test store polluted the real audit history with events for records that store never held.
+  `MemoryAudit.from_env` now resolves: explicit `VEREL_MEMORY_AUDIT` wins; else a non-default local
+  store gets a sidecar `<store>.audit.jsonl` beside its db; else (default brain, `:memory:`,
+  non-file backends) the global path, unchanged. If you deliberately audited a custom store into
+  the global chain, set `VEREL_MEMORY_AUDIT` explicitly to keep that behaviour.
+
 ## 1.9.3 — realign source with the 1.9.2 wheel (no behaviour change vs PyPI 1.9.2)
 
 - **Source/artifact realignment.** The 1.9.2 install-independence fix to `verel.memory.rubric` was

@@ -106,3 +106,63 @@ def test_decay_prunes_are_logged_as_summary(tmp_path):
     assert pruned == 1
     e = audit.entries()[-1]
     assert e["action"] == "decay" and "pruned" in (e.get("extra") or "")
+
+
+# ---------------------------------------------------------------------------
+# from_env — the audit chain FOLLOWS THE STORE. A temp/test VEREL_MEMORY_STORE must
+# get its own sidecar chain, never pollute the operator's global audit history
+# (the 2026-08-03 footgun: CLI runs against a temp db wrote to the real log).
+
+
+def test_from_env_default_is_the_global_chain(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.delenv("VEREL_MEMORY_AUDIT", raising=False)
+    monkeypatch.delenv("VEREL_MEMORY_STORE", raising=False)
+    monkeypatch.delenv("VEREL_MEMORY_BACKEND", raising=False)
+    assert MemoryAudit.from_env().path == tmp_path / "verel" / "memory_audit.jsonl"
+
+
+def test_from_env_nondefault_store_gets_a_sidecar_chain(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.delenv("VEREL_MEMORY_AUDIT", raising=False)
+    monkeypatch.delenv("VEREL_MEMORY_BACKEND", raising=False)
+    store = tmp_path / "scratch" / "test.db"
+    monkeypatch.setenv("VEREL_MEMORY_STORE", str(store))
+    audit = MemoryAudit.from_env()
+    assert audit.path == tmp_path / "scratch" / "test.db.audit.jsonl"
+    # and a mutation through it must not touch the global chain
+    mem = AuditedMemory(LocalMemory(":memory:"), audit, actor="cli:t")
+    mem.write(make_fact())
+    assert not (tmp_path / "verel" / "memory_audit.jsonl").exists()
+
+
+def test_from_env_explicit_audit_path_wins_over_store(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.setenv("VEREL_MEMORY_STORE", str(tmp_path / "other.db"))
+    monkeypatch.setenv("VEREL_MEMORY_AUDIT", str(tmp_path / "explicit.jsonl"))
+    assert MemoryAudit.from_env().path == tmp_path / "explicit.jsonl"
+
+
+def test_from_env_default_store_path_keeps_the_global_chain(tmp_path, monkeypatch):
+    # VEREL_MEMORY_STORE redundantly set to the default brain.db must NOT restart the chain
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.delenv("VEREL_MEMORY_AUDIT", raising=False)
+    monkeypatch.delenv("VEREL_MEMORY_BACKEND", raising=False)
+    monkeypatch.setenv("VEREL_MEMORY_STORE", str(tmp_path / "verel" / "brain.db"))
+    assert MemoryAudit.from_env().path == tmp_path / "verel" / "memory_audit.jsonl"
+
+
+def test_from_env_memory_store_falls_through_to_global(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.delenv("VEREL_MEMORY_AUDIT", raising=False)
+    monkeypatch.delenv("VEREL_MEMORY_BACKEND", raising=False)
+    monkeypatch.setenv("VEREL_MEMORY_STORE", ":memory:")
+    assert MemoryAudit.from_env().path == tmp_path / "verel" / "memory_audit.jsonl"
+
+
+def test_from_env_nonlocal_backend_keeps_the_global_chain(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.delenv("VEREL_MEMORY_AUDIT", raising=False)
+    monkeypatch.setenv("VEREL_MEMORY_BACKEND", "postgres")
+    monkeypatch.setenv("VEREL_MEMORY_STORE", str(tmp_path / "ignored.db"))
+    assert MemoryAudit.from_env().path == tmp_path / "verel" / "memory_audit.jsonl"

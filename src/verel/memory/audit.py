@@ -80,10 +80,27 @@ class MemoryAudit:
 
     @classmethod
     def from_env(cls) -> MemoryAudit:
-        """`VEREL_MEMORY_AUDIT` else `$XDG_CONFIG_HOME/verel/memory_audit.jsonl` (default `~/.config`)."""
+        """Resolve the audit path — the chain FOLLOWS THE STORE, so a temp/test store cannot
+        pollute the operator's real audit history with events for records that store never held:
+
+        1. `VEREL_MEMORY_AUDIT` — explicit path, always wins.
+        2. local backend with a non-default `VEREL_MEMORY_STORE` file path — a sidecar
+           `<store>.audit.jsonl` next to that db (each store gets its own chain).
+        3. else — the global `$XDG_CONFIG_HOME/verel/memory_audit.jsonl` (default `~/.config`),
+           unchanged for the default brain and for non-file backends. (`:memory:` also falls
+           through: a fresh empty store offers the CLI nothing to mutate, so nothing is logged.)
+        """
+        explicit = os.environ.get("VEREL_MEMORY_AUDIT")
+        if explicit:
+            return cls(explicit)
         base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
-        path = os.environ.get("VEREL_MEMORY_AUDIT") or os.path.join(base, "verel", "memory_audit.jsonl")
-        return cls(path)
+        backend = os.environ.get("VEREL_MEMORY_BACKEND", "local")
+        store = os.environ.get("VEREL_MEMORY_STORE")
+        if backend == "local" and store and store != ":memory:":
+            default_store = os.path.join(base, "verel", "brain.db")
+            if os.path.abspath(os.path.expanduser(store)) != os.path.abspath(default_store):
+                return cls(os.path.expanduser(store) + ".audit.jsonl")
+        return cls(os.path.join(base, "verel", "memory_audit.jsonl"))
 
     # ------------------------------------------------------------------
     def _load_head(self) -> str:

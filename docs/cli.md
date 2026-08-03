@@ -168,7 +168,9 @@ OK  audit chain: ok  (~/.config/verel/memory_audit.jsonl)
   in its carried `rejected_values` ledger — is refused with exit 1. Rejection is durable.
 - **Every mutation is audited**: approve/reject (and every trust-layer mutation made through the
   CLI) appends `{actor, action, before, after}` to a hash-chained, tamper-evident log
-  (`VEREL_MEMORY_AUDIT`, default `~/.config/verel/memory_audit.jsonl`).
+  (`VEREL_MEMORY_AUDIT`; default `~/.config/verel/memory_audit.jsonl` for the default brain). The
+  chain follows the store: pointing `VEREL_MEMORY_STORE` at another db audits into a sidecar
+  `<store>.audit.jsonl` beside it — each store keeps its own history.
 - **Terminal-safe**: listings render through the shared canonical text transform, so a stored fact
   can't smuggle ANSI/control sequences into your terminal and spoof what you approve.
 - Uses the backend from `VEREL_MEMORY_BACKEND` (default `local`), same as everything else.
