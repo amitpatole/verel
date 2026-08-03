@@ -1,6 +1,14 @@
 # Changelog
 
-## 1.9.2 — fix: `verel memory rubric` self-assessment is install-independent
+## 1.9.3 — realign source with the 1.9.2 wheel (no behaviour change vs PyPI 1.9.2)
+
+- **Source/artifact realignment.** The 1.9.2 install-independence fix to `verel.memory.rubric` was
+  published in the PyPI 1.9.2 wheel but the corresponding source change was never committed — tag
+  `v1.9.2` still carried the 1.9.1 probe, so the wheel was not reproducible from its tag and the
+  `ghcr.io` 1.9.2 image (built by CI from the tag) shipped the old probe, under-reporting **6/7**
+  inside a container. 1.9.3 commits that exact code (byte-identical to the 1.9.2 wheel's
+  `rubric.py`) so tag, wheel, and image agree again. If you installed 1.9.2 from PyPI you already
+  have this code; if you use the container image, pull 1.9.3.
 
 - **`verel memory rubric` now reports 7/7 from a pip install, not just a checkout.** In 1.9.1 the
   negative-eval probe required finding the committed test file on disk; a wheel doesn't ship `tests/`,
