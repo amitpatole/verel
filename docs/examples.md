@@ -6,8 +6,12 @@ nothing here is mocked up. Run any of them yourself:
 
 ```bash
 pip install verel
+git clone https://github.com/amitpatole/verel && cd verel   # the examples live in the repo
 python examples/demo_selfheal.py
 ```
+
+> The pip wheel installs the package only — `examples/` ships in the repo (and the sdist), not in
+> `site-packages`.
 
 The throughline: **an agent never decides "done" — a grader does.** Each scenario shows that rule
 holding under a different kind of pressure.
