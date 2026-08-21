@@ -91,6 +91,15 @@ class IssueKind(str, Enum):
     BASELINE_REGRESSION = "baseline_regression"
     INVARIANT_VIOLATION = "invariant_violation"
     CROSS_NF_MISMATCH = "cross_nf_mismatch"
+    # Document-ingress guard kinds (the `verel.guard` scanner — future `immel` boundary organ).
+    # HIDDEN_CONTENT = text present for an extractor but invisible to a human reader (vanish runs,
+    # white-on-white, tiny fonts, zero-width/TAG-block carriers); INJECTION = an instruction aimed at
+    # the consuming LLM (override/role/concealment/tool-inducement, or a hidden payload reappearing in
+    # a generated artifact); EXFIL_VECTOR = a rendered-fetch data sink (markdown image/link with a
+    # query-string payload) that exfiltrates on display.
+    HIDDEN_CONTENT = "hidden_content"
+    INJECTION = "injection"
+    EXFIL_VECTOR = "exfil_vector"
     OTHER = "other"
 
 
@@ -129,6 +138,10 @@ class GraderKind(str, Enum):
     # grade supplied artifacts (a metrics file / a config artifact). See docs/use-cases-telecom.md.
     KPI = "kpi"
     TELECOM_CFG = "telecom_cfg"
+    # Document-ingress guard (verel.guard): static hidden-content / prompt-injection scanning over
+    # untrusted documents BEFORE they reach an LLM context. Deterministic structural+lexical evidence
+    # over supplied files (no model in the loop) → PRECISE_GRADERS (it gates).
+    INJECTION = "injection"
     OTHER = "other"
 
 

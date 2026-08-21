@@ -46,6 +46,10 @@ def fingerprint(i: Issue) -> str:
         key = f"{d.get('rule_id', '')}|{i.locator}"
     elif i.source == GraderKind.SECURITY:
         key = f"{d.get('cwe', '')}|{i.locator}|{canonicalize(i.message)}"
+    elif i.source == GraderKind.INJECTION:
+        # detection_id + locator is the stable identity — the message carries a canonicalized
+        # snippet of attacker-controlled text, which must not churn the fingerprint.
+        key = f"{d.get('detection_id', '')}|{i.locator}"
     else:
         key = f"{i.kind.value}|{i.locator}|{canonicalize(i.message)}"
     return blake2s(key.encode()).hexdigest()[:16]

@@ -36,6 +36,10 @@ PRECISE_GRADERS = {
     # (statistical insufficiency cannot gate), so a small-denominator sample never fails the build.
     GraderKind.KPI,
     GraderKind.TELECOM_CFG,
+    # Document-ingress guard: structural hidden-text markers and lexical pattern hits are
+    # deterministic evidence over the supplied bytes (no model in the loop) → it gates. The FP
+    # control lives in the severity policy (hiding alone = WARNING; hiding + imperative = CRITICAL).
+    GraderKind.INJECTION,
     # Hearing: DSP signal analysis and ASR transcription are deterministic grounding.
     GraderKind.DSP,
     GraderKind.ASR,
