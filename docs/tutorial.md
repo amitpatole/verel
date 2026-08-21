@@ -139,7 +139,7 @@ detects `stuck` (no strict shrinkage of the gating-failure set) and **stops inst
 - **[Try it yourself](try-it.md)** — the same ideas as a single from-scratch, copy-paste walkthrough
   on a repo you build in 3 minutes (no API key needed).
 - **[Developer guide](usage.md)** — every surface and organ, with runnable snippets.
-- **[Architecture](ARCHITECTURE.md)** — how the six organs fit together.
+- **[Architecture](ARCHITECTURE.md)** — how the seven organs fit together.
 - Run the rest of the [`examples/`](https://github.com/amitpatole/verel/tree/main/examples) — polyglot CI, the tool-smith's seccomp jail, the distributed fleet, the hosted skill registry.
 
 That's the whole thesis in five minutes: **nothing is done until a grader says so, and only what's

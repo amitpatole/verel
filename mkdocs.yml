@@ -70,6 +70,7 @@ nav:
   - Use cases: use-cases.md
   - Use cases — SRE / Platform / Cloud: use-cases-infra.md
   - Use cases — Telecom RAN / 5G Core: use-cases-telecom.md
+  - Guard — document-ingress defense: guard.md
   - Real-world scenarios: examples.md
   - Adoption: adoption.md
   - Guides:

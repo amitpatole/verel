@@ -58,6 +58,15 @@ smell, and the action gateway — all importable, all on the verdict bus.
 
 ::: verel.gateway
 
+## Guard — document-ingress defense
+
+Static hidden-content / prompt-injection scanning of untrusted documents before an LLM reads them
+(see [Guard](guard.md)). `grade_docs` returns an attested `Report`; `check_propagation` catches a
+known payload replicating into a generated file; `DocumentGuard` is the `Sense`-shaped surface the
+`immel` organ re-exports.
+
+::: verel.guard
+
 ## IaC / cloud-IAM graders & actuators
 
 The offline IaC/IAM change sensor (Terraform plan + cloud IAM across AWS/GCP/Azure), the native

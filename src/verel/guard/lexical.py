@@ -132,8 +132,24 @@ def scan_text(text: str, *, origin: str = "", hidden: bool = False) -> list[Find
             eff = Severity.CRITICAL if (hidden and escalates) else sev
             findings.append(_mk(det, kind, eff, m, hidden=hidden))
     for m in _hostile.ENCODED_RUN.finditer(folded):
-        findings.append(_mk("LEX-007", IssueKind.INJECTION, Severity.WARNING, m,
+        # a visible encoded run is advisory (hashes/UUIDs exist); a HIDDEN encoded blob is the
+        # smuggling shape itself — text a reader can't see AND can't read is not legitimate content,
+        # so it gates (security round 4, R4-1: catches multi-layer encodings a decode pass can't peel).
+        enc_sev = Severity.ERROR if hidden else Severity.WARNING
+        findings.append(_mk("LEX-007", IssueKind.INJECTION, enc_sev, m,
                             hidden=hidden, confidence=Confidence.MEDIUM))
+    # entity/charcode-encoded imperative (e.g. &#105;&#103;… → "ig…"): decode one layer and re-scan
+    entity_decoded = _decode_entities(folded)
+    if entity_decoded and entity_decoded != folded and _families_hit(entity_decoded):
+        from ..memory.view import rejected_key
+        eff = Severity.CRITICAL if hidden else Severity.ERROR
+        findings.append(Finding(
+            detection_id="LEX-009", kind=IssueKind.INJECTION, severity=eff,
+            confidence=Confidence.HIGH,
+            message=f"{_MESSAGES['LEX-009']}: “{_snippet(entity_decoded)}”",
+            locator="text@entity", hidden=hidden,
+            detail={"detection_id": "LEX-009", "span_key": rejected_key(entity_decoded),
+                    "snippet": _snippet(entity_decoded)}))
     for pat in (_hostile.DECODE_EXEC, _hostile.SHELL_CMD):
         for m in pat.finditer(folded):
             eff = Severity.CRITICAL if hidden else Severity.ERROR
@@ -149,7 +165,11 @@ def scan_text(text: str, *, origin: str = "", hidden: bool = False) -> list[Find
         if len(tok) < 12 or _hostile.b64ish(tok) is None:
             continue
         checked += 1
-        if _hostile.decoded_unsafe(tok):
+        # decoded_unsafe catches secrets/shell in the plaintext; the guard ALSO decodes and re-scans
+        # for INJECTION imperatives — a base64-wrapped "ignore previous instructions" is a second-order
+        # injection the model decodes downstream, which the secret/shell denylist alone would miss.
+        decoded_imperative = any(has_imperative(dec) for dec in _hostile.decode_candidates(tok))
+        if _hostile.decoded_unsafe(tok) or decoded_imperative:
             eff = Severity.CRITICAL if hidden else Severity.ERROR
             from ..memory.view import rejected_key
             findings.append(Finding(
@@ -163,9 +183,38 @@ def scan_text(text: str, *, origin: str = "", hidden: bool = False) -> list[Find
     return findings
 
 
-def has_imperative(text: str) -> bool:
-    """True when any imperative family matches — used by structural scanners to decide whether a
-    hidden span is the worm conjunction (→ CRITICAL) or bare hidden text (→ WARNING)."""
-    folded = _hostile.fold(text)[: 2 * 1024 * 1024]
+_ENTITY = re.compile(r"&#x([0-9a-fA-F]{1,6});|&#([0-9]{1,7});")
+_DECIMAL_CHARCODES = re.compile(r"(?:\b\d{1,3}[,\s]+){5,}\d{1,3}\b")
+
+
+def _decode_entities(text: str) -> str | None:
+    """Decode HTML numeric entities (&#105; / &#x69;) and decimal char-code runs to plaintext, so an
+    entity- or charcode-encoded imperative in a comment/body is revealed (security round 3, R3-1)."""
+    if _ENTITY.search(text):
+        def sub(m: re.Match[str]) -> str:
+            code = int(m.group(1), 16) if m.group(1) else int(m.group(2))
+            return chr(code) if 0 <= code <= 0x10FFFF else ""
+        return _ENTITY.sub(sub, text)
+    m = _DECIMAL_CHARCODES.search(text)
+    if m:
+        try:
+            return "".join(chr(int(n)) for n in re.split(r"[,\s]+", m.group(0)) if n and int(n) < 0x110000)
+        except (ValueError, OverflowError):
+            return None
+    return None
+
+
+def _families_hit(folded: str) -> bool:
     return any(pat.search(folded) for _, _, _, _, pat in _FAMILIES) or bool(
         _hostile.DECODE_EXEC.search(folded) or _hostile.SHELL_CMD.search(folded))
+
+
+def has_imperative(text: str) -> bool:
+    """True when any imperative family matches — used by structural scanners to decide whether a
+    hidden span is the worm conjunction (→ CRITICAL) or bare hidden text (→ WARNING). Also decodes
+    one entity/charcode layer so an encoded imperative is revealed."""
+    folded = _hostile.fold(text)[: 2 * 1024 * 1024]
+    if _families_hit(folded):
+        return True
+    decoded = _decode_entities(folded)
+    return bool(decoded and decoded != folded and _families_hit(decoded))

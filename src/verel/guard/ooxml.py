@@ -204,6 +204,12 @@ def _hidden_reason(rpr: Any | None, bg_fill: str | None) -> str | None:
         color = _attr(color_el, "val") if color_el is not None else None
         if color and _rgb_hidden(color, bg_fill):
             return "white_on_white"
+        # theme-color indirection: we don't resolve theme1.xml in v1, but a text color bound to a
+        # LIGHT theme slot on a default (white) background is a probable white-on-white — flag it at
+        # LOW confidence so it surfaces without gating (a documented residual, R-GUARD-theme).
+        theme = _attr(color_el, "themeColor") if color_el is not None else None
+        if theme and theme.lower() in _LIGHT_THEME and (bg_fill or "FFFFFF").upper() == "FFFFFF":
+            return "theme_light"
     sz = _child(rpr, "sz")
     if sz is not None:
         try:
@@ -214,14 +220,21 @@ def _hidden_reason(rpr: Any | None, bg_fill: str | None) -> str | None:
     return None
 
 
+_LIGHT_THEME = {"background1", "light1", "lt1", "bg1"}
+
+
 _REASON_MSG = {
     "vanish": "hidden run (w:vanish)",
     "webHidden": "web-hidden run (w:webHidden)",
     "white_on_white": "near-invisible run (text color matches background)",
+    "theme_light": "probable near-invisible run (light theme-color on white; theme unresolved)",
     "tiny_font": "sub-perceptual run (font ≤ 2pt)",
 }
 _REASON_ID = {"vanish": "DOCX-001", "webHidden": "DOCX-001",
-              "white_on_white": "DOCX-002", "tiny_font": "DOCX-003"}
+              "white_on_white": "DOCX-002", "theme_light": "DOCX-002", "tiny_font": "DOCX-003"}
+# theme_light is LOW-confidence (theme not resolved) so the gate clamps its bare-hidden WARNING;
+# a lexical imperative inside it still escalates via the span's scan_text pass.
+_LOW_CONF_REASONS = {"theme_light"}
 
 
 def _span_findings(runs: list[_Run], part: str) -> list[Finding]:
@@ -230,6 +243,7 @@ def _span_findings(runs: list[_Run], part: str) -> list[Finding]:
     findings: list[Finding] = []
     full = "".join(r.text for r in runs)
     hidden_chars = 0
+    hidden_imperative = False
     i = 0
     while i < len(runs):
         if runs[i].hidden_reason is None:
@@ -240,11 +254,15 @@ def _span_findings(runs: list[_Run], part: str) -> list[Finding]:
             j += 1
         group = runs[i:j]
         span_text = "".join(r.text for r in group)
-        hidden_chars += len(span_text)
         reason = group[0].hidden_reason or "vanish"
+        # a LOW-confidence guess (unresolved theme color) must not drive the gating mismatch umbrella
+        if reason not in _LOW_CONF_REASONS:
+            hidden_chars += len(span_text)
         det = _REASON_ID.get(reason, "DOCX-001")
         canon = canonical_text(span_text)
         imperative = lexical.has_imperative(span_text)
+        hidden_imperative = hidden_imperative or imperative
+        conf = Confidence.LOW if reason in _LOW_CONF_REASONS else Confidence.HIGH
         # bare hidden text is WARNING; hidden + imperative is the worm conjunction → CRITICAL
         if imperative:
             sev = Severity.CRITICAL
@@ -256,7 +274,7 @@ def _span_findings(runs: list[_Run], part: str) -> list[Finding]:
         loc = f"{part}#p[{group[0].para}]/r[{group[0].idx}-{group[-1].idx}]"
         findings.append(Finding(
             detection_id=det, kind=IssueKind.HIDDEN_CONTENT, severity=sev,
-            confidence=Confidence.HIGH,
+            confidence=conf,
             message=f"{_REASON_MSG.get(reason, 'hidden run')}: “{canon[:120]}”",
             locator=loc, hidden=True,
             detail={"detection_id": det, "hidden_reason": reason,
@@ -271,14 +289,21 @@ def _span_findings(runs: list[_Run], part: str) -> list[Finding]:
 
     if full and hidden_chars >= MIN_HIDDEN_SPAN:
         ratio = hidden_chars / len(full)
+        # The mismatch itself gates ONLY when the hidden content carries an imperative — the worm
+        # conjunction. Bare hidden text (ATS-gaming résumé keywords, watermarks, hidden helper text)
+        # is deceptive but not an injection: WARNING, so it surfaces for review without failing the
+        # gate. Factual/context poisoning in hidden text with no imperative verb is a documented
+        # residual — the WARNING still surfaces it. (Security round 3, R3-8.)
+        sev = Severity.ERROR if hidden_imperative else Severity.WARNING
         findings.append(Finding(
-            detection_id="DOCX-006", kind=IssueKind.HIDDEN_CONTENT, severity=Severity.ERROR,
+            detection_id="DOCX-006", kind=IssueKind.HIDDEN_CONTENT, severity=sev,
             confidence=Confidence.HIGH,
             message=(f"visible-vs-extracted mismatch: {hidden_chars} of {len(full)} chars "
                      f"({ratio:.0%}) are hidden from a human reader but visible to an extractor"),
             locator=part, hidden=True,
             detail={"detection_id": "DOCX-006", "hidden_chars": hidden_chars,
-                    "total_chars": len(full), "hidden_ratio": round(ratio, 3)}))
+                    "total_chars": len(full), "hidden_ratio": round(ratio, 3),
+                    "hidden_imperative": hidden_imperative}))
     return findings
 
 
@@ -308,6 +333,25 @@ def _field_findings(runs: list[_Run], part: str) -> list[Finding]:
     return findings
 
 
+def _visible_findings(runs: list[_Run], part: str) -> list[Finding]:
+    """Scan the VISIBLE runs too. Invisible-Unicode carriers (zero-width, bidi, Unicode TAG block)
+    are hidden by their OWN nature, independent of run styling, so they live in "visible" runs and
+    must be caught there (evasion E5). Lexical imperatives in visible text are surfaced at their
+    normal (advisory) severity as defense-in-depth — a plainly-visible imperative doesn't gate, but
+    a sub-threshold-small or theme-colored run that escaped structural classification still gets
+    caught here (evasion E4)."""
+    vis = "".join(r.text for r in runs if r.hidden_reason is None)
+    if not vis.strip():
+        return []
+    out: list[Finding] = []
+    for f in lexical.scan_text(vis, hidden=False) + scan_invisible(vis):
+        out.append(Finding(
+            detection_id=f.detection_id, kind=f.kind, severity=f.severity,
+            confidence=f.confidence, message=f.message,
+            locator=f"{part}/{f.locator}", hidden=f.hidden, detail=f.detail))
+    return out
+
+
 def scan_docx(path: str | Path) -> list[Finding]:
     """Scan a .docx. Raises MissingGuardDep if defusedxml is absent, ValueError on a malformed or
     hostile archive (both mapped to an errored FAIL by the reporter — fail closed)."""
@@ -325,6 +369,7 @@ def scan_docx(path: str | Path) -> list[Finding]:
         runs = _walk_docx(root)
         findings += _span_findings(runs, "word/document.xml")
         findings += _field_findings(runs, "word/document.xml")
+        findings += _visible_findings(runs, "word/document.xml")
     # headers/footers/notes: any hidden run there is equally a channel
     for name, xml in parts.items():
         if name == "word/document.xml":
@@ -340,6 +385,7 @@ def scan_docx(path: str | Path) -> list[Finding]:
             runs = _walk_docx(root)
             findings += _span_findings(runs, name)
             findings += _field_findings(runs, name)
+            findings += _visible_findings(runs, name)
     # comments + metadata: text the reader doesn't see in the body but an extractor ingests →
     # run the full lexical/invisible catalogue (DOCX-005).
     for name in ("word/comments.xml", "docProps/core.xml", "docProps/app.xml", "docProps/custom.xml"):
