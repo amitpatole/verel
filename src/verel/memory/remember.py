@@ -16,12 +16,16 @@ extracted, but **verified before trusted**.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from .extract import ChatFn, extract_facts
 from .principal import is_reserved_key
-from .view import MemoryKind, MemoryRecord, MemoryView, Trust, rejected_key
+from .view import MemoryKind, MemoryRecord, MemoryView, Trust, canon_value, rejected_key
+
+if TYPE_CHECKING:
+    from ..verdict.models import Report
 
 # Distinct AUTHENTICATED principals required to promote a fact by corroboration. ≥2 means one principal
 # repeating a claim never reaches VERIFIED. Configurable upward; never below 2 for the corroboration path.
@@ -70,7 +74,9 @@ class RememberResult:
 def remember_conversation(mem: MemoryView, transcript: object, *, scope: str, chat: ChatFn,
                           source: str = "", now: float = 0.0, min_sources: int = MIN_SOURCES,
                           attest: Attestor | None = None,
-                          authenticate: Authenticator | None = None) -> RememberResult:
+                          authenticate: Authenticator | None = None,
+                          guard: Report | None = None,
+                          tainted: Collection[str] | None = None) -> RememberResult:
     """Extract candidate facts from a conversation and let only GRADED facts compound into `mem`.
 
     A fact graduates `CANDIDATE → VERIFIED` ONLY when:
@@ -82,9 +88,33 @@ def remember_conversation(mem: MemoryView, transcript: object, *, scope: str, ch
     Corroboration still raises *confidence* (a ranking signal) via `write`; it just doesn't grant the
     trust tier on its own. A reserved key (`is_reserved_key`) or a collision with a server-managed
     non-FACT record (a SKILL/AuthorTrust/rule) is **refused** — an untrusted transcript can't touch
-    control state (round-5 lens-3 F1). A `REJECTED` fact is not re-promotable by corroboration."""
+    control state (round-5 lens-3 F1). A `REJECTED` fact is not re-promotable by corroboration.
+
+    Document-ingress guard (both params default None = exactly the prior behavior):
+      * `guard` — a `verel.guard` Report over the SOURCE document(s). If it FAILed, extraction is
+        REFUSED outright and `chat` is never called: the hostile transcript never reaches the
+        extractor LLM (fail closed). This is the anti-worm cut at the ingestion boundary.
+      * `tainted` — canonical span keys (from `verel.guard.taint_keys`) of hidden payloads found in
+        the source. Any fact whose canonical value contains a tainted key is refused AND tombstoned
+        against its record, so a later restate can't launder the payload into memory."""
     res = RememberResult()
+    if guard is not None and getattr(guard.verdict, "value", guard.verdict) == "fail":
+        # fail closed BEFORE the LLM: a document that failed the ingress scan is not extracted from.
+        res.refused.append(
+            f"guard: source document failed ingress scan ({len(guard.issues)} finding(s)) — "
+            "extraction refused, transcript never sent to the extractor")
+        return res
+    taint_keys = {t for t in (tainted or ()) if t}
     for fact in extract_facts(transcript, scope=scope, chat=chat, now=now, source=source):
+        if taint_keys:
+            hay = canon_value(f"{fact.subject} {fact.predicate} {fact.text}")
+            if any(t in hay for t in taint_keys):
+                # write then floor to REJECTED (delta=1.0) so the backend's own contradict path
+                # seeds the durable rejected-value tombstone — a later restate can't launder it in.
+                rec = mem.write(fact, ts=now)
+                mem.contradict(rec.id, delta=1.0)
+                res.refused.append(fact.text)
+                continue
         if is_reserved_key(fact.predicate, fact.scope):
             res.refused.append(fact.text)
             continue

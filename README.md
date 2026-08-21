@@ -8,7 +8,7 @@
   <a href="https://pypi.org/project/verel/"><img src="https://img.shields.io/pypi/v/verel?color=8b7cff&label=pip%20install%20verel&cacheSeconds=1800" alt="PyPI"></a>
   <a href="https://pepy.tech/projects/verel"><img src="https://static.pepy.tech/personalized-badge/verel?period=total&units=international_system&left_color=black&right_color=green&left_text=downloads" alt="PyPI Downloads"></a>
   <a href="https://amitpatole.github.io/verel/"><img src="https://img.shields.io/badge/docs-amitpatole.github.io-5ad1e6" alt="Docs"></a>
-  <img src="https://img.shields.io/badge/tests-1411%20passing-46d39a" alt="tests">
+  <img src="https://img.shields.io/badge/tests-1479%20passing-46d39a" alt="tests">
   <img src="https://img.shields.io/badge/ruff%20%2B%20mypy-clean-5ad1e6" alt="lint">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT">
   <img src="https://img.shields.io/badge/LLM-Ollama%20Cloud%20%C2%B7%20OpenAI-8b7cff" alt="LLM">
@@ -60,15 +60,16 @@ Default LLM is **Ollama Cloud** (`~/.config/ollama/key`, model `qwen3-coder:480b
 New here? **[5-minute tutorial →](docs/tutorial.md)**
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/amitpatole/verel/main/media/infographic.png" alt="Verel architecture — the six organs and the eval-driven loop" width="100%">
+  <img src="https://raw.githubusercontent.com/amitpatole/verel/main/media/infographic.png" alt="Verel architecture — the seven organs and the eval-driven loop" width="100%">
 </p>
 
-## The six organs
+## The seven organs
 
 | Organ | Module | What it does |
 |---|---|---|
 | 🧠 **Brain** | `verel.memory` | **Verified memory.** Facts extracted from a conversation are *graded* — trusted only after **attestation** or corroboration by **≥2 authenticated sources**, so a hallucination (or one bad actor) stays a `CANDIDATE` and never poisons a shared brain. A rejected value leaves a **durable tombstone keyed on the value itself** — restating, superseding, or replicating it can never launder it back to trusted (a property forged under red-teaming, pinned by regression tests). Trust state, **epistemic confidence**, and **retrieval strength** are three quantities that never collapse into one score: being recalled often makes a fact *reachable*, never *true*. Recall is **FTS5 BM25**, token-budgeted, graded-first, and fenced as untrusted data. Consolidates into rules; pluggable store (`VEREL_MEMORY_BACKEND`: SQLite / Postgres / Redis / LanceDB / hosted). → **[Memory in 5 min](docs/memory-quickstart.md)** · [vs Mem0/Engram/Zep](docs/comparison.md) |
 | 👁️ **Eyes** | `verel.senses` | **AgentVision** as a perception organ (DOM/contrast/OCR grounded) feeding both the verdict bus and the brain as one of many senses. |
+| 🛡️ **Immune (ingress)** | `verel.guard` | **Document-ingress guard.** Scans an untrusted document (docx / pptx / xlsx / odf / pdf / html / rtf / text) for hidden content and prompt injection **before an LLM ever reads it** — fully static, the document is data and is never interpreted. Catches the Copilot **"AI worm"** class: a hidden instruction (white-on-white text, a vanished run, a 1pt font, an invisible-Unicode carrier) that executes when the file enters context and replicates into generated files. The load-bearing signal is the **visible-vs-extracted mismatch** — text a human can't see but an extractor ingests — so it holds against novel phrasing a semantic filter can't promise. Structural hiding alone is advisory; **hiding *plus* an injection imperative gates** (the conjunction is the attack). Wires into memory as a **fail-closed ingress gate** (a FAILed document is never extracted from) and an anti-worm **propagation check** (a known hidden payload reappearing in a generated file is caught). Survived **5 adversarial rounds**, regression-pinned. The engine of the future **`immel`** organ, exposed today. → **[Guard →](docs/guard.md)** |
 | ⚖️ **Verdict bus** | `verel.verdict` | One schema for every sense, with an advisory **ceiling clamp**, **grader attestation**, scrubbed fingerprints, and strict-subset **stuck/progress** detection. |
 | 🚁 **Fleet** | `verel.fleet` | Agents managing agents — an **LLM manager** fans out, a scheduler runs workers in **isolated git worktrees** under budget, each gated by the bus. **Concurrent managers** are safe via **fencing leases** (a stale leader's writes are rejected) — enforced even at the remote by a **git pre-receive fencing sink** (a stale push is refused), and across machines by a **hosted control plane** (lease authority behind an HTTP API). **Multi-repo** changes run as one cross-linked DAG and commit as an **atomic saga** (a failure compensates the repos that already landed, in reverse). |
 | 🔧 **Tool-smith** | `verel.toolsmith` | Agents build their own tools: detect → scaffold → test → register → reuse, **sandboxed** (`bwrap`), admitted only on a passing attested eval. |
@@ -134,7 +135,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: amitpatole/verel@v1.9.4
+      - uses: amitpatole/verel@v1.10.0
         with:
           repo: .
           install: "-e .[dev]"     # your project deps so its tests import
@@ -144,7 +145,7 @@ jobs:
 
 ```yaml
 - repo: https://github.com/amitpatole/verel
-  rev: v1.9.4
+  rev: v1.10.0
   hooks: [{ id: verel-precommit }]
 ```
 

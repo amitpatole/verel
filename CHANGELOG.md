@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.10.0 — Guard: document-ingress defense (the "AI worm" scanner)
+
+- **New organ surface `verel.guard` — a static hidden-content / prompt-injection scanner for
+  untrusted documents, graded BEFORE an LLM ever reads them.** Closes the ingress gap behind the
+  published Copilot "AI worm" attack (a hidden instruction — white-on-white text, a vanished run, a
+  1pt font, an invisible-Unicode carrier — that executes when a document enters context and
+  replicates into generated files). The document is treated as data and is never interpreted; no
+  model runs in the detection path. The load-bearing signal is the **visible-vs-extracted
+  mismatch** — text hidden from a human reader but ingested by an extractor.
+  - `verel guard scan <paths…>` (exit 1 on FAIL) and `verel guard demo`; `grade_docs()` API;
+    `verel_guard_scan` MCP tool. Formats: docx/pptx/xlsx/odf/pdf/html/markdown/rtf/text/image
+    metadata, with a bounded text-scan fallback so nothing enters unscanned.
+  - **Severity policy (FP control):** structural hiding alone is advisory (`WARNING`); hiding **plus
+    an injection imperative** gates (`CRITICAL`). Legitimate hidden text (tracked changes, template
+    fields, résumé keyword-stuffing, white-on-dark cells) passes.
+  - **Fail-closed memory ingress:** `remember_conversation(guard=…, tainted=…)` — a FAILed source
+    document is never extracted from (the extractor LLM is never called), and known payloads are
+    tombstoned so a restate can't launder them in. Both params default `None` = prior behavior.
+  - **Anti-worm propagation check:** `check_propagation(artifact, prior=…)` catches a known hidden
+    payload reappearing in a generated file (the replication step).
+  - Every scan returns a signed `RunReceipt` (verifiable via `verel.verdict.gate.verify_receipt`).
+  - New `GraderKind.INJECTION` + `IssueKind.HIDDEN_CONTENT/INJECTION/EXFIL_VECTOR` (additive;
+    `schema_version` unchanged — an older verel deserializing a report with `grader="injection"`
+    raises, the same accepted risk as every prior grader-kind addition).
+  - Extras: `verel[guard]` (defusedxml, for OOXML/ODF; text/md/html/rtf are dependency-free),
+    `verel[guard-pdf]` (pypdf), `verel[guard-media]` (Pillow) — all lazy-imported and fail-closed.
+  - The engine is also re-exported as `immel.document`, the first sense of the future immune organ.
+  - Survived 5 independent adversarial rounds (split-across-runs payloads, homoglyph/zero-width
+    evasion, multi-layer base64, HTML-entity encoding, theme-color and sub-threshold-font tricks),
+    each fixed and regression-pinned. Honest limits documented (visible natural-language injection,
+    text-as-image/OCR → the eyes organ, theme/style-chain color indirection at low confidence).
+
 ## 1.9.4 — fix: the memory audit chain follows the store
 
 - **The memory audit chain now follows the store** (default-behaviour change, fixes an

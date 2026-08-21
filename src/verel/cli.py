@@ -154,6 +154,29 @@ def _heal(args) -> int:
     return 0 if res.healed else 1
 
 
+def _guard(args) -> int:
+    """Static document-ingress scan for hidden content / prompt injection. `scan` grades one or more
+    files and prints grounded findings (exit 1 on FAIL); `demo` runs a no-API-key walkthrough."""
+    if args.guard_cmd == "demo":
+        from .guard.demo import run_demo
+        return run_demo()
+
+    from .guard import grade_docs
+    report = grade_docs(args.paths)
+    if args.json:
+        import json as _json
+        print(_json.dumps(report.model_dump(mode="json"), indent=2))
+        return 1 if report.verdict.value == "fail" else 0
+
+    from .memory.view import canonical_text as _s  # terminal-safe render of untrusted snippets
+    print(f"{report.verdict.value.upper()}: {_s(report.summary)}")
+    for i in report.issues:
+        det = i.detail.get("detection_id", "?")
+        print(f"  [{i.severity.value:<8}] {det:<10} {_s(str(i.locator or ''))}")
+        print(f"             {_s(i.message)}")
+    return 1 if report.verdict.value == "fail" else 0
+
+
 def _memory(args) -> int:
     """Operator review of the memory trust layer — the human-in-the-loop path that resolves
     CANDIDATE facts. CLI-only by design: an agent must not be able to approve its own facts over
@@ -442,6 +465,14 @@ def main(argv=None) -> int:
     rl.add_argument("--write", action="store_true",
                     help="write/append the snippet to its file in the current repo (else print)")
 
+    gd = sub.add_parser("guard", help="scan untrusted documents for hidden content / prompt injection "
+                                      "BEFORE an LLM sees them (docx + text; static, no API key)")
+    gdsub = gd.add_subparsers(dest="guard_cmd", required=True)
+    gds = gdsub.add_parser("scan", help="scan one or more documents; exit 1 on FAIL")
+    gds.add_argument("paths", nargs="+", help="document paths to scan")
+    gds.add_argument("--json", action="store_true", help="emit the full Report as JSON")
+    gdsub.add_parser("demo", help="no-API-key walkthrough: hostile doc → grounded FAIL → fixed → PASS")
+
     va = sub.add_parser("verify-access",
                         help="OPT-IN: query what the cloud ACTUALLY grants (needs cloud read creds; "
                              "makes live provider calls — not an offline gate)")
@@ -470,6 +501,8 @@ def main(argv=None) -> int:
         return ci_main(args.ci_args)
     if args.cmd == "memory":
         return _memory(args)
+    if args.cmd == "guard":
+        return _guard(args)
     if args.cmd == "verify":
         return _verify(args)
     if args.cmd == "mcp":

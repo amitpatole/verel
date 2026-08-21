@@ -280,12 +280,14 @@ def supersede_detail(existing: MemoryRecord, record: MemoryRecord, *, ts: float)
         record.with_detail(rejected_saturated=True)
 
 
-def record_rejection(r: MemoryRecord) -> bool:
-    """Append `r.text`'s bounded canonical key to `r`'s `rejected_values` ledger (in place).
+def record_rejection(r: MemoryRecord, value: str | None = None) -> bool:
+    """Append a value's bounded canonical key to `r`'s `rejected_values` ledger (in place).
     Returns True when the ledger changed (caller must persist `r`). Shared by every backend's
-    contradict → REJECTED transition so the anti-laundering ledger exists on all of them."""
+    contradict → REJECTED transition so the anti-laundering ledger exists on all of them. `value`
+    defaults to `r.text`; the document guard passes a hidden-span value so a payload found at
+    ingress is tombstoned against the record before any restate can launder it back."""
     rejected = list(r.detail.get("rejected_values", []))
-    cv = rejected_key(r.text)
+    cv = rejected_key(value if value is not None else r.text)
     if cv in rejected:
         return False
     rejected.append(cv)

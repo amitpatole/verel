@@ -12,6 +12,7 @@ The tool DISPATCH layer (`TOOLS`, `dispatch`) is pure and testable without the `
   verel_remember_conversation  extract facts from a conversation → only GRADED facts compound (LLM key)
   verel_ci_check     run the inner-loop CI stage on a repo → verdict + issues
   verel_iac_check    grade a terraform plan / K8s manifests offline → IaC drift + cloud-IAM risks
+  verel_guard_scan   scan untrusted documents for hidden content / prompt injection before an LLM reads them
   verel_build_tool   detect→scaffold→test→register a tool (needs an LLM key)
 
 `gate` is the conscience: the agent can no longer self-declare "done" — it gets a real verdict with
@@ -323,6 +324,35 @@ def _tool_iac_check(args: dict) -> dict:
         "verdict": rep.verdict.value,
         "issues": [{"grader": i.source.value, "severity": i.severity.value, "locator": i.locator,
                     "message": i.message, "rule_id": i.detail.get("rule_id", "")} for i in rep.issues],
+    }
+
+
+def _tool_guard_scan(args: dict) -> dict:
+    """Scan untrusted documents for hidden content / prompt injection BEFORE they enter an LLM
+    context. Fully static — the document is treated as data, never interpreted. Detects the
+    visible-vs-extracted mismatch (text hidden from a human but visible to an extractor), invisible-
+    Unicode carriers, and injection/exfil/propagation imperatives. Paths must live inside the repo."""
+    repo = args.get("repo")
+    if not repo or not isinstance(repo, str) or not os.path.isdir(os.path.abspath(repo)):
+        return _err("repo (existing directory) is required")
+    paths = args.get("paths")
+    if not isinstance(paths, list) or not paths or not all(isinstance(p, str) for p in paths):
+        return _err("paths (a non-empty list of document paths inside the repo) is required")
+    base = os.path.abspath(repo)
+    resolved: list[str] = []
+    for p in paths:
+        ap = os.path.abspath(os.path.join(base, p))
+        if os.path.commonpath([ap, base]) != base:
+            return _err("path escapes the repo")
+        resolved.append(ap)
+    from .guard import grade_docs
+    rep = grade_docs(resolved)
+    return {
+        "verdict": rep.verdict.value,
+        "summary": rep.summary,
+        "issues": [{"detection_id": i.detail.get("detection_id", ""), "severity": i.severity.value,
+                    "locator": i.locator, "message": i.message,
+                    "hidden": bool(i.detail.get("hidden"))} for i in rep.issues],
     }
 
 
@@ -826,6 +856,15 @@ TOOLS: dict[str, dict[str, Any]] = {
                         "complexity_budget": {"type": "integer"}}, "required": ["repo", "files"]},
                     "description": "Over-engineering smell: over-complex functions gate; speculative "
                                    "abstractions are flagged. Deterministic, no code execution."},
+    "verel_guard_scan": {"fn": _tool_guard_scan, "schema": {"type": "object", "properties": {
+                             "repo": _REPO,
+                             "paths": {"type": "array", "items": {"type": "string"},
+                                       "description": "document paths (inside the repo) to scan"}},
+                         "required": ["repo", "paths"]},
+                         "description": "Scan untrusted documents (docx/pptx/xlsx/odf/pdf/html/rtf/txt) "
+                                        "for hidden content / prompt injection BEFORE an LLM reads "
+                                        "them. Static, no interpretation; hidden text + an imperative "
+                                        "gates. Catches the Copilot 'AI worm' ingress vector."},
     "verel_recall": {"fn": _tool_recall, "schema": _RECALL_SCHEMA,
                      "description": "Read the shared verified brain (resolves down the scope lattice)."},
     "verel_remember": {"fn": _tool_remember, "schema": _REMEMBER_SCHEMA,

@@ -37,12 +37,13 @@ success with no evidence — can't mint green.
 - **Just want a memory layer for a single agent with a human curator?** → Verel works, but **Mem0** is
   simpler. Here's the honest [when-to-use comparison](comparison.md).
 
-## The six organs
+## The seven organs
 
 | Organ | Module | What it does |
 |---|---|---|
 | 🧠 **Brain** | `verel.memory` | Memory that compounds — only verified facts/skills graduate (held-out, attested promotion gate); lifecycle controls keep it from becoming a junk drawer. **Pluggable backend** (`VEREL_MEMORY_BACKEND`): local SQLite, a shared hosted brain, or an external DB. |
 | 👁️ **Eyes** | `verel.senses` | **AgentVision** as a perception organ (DOM/contrast/OCR grounded, intent conformance, temporal `watch`) feeding the verdict bus and the brain. |
+| 🛡️ **Immune (ingress)** | `verel.guard` | **Document-ingress guard** — scans an untrusted document (docx/pptx/xlsx/odf/pdf/html/rtf/text) for hidden content and prompt injection *before an LLM reads it*, catching the Copilot "AI worm" class on the visible-vs-extracted mismatch. Fail-closed into memory + an anti-worm propagation check. → **[Guard](guard.md)** |
 | ⚖️ **Verdict bus** | `verel.verdict` | One schema for every sense — advisory ceiling clamp, grader attestation, strict-subset stuck/progress. |
 | 🚁 **Fleet** | `verel.fleet` | Agents managing agents — LLM manager fans out, workers in isolated git worktrees, each gated by the bus. |
 | 🔧 **Tool-smith** | `verel.toolsmith` | Agents build their own tools, sandboxed, admitted only on a passing attested eval. |
@@ -73,7 +74,7 @@ into memory; then the eyes look again.
 - **[5-minute tutorial](tutorial.md)** — gate a repo, heal failing tests, watch a bug get remembered.
 - **[Use cases](use-cases.md)** — where Verel fits: agent loops, CI/CD, fleets, shared memory.
 - **[Real-world scenarios](examples.md)** — runnable demos with real captured output for each.
-- **[Architecture](ARCHITECTURE.md)** — the six organs and the eval-driven loop.
+- **[Architecture](ARCHITECTURE.md)** — the seven organs and the eval-driven loop.
 
 Install: `pip install verel` · Source: [GitHub](https://github.com/amitpatole/verel) ·
 Package: [PyPI](https://pypi.org/project/verel/) · License: MIT.

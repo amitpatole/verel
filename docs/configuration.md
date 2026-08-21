@@ -73,6 +73,7 @@ out of the box.
 | `VEREL_ALLOW_BUILD_TOOL` | Set to `1` to authorize `verel_build_tool` over MCP. The tool runs LLM-authored code under OS isolation; absent = tool refused at dispatch (operator opt-in required). | — |
 | `QUINE_RECEIPT_STORE` | Root directory for the crash-atomic `ReceiptStore` (WAL + hash-chain). Used by QuineOS and any caller that commits receipts to disk. | `~/.local/share/quine/receipts` |
 | `VEREL_MEMORY_AUDIT` | Path of the hash-chained memory mutation audit log written by `verel memory` (and any `AuditedMemory` wrapper). When unset, the chain **follows the store**: a non-default local `VEREL_MEMORY_STORE` gets a sidecar `<store>.audit.jsonl` next to that db, so a temp/test store never pollutes the operator's global audit history. | `~/.config/verel/memory_audit.jsonl` (default brain) |
+| `VEREL_GUARD_MAX_DOC_BYTES` | Max size of a document the [`verel guard`](guard.md) ingress scanner will read. A file over the cap fails closed (an errored FAIL) before it is opened — every attacker-controlled resource is bounded before the expensive op. | `10485760` (10 MiB) |
 
 ## Memory backend
 

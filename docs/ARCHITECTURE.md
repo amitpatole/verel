@@ -15,7 +15,7 @@ see the [changelog](https://github.com/amitpatole/verel/blob/main/CHANGELOG.md).
 
 ---
 
-## The six organs
+## The seven organs
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/amitpatole/verel/main/media/architecture.png" alt="Verel system architecture" width="100%">
@@ -25,6 +25,7 @@ see the [changelog](https://github.com/amitpatole/verel/blob/main/CHANGELOG.md).
 |---|---|---|
 | **Verdict bus** | `verel.verdict` | One `Report`/`Percept` schema for every sense; `gate()` reduces them to a verdict. |
 | **Eyes / Senses** | `verel.senses` | AgentVision as a grounded perception adapter, plus the percept log. |
+| **Immune / Guard** | `verel.guard` | Document-ingress defense: static hidden-content / prompt-injection scanning of untrusted documents before an LLM reads them (the "AI worm" class); fail-closed into memory + an anti-worm propagation check. Engine of the future `immel` organ. |
 | **Brain** | `verel.memory` | The trust layer over a memory backend: what is believed, how strongly, and what compounds. |
 | **Fleet** | `verel.fleet` | Agents managing agents — manager fan-out, scheduler, isolated worktrees. |
 | **Tool-smith** | `verel.toolsmith` | Agents building, testing, and registering their own tools. |
@@ -242,7 +243,7 @@ Default LLM provider is Ollama Cloud; OpenAI is the bundled fallback, and the pr
 
 ## Roadmap
 
-**Done (all six organs, end-to-end):** verdict bus with attestation; AgentVision sight
+**Done (all seven organs, end-to-end):** verdict bus with attestation; AgentVision sight
 adapter; the memory trust layer with consolidation + promotion gate (LocalMemory and mem0);
 semantic recall; the fleet (manager + scheduler + worktrees); the tool-smith with subprocess
 and container isolation; the full CI/CD stage table with self-healing and rollback; a

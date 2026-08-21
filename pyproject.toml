@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "verel"
-version = "1.9.4"
+version = "1.10.0"
 description = "The agent framework where nothing is done until a grader returns a verdict — verification + grounded perception (AgentVision eyes), compounding memory, a fleet, agent-built tooling, and agent-run CI/CD."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -48,6 +48,15 @@ telecom = ["pyyaml>=6", "defusedxml>=0.7"]
 # planner (plan / classify / verify-desired) needs NONE of it — ncclient is lazy-imported only for a live
 # apply, so `verel[telecom]` alone still plans + dry-runs.
 telecom-actuator = ["ncclient>=0.6"]
+# Document-ingress guard (verel.guard): static hidden-content / prompt-injection scanning of untrusted
+# documents BEFORE an LLM sees them. defusedxml hardens OOXML/ODF (docx/pptx/xlsx/odt) XML parsing
+# against XXE / entity-expansion; it is lazy-imported and OOXML scanning FAILS CLOSED without it.
+# Plain text / markdown / HTML / RTF scanning is dependency-free (no extra needed).
+guard = ["defusedxml>=0.7"]
+# PDF and image-metadata scanning need heavier parsers; kept separate so the base `guard` extra
+# (docx/pptx/xlsx/odf + dep-free text/html/rtf) stays light. Both lazy-imported, fail-closed.
+guard-pdf = ["pypdf>=4"]
+guard-media = ["pillow>=10"]
 dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.6", "mypy>=1.10", "bandit>=1.7"]  # bandit = the pre-merge `security` grader; must be installed for that gate to run (else it fails closed)
 
 [project.scripts]

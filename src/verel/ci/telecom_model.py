@@ -45,59 +45,23 @@ def _yaml_load(text: str) -> object:
         raise ValueError(f"invalid YAML artifact: {type(e).__name__}") from e
 
 
-_MAX_XML_ELEMENTS = 1_000_000
-_MAX_XML_DEPTH = 64
-_MAX_XML_TEXT = 4096
-_MAX_XML_ATTRS = 4096  # per-element attribute count (defense-in-depth, post-parse)
-
-
+# The hardened parser lives in `verel._xmlsafe` (shared with the document guard); this wrapper keeps
+# the telecom-specific missing-dep hint and exception type exactly as before the factoring.
 def xml_root(raw: str) -> Any:
-    """Parse an UNTRUSTED XML artifact (PM-XML / NETCONF-NRM) SAFELY. Uses defusedxml with DTD, external
-    entities, and entity expansion ALL forbidden (kills XXE + billion-laughs at the door), then walks
-    once to bound element count/depth/text (defusedxml does not bound those). Fails closed to a clean
-    ValueError — never a raw parser traceback on attacker input."""
+    """Parse an UNTRUSTED XML artifact (PM-XML / NETCONF-NRM) SAFELY — see `verel._xmlsafe.xml_root`.
+    Fails closed: `MissingTelecomDep` when defusedxml is absent, clean ValueError on hostile input."""
+    from .._xmlsafe import MissingXmlDep
+    from .._xmlsafe import xml_root as _xml_root
     try:
-        from defusedxml import DefusedXmlException  # type: ignore[import-untyped]
-        from defusedxml.ElementTree import fromstring  # type: ignore[import-untyped]
-    except ModuleNotFoundError as e:  # pragma: no cover - exercised via the install-hint test
-        raise MissingTelecomDep(
-            "telecom PM-XML / NETCONF adapters need `verel[telecom]` (defusedxml)"
-        ) from e
-    from xml.etree.ElementTree import ParseError
-    # Cheap PRE-parse bound: `fromstring` materializes the WHOLE tree before any post-walk guard runs,
-    # so a 24 MB artifact would balloon to ~GBs of RSS before we could reject it (red-team R1 F1 / R2 —
-    # the "guard after the expensive op" shape). The parse cost scales with elements AND attributes;
-    # '<' bounds elements and '=' bounds attribute assignments (both over-count, i.e. conservative), so
-    # their sum is a cheap (~tens of ms) upper bound on parse work — reject here, before parsing.
-    s = raw or ""
-    if s.count("<") + s.count("=") > _MAX_XML_ELEMENTS:
-        raise ValueError("oversized XML artifact (element/attribute count)")
-    try:
-        root = fromstring(raw or "", forbid_dtd=True, forbid_entities=True, forbid_external=True)
-    except (ParseError, DefusedXmlException, RecursionError, ValueError) as e:
-        raise ValueError(f"invalid XML artifact: {type(e).__name__}") from e
-    n = 0
-    stack = [(root, 1)]
-    while stack:
-        el, depth = stack.pop()
-        n += 1
-        if n > _MAX_XML_ELEMENTS:
-            raise ValueError("oversized XML artifact (element count)")
-        if depth > _MAX_XML_DEPTH:
-            raise ValueError("over-deep XML artifact")
-        if el.text and len(el.text) > _MAX_XML_TEXT:
-            raise ValueError("oversized XML text node")
-        if len(el.attrib) > _MAX_XML_ATTRS:
-            raise ValueError("over-attributed XML element")
-        for child in el:
-            stack.append((child, depth + 1))
-    return root
+        return _xml_root(raw, dep_hint="telecom PM-XML / NETCONF adapters need `verel[telecom]` (defusedxml)")
+    except MissingXmlDep as e:  # pragma: no cover - exercised via the install-hint test
+        raise MissingTelecomDep(str(e)) from e
 
 
 def local_name(tag: object) -> str:
     """The namespace-stripped local element name (vendors mangle NRM/PM-XML namespaces; match locally)."""
-    t = str(tag)
-    return t.rsplit("}", 1)[-1] if "}" in t else t
+    from .._xmlsafe import local_name as _local_name
+    return _local_name(tag)
 
 
 @dataclass(frozen=True)
