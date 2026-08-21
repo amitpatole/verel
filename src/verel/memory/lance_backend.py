@@ -428,4 +428,6 @@ class LanceMemory(MemoryView):
         with self._lock:
             self._closed = True
             self._tbl = None
-            self._db = None
+            # nulled only on close; a newer lancedb types connect() as non-Optional DBConnection, so
+            # this teardown assignment needs the ignore (the attr is a live connection in normal use).
+            self._db = None  # type: ignore[assignment]
