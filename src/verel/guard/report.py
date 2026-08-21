@@ -40,18 +40,41 @@ def _issue(f: Finding, file: str) -> Issue:
     )
 
 
+# OOXML/ODF suffixes routed to their structural scanners; text-like formats get the HTML/RTF/plain
+# scanners; anything unrecognized falls back to a bounded text scan so NOTHING enters unscanned.
 def _scan_one(path: Path) -> list[Finding]:
     suffix = path.suffix.lower()
     if suffix == ".docx":
         from .ooxml import scan_docx
         return scan_docx(path)
-    # text-like and unknown formats: bounded read → lexical + invisible (dependency-free)
-    from .invisible import scan_invisible
-    from .lexical import scan_text
+    if suffix == ".pptx":
+        from .ooxml import scan_pptx
+        return scan_pptx(path)
+    if suffix == ".xlsx":
+        from .ooxml import scan_xlsx
+        return scan_xlsx(path)
+    if suffix in (".odt", ".ods", ".odp"):
+        from .odf import scan_odf
+        return scan_odf(path)
+    if suffix == ".pdf":
+        from .pdf import scan_pdf
+        return scan_pdf(path)
+    if suffix in (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".webp", ".gif"):
+        from .media import scan_image
+        return scan_image(path)
+    # text-like and unknown formats: bounded read → the right text scanner (dependency-free)
     raw = path.read_bytes()[: MAX_DOC_BYTES + 1]
     if len(raw) > MAX_DOC_BYTES:
         raise ValueError(f"document exceeds size cap ({MAX_DOC_BYTES} bytes)")
     text = raw.decode("utf-8", "replace")
+    if suffix in (".html", ".htm", ".xhtml") or "<html" in text[:2000].lower():
+        from .html_md import scan_html
+        return scan_html(text)
+    if suffix == ".rtf" or text[:6] == "{\\rtf1":
+        from .rtf import scan_rtf
+        return scan_rtf(text)
+    from .invisible import scan_invisible
+    from .lexical import scan_text
     return scan_text(text) + scan_invisible(text)
 
 

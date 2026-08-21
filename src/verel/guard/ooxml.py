@@ -362,3 +362,54 @@ def scan_docx(path: str | Path) -> list[Finding]:
 def _strip_tags(xml: str) -> str:
     import re
     return re.sub(r"<[^>]+>", " ", xml)
+
+
+def _scan_text_parts(path: Path, patterns: tuple[str, ...], hidden_parts: tuple[str, ...],
+                     dep_hint: str) -> list[Finding]:
+    """Shared pptx/xlsx path: parse each allowlisted part safely, then run the lexical/invisible
+    catalogue over its text. Parts in `hidden_parts` (notes, comments, metadata, shared strings) are
+    scanned as hidden channels (imperatives there escalate). Fails closed without defusedxml."""
+    from .._xmlsafe import MissingXmlDep, xml_root
+    parts = _safe_parts(path, patterns)
+    findings: list[Finding] = []
+    for name, xml in parts.items():
+        try:
+            xml_root(xml, dep_hint=dep_hint, max_text=MAX_XML_TEXT)
+        except MissingXmlDep as e:
+            raise MissingGuardDep(str(e)) from e
+        except ValueError:
+            continue
+        text = _strip_tags(xml)
+        is_hidden = any(fnmatch.fnmatch(name, h) for h in hidden_parts)
+        for f in lexical.scan_text(text, hidden=is_hidden) + scan_invisible(text):
+            findings.append(Finding(
+                detection_id=f.detection_id, kind=f.kind, severity=f.severity,
+                confidence=f.confidence, message=f"{name}: {f.message}",
+                locator=f"{name}/{f.locator}", hidden=f.hidden or is_hidden, detail=f.detail))
+    return findings
+
+
+def scan_pptx(path: str | Path) -> list[Finding]:
+    """Scan a .pptx: slide text, speaker notes (hidden channel), and metadata."""
+    return _scan_text_parts(
+        Path(path), _PPTX_PARTS,
+        hidden_parts=("ppt/notesSlides/*", "docProps/*"),
+        dep_hint="scanning OOXML documents needs `verel[guard]` (defusedxml)")
+
+
+def scan_xlsx(path: str | Path) -> list[Finding]:
+    """Scan a .xlsx: shared strings + sheet text (hidden sheets/rows are an out-of-body channel)."""
+    import re as _re
+    findings = _scan_text_parts(
+        Path(path), _XLSX_PARTS,
+        hidden_parts=("xl/sharedStrings.xml", "xl/comments*.xml", "docProps/*"),
+        dep_hint="scanning OOXML documents needs `verel[guard]` (defusedxml)")
+    # a veryHidden/hidden worksheet is the spreadsheet analogue of a vanished run
+    parts = _safe_parts(Path(path), ("xl/workbook.xml",))
+    wb = parts.get("xl/workbook.xml", "")
+    if _re.search(r'state\s*=\s*"(?:very)?hidden"', wb, _re.IGNORECASE):
+        findings.append(Finding(
+            detection_id="XLSX-001", kind=IssueKind.HIDDEN_CONTENT, severity=Severity.WARNING,
+            confidence=Confidence.MEDIUM, message="workbook contains a hidden/veryHidden worksheet",
+            locator="xl/workbook.xml", hidden=True, detail={"detection_id": "XLSX-001"}))
+    return findings
