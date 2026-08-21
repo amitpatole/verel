@@ -13,6 +13,7 @@ The engine lives here (fastest path to a shipped, tested defense) behind a `Sens
 from __future__ import annotations
 
 from .model import CATALOG_VERSION, Finding, MissingGuardDep
+from .propagate import check_propagation, taint_keys
 from .report import grade_docs
 from .sense import DocumentGuard
 
@@ -21,8 +22,10 @@ __all__ = [
     "DocumentGuard",
     "Finding",
     "MissingGuardDep",
+    "check_propagation",
     "grade_docs",
     "scan_text",
+    "taint_keys",
 ]
 
 
