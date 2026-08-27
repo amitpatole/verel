@@ -177,6 +177,26 @@ def _guard(args) -> int:
     return 1 if report.verdict.value == "fail" else 0
 
 
+def _fmt_when(ts: float) -> str:
+    """A UTC ISO instant for a bi-temporal readout; `0`/open renders as 'now'."""
+    from datetime import datetime, timezone
+    if not ts:
+        return "now"
+    try:
+        return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except (OverflowError, OSError, ValueError):
+        return str(ts)
+
+
+def _render_asof(r) -> str:
+    """One line for an as-of snapshot: value, its VALID interval, and trust tier. Untrusted text is
+    sanitized by the caller (`canonical_text`)."""
+    lo = _fmt_when(r.valid_from or r.created_ts)
+    hi = _fmt_when(r.valid_to) if r.valid_to else "open"
+    head = f"{r.subject} {r.predicate}".strip()
+    return f"{head}: {r.text}  [{lo} .. {hi}]  ({r.trust.value})"
+
+
 def _memory(args) -> int:
     """Operator review of the memory trust layer — the human-in-the-loop path that resolves
     CANDIDATE facts. CLI-only by design: an agent must not be able to approve its own facts over
@@ -265,6 +285,30 @@ def _memory(args) -> int:
             return 1
         print(f"OK  {_s(rec.id)} -> {rec.trust.value} (durable tombstone — this value can no longer "
               f"be recalled or re-promoted)")
+        return 0
+    if args.memory_cmd in ("recall", "members"):
+        import time as _time
+
+        from .memory import members_as_of, parse_when, recall_as_of
+        kind = MemoryKind(args.kind) if args.kind else None
+        if args.as_of:
+            as_of = parse_when(args.as_of)
+            if as_of is None:
+                print(f"-- could not parse --as-of {args.as_of!r} (use ISO-8601 or epoch seconds)")
+                return 2
+        else:
+            as_of = _time.time()  # default: "as of now" — current open-interval values
+        when = _fmt_when(as_of)
+        if args.memory_cmd == "recall":
+            recs = recall_as_of(mem, args.query, as_of=as_of, scope=args.scope, kind=kind, k=args.k)
+            print(f"as of {when} — {len(recs)} record(s) for {args.query!r}:")
+        else:
+            recs = members_as_of(mem, predicate=args.predicate, as_of=as_of, value=args.value,
+                                 scope=args.scope, kind=kind)
+            held = f"={args.value!r}" if args.value else ""
+            print(f"as of {when} — {len(recs)} holder(s) of {args.predicate!r}{held}:")
+        for r in recs:
+            print("  " + _s(_render_asof(r)))
         return 0
     return 2
 
@@ -437,6 +481,20 @@ def main(argv=None) -> int:
     mau.add_argument("--record-id", help="filter entries to one record id")
     mau.add_argument("--limit", type=int, default=50)
     mau.add_argument("--verify", action="store_true", help="verify the hash chain end-to-end")
+    mrc = mmsub.add_parser("recall", help="bi-temporal recall — what was believed about a query AS OF "
+                                          "a past instant (point-in-time; read-only)")
+    mrc.add_argument("query", help="text to match (subject/predicate/value tokens)")
+    mrc.add_argument("--as-of", help="ISO-8601 or epoch seconds; default = now")
+    mrc.add_argument("--scope", help="filter to one scope (also sees global)")
+    mrc.add_argument("--kind", help="filter to one kind (fact|design_rule|schema|failure|skill)")
+    mrc.add_argument("-k", type=int, default=5, help="max records to return")
+    mmb = mmsub.add_parser("members", help="set-membership as-of — every subject holding a predicate "
+                                           "(optionally =value) at a past instant (e.g. who was admin then)")
+    mmb.add_argument("--predicate", required=True, help="the relation (e.g. role)")
+    mmb.add_argument("--value", help="filter to holders of this exact value (e.g. admin)")
+    mmb.add_argument("--as-of", help="ISO-8601 or epoch seconds; default = now")
+    mmb.add_argument("--scope", help="filter to one scope (also sees global)")
+    mmb.add_argument("--kind", help="filter to one kind (fact|design_rule|schema|failure|skill)")
     mmsub.add_parser("rubric", help="self-assess the memory against the agent-memory-atlas rubric "
                                     "(7 binary dimensions, live behavioural probes)")
 

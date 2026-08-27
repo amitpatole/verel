@@ -12,8 +12,14 @@ Runs offline, no API key:
 """
 from __future__ import annotations
 
-from verel.memory import LocalMemory, recall_as_of, value_as_of
-from verel.memory.view import MemoryKind, MemoryRecord
+from verel.memory import (
+    LocalMemory,
+    members_as_of,
+    parse_extracted_facts,
+    recall_as_of,
+    value_as_of,
+)
+from verel.memory.view import MemoryKind, MemoryRecord, make_id, make_key
 
 JAN, JUN, TODAY = 1_700_000_000.0, 1_705_000_000.0, 1_710_000_000.0
 
@@ -21,6 +27,12 @@ JAN, JUN, TODAY = 1_700_000_000.0, 1_705_000_000.0, 1_710_000_000.0
 def fact(text: str) -> MemoryRecord:
     return MemoryRecord(kind=MemoryKind.FACT, subject="server", predicate="region",
                         text=text, scope="repo:acme")
+
+
+def role(subject: str, value: str) -> MemoryRecord:
+    key = make_key(subject, "role", "repo:acme")
+    return MemoryRecord(id=make_id(key), kind=MemoryKind.FACT, subject=subject, predicate="role",
+                        text=value, scope="repo:acme", subj_pred_key=key)
 
 
 def main() -> None:
@@ -47,6 +59,28 @@ def main() -> None:
 
     # value_as_of is the pure reconstruction primitive underneath recall_as_of.
     print("\nvalue_as_of(March):", value_as_of(current, (JAN + JUN) / 2).text)
+
+    # --- valid-time CAPTURE + set-membership as-of ("who was admin THEN?") -----------
+    print("\n--- roles over time (valid-time captured from content) ---")
+    # Extraction reads the stated dates straight into valid_from/valid_to (fail-safe parsed):
+    captured = parse_extracted_facts(
+        '[{"subject":"alice","predicate":"role","object":"admin",'
+        '"valid_from":"2024-01-03","valid_to":"2024-06-01"}]', scope="repo:acme")
+    r = captured[0]
+    print(f"  extracted: {r.subject} {r.predicate}={r.text}  "
+          f"valid [{r.valid_from:.0f} .. {r.valid_to:.0f})  (not 'when we learned it')")
+
+    # A role is a set-valued relation: alice was admin then demoted; bob is owner throughout.
+    mem2 = LocalMemory(":memory:")
+    mem2.write(role("alice", "admin"), ts=JAN)
+    mem2.write(role("alice", "member"), ts=JUN)      # demoted in June
+    mem2.write(role("bob", "owner"), ts=JAN)
+    for label, t in [("March", (JAN + JUN) / 2), ("today", TODAY)]:
+        admins = members_as_of(mem2, predicate="role", value="admin", as_of=t, scope="repo:acme")
+        owners = members_as_of(mem2, predicate="role", value="owner", as_of=t, scope="repo:acme")
+        print(f"  as_of {label:<6} -> admins={[a.subject for a in admins]}  "
+              f"owners={[o.subject for o in owners]}")
+    print("  → 'alice was an admin THEN' and 'bob is the current owner NOW' — history intact.")
 
 
 if __name__ == "__main__":

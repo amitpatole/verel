@@ -425,6 +425,56 @@ def value_as_of(r: MemoryRecord, t: float) -> MemoryRecord | None:
     return None
 
 
+# Valid-time is a wall-clock instant in epoch SECONDS. Bound it to a sane window so untrusted content
+# (an extracted `valid_from`/`valid_to`, a caller-supplied `--as-of`) can never plant a "valid forever"
+# (+inf) or a pre-epoch/absurd bound that would shadow every as-of query — the same class of hostile
+# interval the `_interval_contains` fail-safe already rejects at query time, refused here at INGEST too.
+_MIN_WHEN = 0.0             # 1970-01-01Z — no negative / pre-epoch instants
+_MAX_WHEN = 4102444800.0    # 2100-01-01Z — a value/query past this is treated as unparseable
+_MAX_WHEN_STR = 40          # cap an ISO string before parsing (a date/datetime is well under this)
+
+
+def parse_when(value: object) -> float | None:
+    """Parse a wall-clock instant to bounded epoch SECONDS, or None if unparseable/out-of-range.
+
+    Accepts a finite number (already epoch seconds) or an ISO-8601 date / datetime string (a trailing
+    `Z` is honored; a naive datetime is read as UTC). FAIL-SAFE by construction — NaN/inf, a value
+    outside [1970, 2100), an over-long or malformed string, and any parse error return None, never
+    raise. This is the ingest-side twin of `_interval_contains`'s hostile-bound rejection: content is
+    untrusted, so a `valid_to = +inf` ("valid forever") or a garbage bound is dropped, not stored."""
+    import math
+    from datetime import date, datetime, timezone
+
+    if isinstance(value, bool):  # bool is an int subclass; a True/False "instant" is nonsense
+        return None
+    if isinstance(value, (int, float)):
+        t = float(value)
+        return t if math.isfinite(t) and _MIN_WHEN <= t < _MAX_WHEN else None
+    if isinstance(value, str):
+        s = value.strip()
+        if not s or len(s) > _MAX_WHEN_STR:
+            return None
+        iso = s[:-1] + "+00:00" if s.endswith(("Z", "z")) else s
+        try:
+            dt = datetime.fromisoformat(iso)
+        except ValueError:
+            try:
+                dt = datetime.combine(date.fromisoformat(iso), datetime.min.time())
+            except ValueError:
+                try:  # a numeric string (epoch seconds) — CLI args arrive as strings
+                    return parse_when(float(s))
+                except ValueError:
+                    return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)  # naive → UTC, so parsing is deterministic
+        try:
+            t = dt.timestamp()
+        except (OverflowError, OSError, ValueError):
+            return None
+        return t if _MIN_WHEN <= t < _MAX_WHEN else None
+    return None
+
+
 def effective_half_life(r: MemoryRecord, base_half_life_s: float) -> float:
     """Per-record half-life: the base, stretched by demonstrated usefulness (support_count +
     epistemic_confidence), capped at HL_MAX_FACTOR×. A one-off weak memory decays at the base

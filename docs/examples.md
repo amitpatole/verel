@@ -372,7 +372,9 @@ is a runnable, real-output script in [`examples/`](https://github.com/amitpatole
 - **[`demo_bitemporal.py`](https://github.com/amitpatole/verel/blob/main/examples/demo_bitemporal.py)**
   — bi-temporal recall (no key): a fact that changed over time (`region = us-east` until June, `us-west`
   after) keeps valid-time distinct from write-time, and `recall_as_of(as_of=March)` reconstructs what was
-  actually true then from the correction chain — not today's value.
+  actually true then from the correction chain — not today's value. Then it captures a stated valid-time
+  from content and uses `members_as_of` for the set-valued query — "alice was an admin **then**" vs.
+  "bob is the current owner **now**" — history intact, not flattened by an overwrite.
 - **[`demo_memory_loop.py`](https://github.com/amitpatole/verel/blob/main/examples/demo_memory_loop.py)**
   — the fleet stops repeating mistakes: a real fix is recorded, marked `fixed` on pass, and consolidated
   into a candidate semantic rule.

@@ -18,6 +18,7 @@ from .view import (
     MemoryKind,
     MemoryRecord,
     MemoryView,
+    canon_value,
     canonical_text,
     is_launder_blocked,
     rank,
@@ -118,6 +119,52 @@ def recall_as_of(mem: MemoryView, query: str, *, as_of: float, scope: str | None
             out.append((snap, rel))
     out.sort(key=lambda sr: rank(sr[0], sr[1]), reverse=True)
     return [s for s, _ in out[: max(1, k)]]
+
+
+def members_as_of(mem: MemoryView, *, predicate: str, as_of: float, value: str | None = None,
+                  scope: str | None = None, kind: MemoryKind | None = None,
+                  k: int = 0) -> list[MemoryRecord]:
+    """Set-valued bi-temporal query — "who held this predicate (optionally == `value`) at wall-clock
+    `as_of`?" — the query `recall_as_of` can't express.
+
+    `recall_as_of` reconstructs the value of ONE key at a time and ranks by text relevance; it can't
+    answer "enumerate every subject that was `role`=`admin` in March", because a role is a set-valued
+    relation (many subjects hold it) spread across many `subj_pred_key`s. This walks every scoped
+    record whose PREDICATE matches, reconstructs the value that was valid at `as_of` (current or a
+    superseded one from the correction chain, via `value_as_of`), and returns the holders — the
+    membership snapshot. With `value` set it filters to holders of that exact value (canonicalized), so
+    "who was admin then" is one call; without it, every subject's `predicate` value at `as_of`.
+
+    Deliberate properties (mirroring `recall_as_of`):
+    - **Read-only time travel:** reconstructs, never mutates or reinforces.
+    - **Ledger-aware:** a value ever graded false is excluded (`is_launder_blocked` on the reconstructed
+      snapshot, not just the current record), so a rejected role can't be resurrected from history.
+    - **Scope semantics match recall:** a scoped query also sees `global` facts.
+    - **O(n) scan:** as-of membership is an analytical query, not the hot path.
+
+    Returns raw `MemoryRecord` snapshots sorted by (subject, value); a caller dropping them into a
+    prompt must fence them as untrusted DATA exactly as with `recall`. `k>0` caps the result count."""
+    records = mem.all(scope=scope, kind=kind)
+    if scope is not None and scope != "global":
+        records = [*records, *mem.all(scope="global", kind=kind)]
+    want_pred = canon_value(predicate)
+    want_val = canon_value(value) if value is not None else None
+    out: list[MemoryRecord] = []
+    seen: set[str] = set()
+    for r in records:
+        if r.id in seen:
+            continue
+        seen.add(r.id)
+        if canon_value(r.predicate) != want_pred:
+            continue
+        snap = value_as_of(r, as_of)
+        if snap is None or is_launder_blocked(snap):
+            continue
+        if want_val is not None and canon_value(snap.text) != want_val:
+            continue
+        out.append(snap)
+    out.sort(key=lambda s: (s.subject.casefold(), s.text.casefold()))
+    return out[:k] if k and k > 0 else out
 
 
 def recall_budgeted(mem: MemoryView, query: str, *, token_budget: int, scope: str | None = None,

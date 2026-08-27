@@ -7,7 +7,8 @@ The tool DISPATCH layer (`TOOLS`, `dispatch`) is pure and testable without the `
   verel_gate         RUN the graders on a repo → attested verdict + a verifiable receipt (§3/§4)
   verel_sight        render a URL → attested percept (bboxes + image_ref + receipt) — the eyes
   verel_verify       verify a receipt with NO trust in its producer (ed25519 = public; §11)
-  verel_recall       read the shared verified brain (scope lattice; set token_budget for graded-first recall)
+  verel_recall       read the shared brain (scope lattice; token_budget=graded-first; as_of=point-in-time)
+  verel_members_as_of  set-membership at a past instant — who held a predicate/value THEN (who was admin)
   verel_remember     write to the shared brain — trust does NOT travel (candidate until attested)
   verel_remember_conversation  extract facts from a conversation → only GRADED facts compound (LLM key)
   verel_ci_check     run the inner-loop CI stage on a repo → verdict + issues
@@ -513,6 +514,13 @@ def _tool_recall(args: dict) -> dict:
             kind = MemoryKind(kraw)
         except ValueError:
             return _err(f"unknown kind {kraw!r}")
+    as_of = None
+    araw = args.get("as_of")
+    if araw is not None:
+        from .memory import parse_when
+        as_of = parse_when(araw)
+        if as_of is None:
+            return _err("as_of must be ISO-8601 or epoch seconds within [1970, 2100)")
 
     try:
         mem = _brain()   # may fail closed: cleartext-routable token (ValueError) or misconfigured
@@ -520,6 +528,10 @@ def _tool_recall(args: dict) -> dict:
         return _err(str(e))
     import urllib.error
     try:
+        if as_of is not None:   # bi-temporal: what was believed AS OF a past instant (read-only)
+            from .memory import recall_as_of
+            hits = recall_as_of(mem, query, as_of=as_of, scope=scope, kind=kind, k=k)
+            return {"records": [_recall_brief(h) for h in hits], "as_of": as_of}
         if budget:   # graded-first, token-budgeted recall (verified beats candidate at the margin)
             from .memory import recall_budgeted
             br = recall_budgeted(mem, query, scope=scope, token_budget=min(budget, 100_000), kind=kind, k=k)
@@ -536,7 +548,56 @@ def _tool_recall(args: dict) -> dict:
 def _recall_brief(h) -> dict:
     return {"text": h.text, "subject": h.subject, "predicate": h.predicate, "scope": h.scope,
             "trust": h.trust.value, "confidence": round(h.epistemic_confidence, 3),
-            "support_count": h.support_count, "provenance": h.provenance, "fingerprint": h.id}
+            "support_count": h.support_count, "provenance": h.provenance, "fingerprint": h.id,
+            "valid_from": h.valid_from or h.created_ts, "valid_to": h.valid_to}
+
+
+def _tool_members_as_of(args: dict) -> dict:
+    """Set-membership bi-temporal query: every subject that held `predicate` (optionally == `value`) at
+    a past wall-clock `as_of` — the "who was admin THEN" query a text recall can't express. Read-only;
+    ledger-aware (a value ever graded false is excluded); scoped + fenced like recall."""
+    from .memory import MemoryKind, members_as_of, parse_when
+
+    predicate = args.get("predicate")
+    if not isinstance(predicate, str) or not predicate.strip():
+        return _err("predicate (string) is required")
+    if len(predicate) > _MAX_QUERY:
+        return _err(f"predicate too long (max {_MAX_QUERY} chars)")
+    value = args.get("value")
+    if value is not None and (not isinstance(value, str) or len(value) > _MAX_QUERY):
+        return _err("value must be a string within the length bound")
+    araw = args.get("as_of")
+    if araw is None:
+        return _err("as_of (ISO-8601 or epoch seconds) is required")
+    as_of = parse_when(araw)
+    if as_of is None:
+        return _err("as_of must be ISO-8601 or epoch seconds within [1970, 2100)")
+    sc = args.get("scope")
+    scope = sc if isinstance(sc, str) and sc.strip() else "team"  # least-privilege, like recall
+    kind = None
+    kraw = args.get("kind")
+    if kraw is not None:
+        if not isinstance(kraw, str):
+            return _err("kind must be a string")
+        try:
+            kind = MemoryKind(kraw)
+        except ValueError:
+            return _err(f"unknown kind {kraw!r}")
+
+    try:
+        mem = _brain()
+    except (ValueError, RuntimeError) as e:
+        return _err(str(e))
+    import urllib.error
+    try:
+        holders = members_as_of(mem, predicate=predicate, as_of=as_of, value=value, scope=scope,
+                                kind=kind, k=100)
+    except urllib.error.HTTPError as e:
+        return _err(f"remote brain rejected the request: HTTP {e.code}")
+    except urllib.error.URLError as e:
+        return _err(f"remote brain unreachable: {e.reason}")
+    return {"as_of": as_of, "predicate": predicate, "value": value,
+            "members": [_recall_brief(h) for h in holders]}
 
 
 def _tool_remember(args: dict) -> dict:
@@ -786,8 +847,21 @@ _RECALL_SCHEMA = {
         "token_budget": {"type": "integer", "description": "if set, return the highest-value memories "
                          "that fit this many tokens (graded-first: VERIFIED beats CANDIDATE at the "
                          "margin); response adds used_tokens, dropped, and a prompt-ready context block"},
+        "as_of": {"description": "ISO-8601 or epoch seconds; if set, bi-temporal recall — reconstruct "
+                  "what was believed AS OF that past instant (point-in-time; ignores token_budget)"},
     },
     "required": ["query"],
+}
+_MEMBERS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "predicate": {"type": "string", "description": "the relation (e.g. role)"},
+        "value": {"type": "string", "description": "filter to holders of this exact value (e.g. admin)"},
+        "as_of": {"description": "ISO-8601 or epoch seconds — the instant to reconstruct membership at"},
+        "scope": {"type": "string", "default": "team"},
+        "kind": {"type": "string", "enum": ["fact", "design_rule", "schema", "failure", "skill"]},
+    },
+    "required": ["predicate", "as_of"],
 }
 _REMEMBER_CONVERSATION_SCHEMA = {
     "type": "object",
@@ -866,7 +940,12 @@ TOOLS: dict[str, dict[str, Any]] = {
                                         "them. Static, no interpretation; hidden text + an imperative "
                                         "gates. Catches the Copilot 'AI worm' ingress vector."},
     "verel_recall": {"fn": _tool_recall, "schema": _RECALL_SCHEMA,
-                     "description": "Read the shared verified brain (resolves down the scope lattice)."},
+                     "description": "Read the shared verified brain (resolves down the scope lattice; "
+                                    "set as_of for point-in-time recall of what was true THEN)."},
+    "verel_members_as_of": {"fn": _tool_members_as_of, "schema": _MEMBERS_SCHEMA,
+                            "description": "Set-membership at a past instant: every subject holding a "
+                                           "predicate (optionally =value) as of a wall-clock time — the "
+                                           "'who was admin THEN' query. Read-only, ledger-aware."},
     "verel_remember": {"fn": _tool_remember, "schema": _REMEMBER_SCHEMA,
                        "description": "Write to the shared brain — trust does not travel; a fact is "
                                       "candidate until backed by a verifiable receipt."},

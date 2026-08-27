@@ -76,7 +76,8 @@ def remember_conversation(mem: MemoryView, transcript: object, *, scope: str, ch
                           attest: Attestor | None = None,
                           authenticate: Authenticator | None = None,
                           guard: Report | None = None,
-                          tainted: Collection[str] | None = None) -> RememberResult:
+                          tainted: Collection[str] | None = None,
+                          source_prior: float | None = None) -> RememberResult:
     """Extract candidate facts from a conversation and let only GRADED facts compound into `mem`.
 
     A fact graduates `CANDIDATE → VERIFIED` ONLY when:
@@ -96,7 +97,12 @@ def remember_conversation(mem: MemoryView, transcript: object, *, scope: str, ch
         extractor LLM (fail closed). This is the anti-worm cut at the ingestion boundary.
       * `tainted` — canonical span keys (from `verel.guard.taint_keys`) of hidden payloads found in
         the source. Any fact whose canonical value contains a tainted key is refused AND tombstoned
-        against its record, so a later restate can't launder the payload into memory."""
+        against its record, so a later restate can't launder the payload into memory.
+
+    `source_prior` (default None) seeds the INITIAL `epistemic_confidence` of every extracted fact from
+    the CALLER's trust in this source TYPE (an audit log ≫ a random chat message). It is a ranking
+    prior only — it never grants VERIFIED (that still needs `attest` or independent corroboration) and
+    it is the caller's authority, never read from the untrusted transcript."""
     res = RememberResult()
     if guard is not None and getattr(guard.verdict, "value", guard.verdict) == "fail":
         # fail closed BEFORE the LLM: a document that failed the ingress scan is not extracted from.
@@ -105,7 +111,8 @@ def remember_conversation(mem: MemoryView, transcript: object, *, scope: str, ch
             "extraction refused, transcript never sent to the extractor")
         return res
     taint_keys = {t for t in (tainted or ()) if t}
-    for fact in extract_facts(transcript, scope=scope, chat=chat, now=now, source=source):
+    for fact in extract_facts(transcript, scope=scope, chat=chat, now=now, source=source,
+                              source_prior=source_prior):
         if taint_keys:
             hay = canon_value(f"{fact.subject} {fact.predicate} {fact.text}")
             if any(t in hay for t in taint_keys):

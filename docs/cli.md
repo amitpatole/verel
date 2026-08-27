@@ -23,7 +23,7 @@ Verel ships **four** console scripts:
 | `heal` | Self-healing CI — failing tests → an agent fixes → green. |
 | `ci` | Delegate to `verel-ci` (agent-run CI). |
 | `verify` | Verify a run-receipt — `ed25519` receipts are publicly verifiable (see below). |
-| `memory` | Human review of the memory trust layer — `pending` / `show` / `approve` / `reject` the CANDIDATE queue, and `audit` the hash-chained mutation log (see [below](#review-memory-as-a-human-verel-memory-resolve-the-candidate-queue)). |
+| `memory` | Human review of the memory trust layer — `pending` / `show` / `approve` / `reject` the CANDIDATE queue, `audit` the hash-chained mutation log, and bi-temporal `recall --as-of` / `members` point-in-time queries (see [below](#review-memory-as-a-human-verel-memory-resolve-the-candidate-queue)). |
 | `verify-access` | **Opt-in, online.** Query what the cloud *actually* grants (AWS IAM Access Analyzer / GCP Policy Analyzer / Azure role assignments). Needs cloud read creds from `~/.config`; **not** part of the offline gate. |
 | `serve` | Run the REST gate server over a repo (`POST /gate`, `POST /github`). |
 | `mcp install` | Print the `verel-mcp` server config + where each agent host expects it. |
@@ -49,7 +49,7 @@ verel doctor
 A representative run:
 
 ```text
-verel 1.10.0
+verel 1.11.0
   — core grading (no key / no network needed):
   OK python 3.11.9
   OK git
@@ -174,6 +174,39 @@ verel memory audit                      # the hash-chained mutation log (who cha
 verel memory audit --verify             # verify the audit chain end-to-end
 verel memory rubric                     # self-assess vs the agent-memory-atlas rubric (7 binary dims)
 ```
+
+**Point-in-time recall (`recall`) and set-membership (`members`).** Verel's memory is *bi-temporal*:
+every value carries a **valid-time** interval (when it was true in the world) distinct from its
+**transaction-time** (when it was recorded). Two read-only queries reconstruct history without
+flattening it — "what was true **then**" vs. "who is it **now**":
+
+```bash
+# What did we believe about a subject AS OF a past instant? (ISO-8601 or epoch; default = now)
+verel memory recall alice --as-of 2024-03-15 --scope repo:x
+
+# Who held a predicate (optionally =value) at that instant — the set-valued query recall can't express
+verel memory members --predicate role --value admin --as-of 2024-03-15 --scope repo:x
+```
+```text
+$ verel memory recall alice --as-of 2024-03-15 --scope repo:x
+as of 2024-03-15T00:00:00Z — 1 record(s) for 'alice':
+  alice role: admin [2024-01-03T00:00:00Z .. 2024-06-01T00:00:00Z] (candidate)
+$ verel memory recall alice --as-of 2024-08-01 --scope repo:x
+as of 2024-08-01T00:00:00Z — 1 record(s) for 'alice':
+  alice role: member [2024-06-01T00:00:00Z .. open] (candidate)
+$ verel memory members --predicate role --value admin --as-of 2024-03-15 --scope repo:x
+as of 2024-03-15T00:00:00Z — 1 holder(s) of 'role'='admin':
+  alice role: admin [2024-01-03T00:00:00Z .. 2024-06-01T00:00:00Z] (candidate)
+$ verel memory members --predicate role --value admin --as-of 2024-08-01 --scope repo:x
+as of 2024-08-01T00:00:00Z — 0 holder(s) of 'role'='admin':
+```
+
+- Both are **read-only time travel**: they reconstruct the value valid at `--as-of` from the bounded
+  correction chain and never reinforce or mutate anything.
+- **Ledger-aware**: a value ever graded false is excluded even from a historical query — a rejected
+  fact can't be resurrected into a prompt through time travel.
+- Valid-time is populated when a source states *when* a fact became/ceased true (extraction captures
+  ISO dates; the `remember_conversation` / `write` APIs accept an explicit `valid_from`/`valid_to`).
 ```text
 $ verel memory pending
 0a9fa204672c8e62  candidate  ec=0.50 sup=1  [repo:demo]  api port: 8080
