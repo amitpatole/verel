@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — Bi-temporal memory: valid-time capture, set-membership as-of, source-typed priors
+## 1.11.0 — Bi-temporal memory: valid-time capture, set-membership as-of, source-typed priors
 
 - **Point-in-time memory that distinguishes "was true THEN" from "is true NOW" without flattening
   history.** The bi-temporal substrate (valid-time `valid_from`/`valid_to` distinct from
