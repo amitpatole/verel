@@ -82,7 +82,12 @@ python demo_memory.py     # offline, no API key
 - **Bi-temporal recall** — every value carries valid-time (`valid_from`/`valid_to`) distinct from
   when it was written, so `recall_as_of(mem, query, as_of=T)` answers *what did we believe at time T*.
   A fact that changed over time (`region = us-east` until June, `us-west` after) reconstructs the
-  value that was actually true then, from the correction chain — not today's.
+  value that was actually true then, from the correction chain — not today's. Extraction **captures**
+  a stated valid-time from content (`"alice became admin on 2024-01-03"`), and `members_as_of(mem,
+  predicate="role", value="admin", as_of=T)` answers the set-valued *who held it then* — the query
+  a text recall can't express. Both surface on the CLI (`verel memory recall --as-of` / `members`)
+  and MCP (`as_of` on `verel_recall`; `verel_members_as_of`). A `source_prior` on
+  `remember_conversation` lets a caller weight an authoritative source (an audit log) above chat.
 
 ## Use your real LLM
 

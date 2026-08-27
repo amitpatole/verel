@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased — Bi-temporal memory: valid-time capture, set-membership as-of, source-typed priors
+
+- **Point-in-time memory that distinguishes "was true THEN" from "is true NOW" without flattening
+  history.** The bi-temporal substrate (valid-time `valid_from`/`valid_to` distinct from
+  transaction-time, `value_as_of`/`recall_as_of`) already existed; this closes the ergonomic and
+  relational gaps around it so a changing fact — a Discord role, an owner, a region — is queryable as
+  intervals, not an overwrite.
+  - **Valid-time capture at extraction.** `parse_extracted_facts` / `extract_facts` /
+    `remember_conversation` now populate `valid_from`/`valid_to` when a source states *when* a fact
+    became or ceased true (ISO-8601 in the extractor output), through the new fail-safe `parse_when`
+    (rejects `+inf`/NaN/out-of-range bounds so untrusted content can't plant a "valid forever"
+    interval). Previously valid-time defaulted to when a fact was *learned*.
+  - **Set-membership as-of** — `members_as_of(mem, predicate=…, as_of=…, value=…)`: every subject that
+    held a predicate (optionally =value) at a past instant — "who was admin THEN" — the set-valued
+    query `recall_as_of` (one key at a time, text-ranked) can't express. Read-only and ledger-aware
+    (a value ever graded false is excluded even from a historical query).
+  - **Source-typed confidence prior** — `remember_conversation(…, source_prior=…)` seeds the initial
+    `epistemic_confidence` from the caller's trust in the source *type* (an audit log ≫ a chat
+    message). A ranking prior only: it never grants VERIFIED (still needs attestation or independent
+    corroboration) and is the caller's authority, never read from the untrusted transcript.
+  - **Surfaces:** CLI `verel memory recall <query> --as-of <t>` and `verel memory members --predicate
+    … [--value …] --as-of <t>`; MCP `as_of` on `verel_recall` (+ `valid_from`/`valid_to` in the
+    brief) and a new `verel_members_as_of` tool.
+  - **Security cadence** (untrusted transcript → memory): adversarial pins for hostile valid-time
+    injection (`+inf`/NaN/pre-epoch/inverted interval dropped), historical-launder resistance
+    (`members_as_of` / `recall_as_of` exclude a rejected value even at its historically-"valid"
+    instant), and belief-integrity (valid-time and a self-reported `confidence` never move
+    `epistemic_confidence`). All new params default to prior behavior.
+
 ## 1.10.0 — Guard: document-ingress defense (the "AI worm" scanner)
 
 - **New organ surface `verel.guard` — a static hidden-content / prompt-injection scanner for

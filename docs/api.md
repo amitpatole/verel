@@ -174,6 +174,20 @@ Extract durable facts from a conversation, let only **graded** facts compound (c
 attested — never a one-off say-so), and recall them token-budgeted and verified-first. See
 [Memory backends → Conversational memory](memory-backends.md#conversational-memory).
 
+Memory is **bi-temporal**: each value carries a valid-time interval (`valid_from`/`valid_to` — when it
+was true in the world) distinct from its transaction-time (`created_ts` — when it was recorded).
+Extraction captures a stated valid-time from content; `remember_conversation` / `write` accept an
+explicit interval. Query history without flattening it:
+
+- `recall_as_of(mem, query, as_of=…)` — point-in-time recall: what was believed about a subject **at
+  a past instant** (reconstructed from the correction chain, read-only, ledger-aware).
+- `members_as_of(mem, predicate=…, as_of=…, value=…)` — the set-valued query recall can't express:
+  **every subject that held a predicate (optionally =value) at an instant** ("who was admin then").
+- `remember_conversation(…, source_prior=…)` — seed the initial belief prior from the caller's trust
+  in the source *type* (an audit log ≫ a chat message); a ranking prior only, never a trust grant.
+- `parse_when(value)` — the fail-safe ISO-8601/epoch instant parser (rejects `+inf`/NaN/out-of-range
+  bounds) shared by ingest and the `--as-of` surface.
+
 ::: verel.memory.extract
 
 ::: verel.memory.remember
