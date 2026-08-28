@@ -194,6 +194,17 @@ explicit interval. Query history without flattening it:
 
 ::: verel.memory.recall
 
+#### Deterministic injection harness — runtime hooks, not tool calls
+
+Fold graded, fenced memory into an LLM's context automatically at runtime, at a developer-chosen
+position (system / user / assistant), without the model deciding to retrieve. `inject_memory` is a pure
+function over the message list (drops into any framework hook); `MemoryInjector` wraps any `ChatFn`;
+`capture_conversation` closes the loop by writing the turn back. The injected block is
+`recall_budgeted`'s fenced, graded-first, neutralized DATA — so a poisoned memory can't hijack the
+prompt it lands in.
+
+::: verel.memory.inject
+
 ### Operator review — the human-in-the-loop path
 
 List the CANDIDATE queue, approve to VERIFIED on human authority, or reject into a durable

@@ -369,6 +369,11 @@ is a runnable, real-output script in [`examples/`](https://github.com/amitpatole
 - **[`demo_token_savings.py`](https://github.com/amitpatole/verel/blob/main/examples/demo_token_savings.py)**
   — the cost angle (no key): budgeted graded-first recall cuts a 40-fact brain ~80% (679→135 tokens/turn,
   exact `tiktoken` counts), hallucinations excluded — you don't replay the whole brain into every prompt.
+- **[`demo_inject.py`](https://github.com/amitpatole/verel/blob/main/examples/demo_inject.py)**
+  — deterministic memory injection (no key): a developer-designed runtime hook folds relevant, graded,
+  fenced memory into the prompt at a chosen position (system/user/assistant) on every call — so a user
+  never re-supplies context they already gave, and retrieval doesn't depend on the model deciding to
+  call a tool. `inject_memory` (pure, framework-agnostic) + `MemoryInjector` (drop-in `chat` wrapper).
 - **[`demo_bitemporal.py`](https://github.com/amitpatole/verel/blob/main/examples/demo_bitemporal.py)**
   — bi-temporal recall (no key): a fact that changed over time (`region = us-east` until June, `us-west`
   after) keeps valid-time distinct from write-time, and `recall_as_of(as_of=March)` reconstructs what was

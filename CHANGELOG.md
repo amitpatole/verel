@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.12.0 — Deterministic memory-injection harness (runtime hooks, not tool calls)
+
+- **Fold graded memory into an LLM's context automatically at runtime — no tool call, no model
+  choice.** Verel's memory has been reachable two ways: the operator CLI and the *agent-driven* MCP
+  `verel_recall` tool (the model must choose to call it). This adds the third, deterministic path: a
+  developer-designed **runtime hook** that always injects relevant prior context, so a user never
+  re-supplies what they already told an earlier conversation, and retrieval no longer depends on the
+  model deciding to retrieve.
+  - **`inject_memory(mem, messages, *, scope, position, token_budget, …)`** — a pure function over the
+    message list (drops into any framework's hook): derives a recall query deterministically (default:
+    the latest user turn), recalls graded-first + budgeted + fenced, and injects at a developer-chosen
+    **`position`** — `system` (appended after the developer's own system prompt, which stays first and
+    authoritative), `user` (prepended into the latest user turn), or `assistant` (a synthetic prior
+    turn). Deterministic and side-effect-free — it never mutates the caller's messages, and returns
+    them unchanged when nothing relevant is recalled.
+  - **`MemoryInjector(mem, chat, …)`** — wraps any `ChatFn` (`Callable[[list[dict]], str]`, the
+    universal seam) so a single wrap turns retrieval deterministic for a whole app, with no change to
+    callers. Optional `capture=capture_conversation(…)` writes the turn back to memory after the reply
+    (a full read+write harness); a write-back error never breaks the chat turn.
+  - **Injection is safe by construction:** the injected block is `recall_budgeted`'s fenced
+    `<recalled_memory>` DATA — graded-first (a VERIFIED fact beats a candidate; a poisoned candidate
+    can't crowd it out), token-budgeted, and neutralized (zero-width/bidi stripped, newlines collapsed,
+    `<>` defanged) so a stored memory can't forge the fence or smuggle an instruction into the very
+    prompt it lands in. The harness only ever injects that block, never raw record text.
+  - **Security cadence** (untrusted memory → LLM context), regression-pinned: fence-escape resistance
+    (a memory that tries to close the fence / forge a `System:` line is defanged), scope isolation (no
+    cross-scope leak), no-mutation/aliasing safety, graded-first (verified outranks a candidate under a
+    tight budget), determinism, and rejected-value exclusion. Library API only — deliberately **not** an
+    MCP tool, since the whole point is a hook the developer controls, not a tool the agent invokes.
+
 ## 1.11.0 — Bi-temporal memory: valid-time capture, set-membership as-of, source-typed priors
 
 - **Point-in-time memory that distinguishes "was true THEN" from "is true NOW" without flattening
