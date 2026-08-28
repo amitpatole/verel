@@ -20,6 +20,12 @@ from .embed import Embedder, HashEmbedder, OpenAIEmbedder, cosine, embedder_from
 from .extract import extract_facts, parse_extracted_facts
 from .failure_ledger import FailureLedger, regression_report
 from .hosted import MemoryServer, RemoteMemory, ReplicaClient
+from .inject import (
+    MemoryInjector,
+    capture_conversation,
+    inject_memory,
+    last_user_query,
+)
 from .lattice import ScopeLattice, graduate, lattice_recall
 from .librarian import LibrarianReport, librarian_pass
 from .local import LocalMemory
@@ -87,6 +93,10 @@ __all__ = [
     "members_as_of",
     "parse_when",
     "BudgetedRecall",
+    "inject_memory",
+    "MemoryInjector",
+    "capture_conversation",
+    "last_user_query",
     "consolidate_failures",
     "induce_schemas",
     "induce_hierarchy",
