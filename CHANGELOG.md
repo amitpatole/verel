@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.13.0 — Eyes gain sight: live desktop screen capture
+
+- **The eyes can now see the live desktop.** AgentVision 0.12.0 adds a `desktop:` / `screen:`
+  capture source that grabs the current screen through the freedesktop `xdg-desktop-portal`
+  (consent-prompted, ephemeral) and grades it with the same vision pipeline. Verel's `sight`
+  extra now pulls **`agentvision[render,motion,desktop]>=0.12`**, so `verel.senses.perceive()` /
+  `verel.senses.watch()` can grade a live desktop the same way they grade a URL or a render —
+  the sight adapter is source-kind-agnostic, so it flows through with no code change, gated by
+  the same DOM/OCR/CV/Vision graders and recorded in episodic memory like any other sense.
+- Sending a live capture to a cloud backend is fail-closed in the eyes (`--allow-egress` /
+  `allow_screen_capture_egress`); the offline `local` path never egresses. See the AgentVision
+  0.12.0 notes for the full consent/egress/ephemeral model.
+- **Re-synced the classic-capability pin.** The drift guard flagged that AgentVision's no-LLM
+  (`local`/`checks`) set now also emits `clipped` (SVG/DOM overflow geometry) and `overlap`
+  (PPTX OOXML) deterministically; reviewed and re-pinned `_DESIGN_PINNED` so the eyes↔brain
+  capability binding stays honest (these are reachable without a vision backend).
+
 ## 1.12.0 — Deterministic memory-injection harness (runtime hooks, not tool calls)
 
 - **Fold graded memory into an LLM's context automatically at runtime — no tool call, no model

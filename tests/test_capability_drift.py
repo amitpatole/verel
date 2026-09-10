@@ -6,7 +6,12 @@ import pytest
 
 # The set the design pins as of writing — used only to detect SILENT upstream drift, so a
 # human reviews the capability table when AgentVision changes its classic checks.
-_DESIGN_PINNED = {"contrast", "overflow", "broken_image", "error_text", "typo", "blank", "other"}
+# Reviewed & re-pinned for the AgentVision 0.12.0 (sight) sync: `clipped` and `overlap` are
+# emitted DETERMINISTICALLY by AgentVision's no-LLM checks (SVG viewport / DOM hard-overflow
+# geometry, and PPTX OOXML slide inspection) — so they are correctly reachable without a vision
+# backend and belong in the classic set.
+_DESIGN_PINNED = {"contrast", "overflow", "clipped", "overlap", "broken_image", "error_text",
+                  "typo", "blank", "other"}
 
 
 def test_classic_capabilities_imported_from_source():
@@ -17,7 +22,9 @@ def test_classic_capabilities_imported_from_source():
         pytest.skip("agentvision not installed (verel[sight] extra)")
     assert isinstance(caps, set) and caps
     # NOT in the classic set — must require a vision backend (the silent-green guard).
-    assert {"clipped", "overlap", "layout", "missing_element"}.isdisjoint(caps)
+    # `clipped`/`overlap` are NO LONGER here: AgentVision emits them from deterministic checks
+    # (see the re-pin note above), so only genuinely vision-only kinds remain in this guard.
+    assert {"layout", "missing_element"}.isdisjoint(caps)
 
 
 def test_pinned_set_matches_or_flags_drift():

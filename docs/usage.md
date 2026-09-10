@@ -28,7 +28,7 @@ pip install "verel[telecom]"      # + 5G RAN/Core config + KPI graders
 | Extra | Pulls in | Enables |
 |---|---|---|
 | `dev` | pytest, ruff, mypy | the Python test/lint/type graders |
-| `sight` | `agentvision[render]` | `verel.senses` — DOM/contrast/OCR vision + `watch` |
+| `sight` | `agentvision[render,motion,desktop]` | `verel.senses` — DOM/contrast/OCR vision, live desktop capture, + `watch` |
 | `container` | `pyseccomp` | the seccomp syscall filter on the `bwrap` tool runner |
 | `mem0` | `mem0ai`, `chromadb` | `Mem0Memory` as the `MemoryView` backend |
 | `mcp` | `mcp`, `anyio` | `verel-mcp` (Cursor / Claude / any MCP host) |
@@ -69,7 +69,7 @@ offline examples in `examples/`) run with no key at all.
 | **CLI** | `verel …` | `doctor` · `loop` · `fleet` · `heal` · `ci` |
 | **CI CLI / git hook** | `verel-ci …` | a verdict-bus gate in CI or a pre-commit hook |
 | **MCP server** | `verel-mcp` | exposing gate / recall / build-tool / ci-check to an MCP host |
-| **GitHub Action** | `amitpatole/verel@v1.12.0` | failing a build on a FAIL verdict |
+| **GitHub Action** | `amitpatole/verel@v1.13.0` | failing a build on a FAIL verdict |
 | **pre-commit** | `.pre-commit-hooks.yaml` | gating commits |
 
 ### CLI reference
@@ -98,7 +98,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: amitpatole/verel@v1.12.0
+      - uses: amitpatole/verel@v1.13.0
         with:
           repo: .
           install: "-e .[dev]"      # your project deps so its tests import
@@ -107,7 +107,7 @@ jobs:
 ```yaml
 # .pre-commit-config.yaml
 - repo: https://github.com/amitpatole/verel
-  rev: v1.12.0
+  rev: v1.13.0
   hooks: [{ id: verel-precommit }]
 ```
 

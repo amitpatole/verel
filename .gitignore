@@ -24,3 +24,6 @@ docs/SUBSTRATE_DESIGN.md
 docs/VERIFIED_REVIEW_DESIGN.md
 docs/K8S_DEPLOYMENT_DESIGN.md
 docs/CRITIC_CONVERGENCE.md
+
+# Local Claude Code state (settings.local.json, scheduled_tasks.lock, worktrees) — never publish
+.claude/
