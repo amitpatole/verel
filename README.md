@@ -140,7 +140,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: amitpatole/verel@v1.18.0
+      - uses: amitpatole/verel@v1.18.0rc1
         with:
           repo: .
           install: "-e .[dev]"     # your project deps so its tests import
@@ -150,7 +150,7 @@ jobs:
 
 ```yaml
 - repo: https://github.com/amitpatole/verel
-  rev: v1.18.0
+  rev: v1.18.0rc1
   hooks: [{ id: verel-precommit }]
 ```
 

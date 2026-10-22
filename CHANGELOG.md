@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.18.0 — Pilot readiness: shadow mode, media specs, enterprise operations, scale, gated rollout
+## 1.18.0rc1 — Pilot readiness: shadow mode, media specs, enterprise operations, scale, gated rollout
 
 Five phases of pilot-readiness work, released together. They are one release, not five, on purpose: three
 independent red-team rounds changed code across every phase (the evidence-log format, the pilot service, the
