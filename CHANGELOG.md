@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.14.0 — Pilot readiness, phase 1: shadow mode + earned enforcement
+
+- **`verel.pilot` / `verel pilot`.** Run Verel beside an existing pipeline without blocking it
+  (`shadow`), surface-only (`advisory`), or `enforce`. Every would-be verdict goes to a hash-chained,
+  tamper-evident decision log (edit, delete, reorder and insert are detected; an optional external
+  head hash also catches tail truncation). `verel pilot eval` scores the log against human labels
+  (precision, recall, false-positive rate, Wilson lower bound) and recommends which graders earned
+  enforcement. Unknown modes raise; a gate crash fails closed. Appends are file-locked: parallel
+  workers sharing a log previously forked the chain (reproduced, now pinned by a multi-process test). See [Pilot](docs/pilot.md).
+
 ## 1.13.0 — Eyes gain sight: live desktop screen capture
 
 - **The eyes can now see the live desktop.** AgentVision 0.12.0 adds a `desktop:` / `screen:`

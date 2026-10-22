@@ -71,6 +71,7 @@ nav:
   - Use cases — SRE / Platform / Cloud: use-cases-infra.md
   - Use cases — Telecom RAN / 5G Core: use-cases-telecom.md
   - Guard — document-ingress defense: guard.md
+  - Pilot — shadow mode & earned enforcement: pilot.md
   - Real-world scenarios: examples.md
   - Adoption: adoption.md
   - Guides:

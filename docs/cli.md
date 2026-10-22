@@ -49,7 +49,7 @@ verel doctor
 A representative run:
 
 ```text
-verel 1.13.0
+verel 1.14.0
   — core grading (no key / no network needed):
   OK python 3.11.9
   OK git
@@ -134,6 +134,18 @@ OK  ed25519  runner=ed25519:Ab3kQ1z9_xYwTuVe  [public-verifiable]
 - Publish a verifier's trust by dropping `<key_id>.pub` into `~/.config/verel/trusted_keys/`
   (`VEREL_TRUSTED_KEYS` overrides the dir). An untrusted `key_id` can't verify itself into trust. The
   same check is the **`verel_verify`** MCP tool. See [Configuration](configuration.md#receipts-signing-trusted-keys).
+
+### Run a pilot (`verel pilot`) — shadow mode and earned enforcement
+
+Attach Verel to a real pipeline without blocking it, then score it against human labels. See
+[Pilot](pilot.md).
+
+```bash
+verel pilot record --reports r.json --artifact-id ep-1 --log pilot.jsonl   # --mode shadow|advisory|enforce
+verel pilot eval   --log pilot.jsonl --labels labels.json [--json]          # precision/recall/FPR + graduation
+verel pilot verify --log pilot.jsonl [--expect-head HASH]                   # exit 2 if tampered
+verel pilot demo                                                            # no-API-key walkthrough
+```
 
 ### Scan documents for hidden injection (`verel guard`) — ingress defense
 

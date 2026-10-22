@@ -154,6 +154,52 @@ def _heal(args) -> int:
     return 0 if res.healed else 1
 
 
+def _pilot(args) -> int:
+    """Shadow-mode pilot: `record` gates + logs a would-be verdict, `eval` scores the log against human
+    labels and recommends which graders earned enforcement, `verify` checks the log's hash chain."""
+    from .pilot import LogCorrupt, ShadowLog, evaluate, load_labels, parse_mode, run_pilot
+    from .pilot.render import render
+    if args.pilot_cmd == "demo":
+        from .pilot.demo import run_demo
+        return run_demo()
+    log = ShadowLog(args.log)
+    try:
+        if args.pilot_cmd == "verify":
+            n = log.verify(args.expect_head)
+            print(f"OK: {n} records, chain intact, head={log.head()}")
+            return 0
+        if args.pilot_cmd == "eval":
+            ev = evaluate(log.records(), load_labels(args.labels), warn_is_positive=args.warn_positive,
+                          min_samples=args.min_samples, min_precision=args.min_precision)
+            if args.json:
+                import json as _json
+                print(_json.dumps(ev.model_dump(mode="json"), indent=2))
+            else:
+                print(render(ev))
+            return 0
+        import json as _json
+        from pathlib import Path as _P
+
+        from .verdict.models import Report
+        rp = _P(args.reports)
+        if rp.stat().st_size > 10_000_000:
+            print("error: reports file exceeds 10MB", file=sys.stderr)
+            return 2
+        raw = _json.loads(rp.read_text(encoding="utf-8"))
+        reports = [Report.model_validate(r) for r in (raw if isinstance(raw, list) else [raw])]
+        dec = run_pilot(reports, artifact_id=args.artifact_id, mode=parse_mode(args.mode), log=log)
+        from .memory.view import canonical_text as _s
+        print(f"{dec.enforced.value.upper()} (would-be {dec.would_be.value}, mode {dec.mode.value})"
+              + (f": {_s(dec.reason)}" if dec.reason else ""))
+        return 1 if dec.blocked else 0
+    except LogCorrupt as e:
+        print(f"error: pilot log failed integrity check: {e}", file=sys.stderr)
+        return 2
+    except (ValueError, OSError, RecursionError) as e:
+        print(f"error: {type(e).__name__}: {e}", file=sys.stderr)
+        return 2
+
+
 def _guard(args) -> int:
     """Static document-ingress scan for hidden content / prompt injection. `scan` grades one or more
     files and prints grounded findings (exit 1 on FAIL); `demo` runs a no-API-key walkthrough."""
@@ -531,6 +577,27 @@ def main(argv=None) -> int:
     gds.add_argument("--json", action="store_true", help="emit the full Report as JSON")
     gdsub.add_parser("demo", help="no-API-key walkthrough: hostile doc → grounded FAIL → fixed → PASS")
 
+    pl = sub.add_parser("pilot", help="shadow-mode pilot: record would-be verdicts, score vs human labels, "
+                                      "recommend what earned enforcement")
+    plsub = pl.add_subparsers(dest="pilot_cmd", required=True)
+    plsub.add_parser("demo", help="no-API-key synthetic pilot: shadow-record → label → evaluate → graduate")
+    plr = plsub.add_parser("record", help="gate one artifact's reports (JSON) and log the would-be verdict")
+    plr.add_argument("--reports", required=True, help="JSON file: one Report or a list of Reports")
+    plr.add_argument("--artifact-id", required=True)
+    plr.add_argument("--mode", default="shadow", help="shadow (default) | advisory | enforce")
+    plr.add_argument("--log", required=True, help="hash-chained JSONL decision log")
+    ple = plsub.add_parser("eval", help="score the log against labels; exit 0 always (it's a report)")
+    ple.add_argument("--log", required=True)
+    ple.add_argument("--labels", required=True, help='JSON/JSONL of {"artifact_id","defect"}')
+    ple.add_argument("--min-samples", type=int, default=30)
+    ple.add_argument("--min-precision", type=float, default=0.95)
+    ple.add_argument("--warn-positive", action="store_true", help="count WARN as a positive prediction")
+    ple.add_argument("--json", action="store_true")
+    plv = plsub.add_parser("verify", help="verify the decision log's hash chain (exit 2 if tampered)")
+    plv.add_argument("--log", required=True)
+    plv.add_argument("--expect-head", default=None,
+                     help="head hash recorded elsewhere; also detects tail truncation")
+
     va = sub.add_parser("verify-access",
                         help="OPT-IN: query what the cloud ACTUALLY grants (needs cloud read creds; "
                              "makes live provider calls — not an offline gate)")
@@ -561,6 +628,8 @@ def main(argv=None) -> int:
         return _memory(args)
     if args.cmd == "guard":
         return _guard(args)
+    if args.cmd == "pilot":
+        return _pilot(args)
     if args.cmd == "verify":
         return _verify(args)
     if args.cmd == "mcp":
