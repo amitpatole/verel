@@ -49,7 +49,7 @@ verel doctor
 A representative run:
 
 ```text
-verel 1.14.0
+verel 1.18.0
   — core grading (no key / no network needed):
   OK python 3.11.9
   OK git
@@ -134,6 +134,27 @@ OK  ed25519  runner=ed25519:Ab3kQ1z9_xYwTuVe  [public-verifiable]
 - Publish a verifier's trust by dropping `<key_id>.pub` into `~/.config/verel/trusted_keys/`
   (`VEREL_TRUSTED_KEYS` overrides the dir). An untrusted `key_id` can't verify itself into trust. The
   same check is the **`verel_verify`** MCP tool. See [Configuration](configuration.md#receipts-signing-trusted-keys).
+
+### Media delivery and content credentials (`verel-ci media`, `verel-ci provenance`)
+
+Offline, deterministic, signed receipt. See [Media](media.md).
+
+```bash
+verel-ci media --repo . --facts audel.json --facts probe.json --spec delivery.yaml   # exit 1 on FAIL
+verel-ci provenance --repo . --asset masters/ep.mp4 --policy provenance.yaml          # or --manifest-json
+verel media demo                                                                       # no-API-key walkthrough
+```
+
+### Serve the pilot to a team (`verel serve-pilot`, `verel auth`)
+
+Multi-tenant HTTP service with roles, tokens or OIDC SSO and an audit trail. See [Enterprise](enterprise.md).
+
+```bash
+verel auth add --file tokens.json --id alice --role operator --tenant acme   # token printed once
+verel auth list|revoke|verify-audit ...
+verel serve-pilot --data-dir ./pilot-data --tokens tokens.json               # POST /v1/pilot/record|labels|archive, GET /v1/pilot/evaluation|verify
+verel pilot archive --log pilot.jsonl --keep-last 10000                      # retention
+```
 
 ### Run a pilot (`verel pilot`) — shadow mode and earned enforcement
 

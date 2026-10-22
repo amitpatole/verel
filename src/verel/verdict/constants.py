@@ -36,6 +36,11 @@ PRECISE_GRADERS = {
     # (statistical insufficiency cannot gate), so a small-denominator sample never fails the build.
     GraderKind.KPI,
     GraderKind.TELECOM_CFG,
+    # Media delivery: declared-spec rules over supplied facts + C2PA policy over a validated manifest.
+    # Both are pure deterministic evaluation (no model in the path) → they gate. A MISSING fact is an
+    # ERROR by default: an unmeasured asset must never read as a clean PASS.
+    GraderKind.MEDIA,
+    GraderKind.PROVENANCE,
     # Document-ingress guard: structural hidden-text markers and lexical pattern hits are
     # deterministic evidence over the supplied bytes (no model in the loop) → it gates. The FP
     # control lives in the severity policy (hiding alone = WARNING; hiding + imperative = CRITICAL).

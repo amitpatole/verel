@@ -398,6 +398,40 @@ is a runnable, real-output script in [`examples/`](https://github.com/amitpatole
   — the corpus-transfer experiment that decides the moat: do verified skills **re-verify across tenants**?
   Measured, not assumed.
 
+## Pilot and media delivery (no API key)
+
+**Attach Verel to a pipeline without risking it, then earn enforcement** (`verel pilot demo`, synthetic data, real graders):
+
+```text
+recorded 200 shadow decisions (hash chain verified); the pipeline was never blocked.
+
+labeled=200  unlabeled_records=0  labels_without_record=0  gate_errors=0
+  GATE         tp=40  fp=1   tn=149 fn=10  precision= 97.6% (lb 87.4%) recall= 80.0% fpr=  0.7%  
+  audio_llm    tp=50  fp=50  tn=100 fn=0   precision= 50.0% (lb 40.4%) recall=100.0% fpr= 33.3%  -> keep in shadow/advisory: precision lower bound 0.40 < 0.85
+  dsp          tp=40  fp=1   tn=149 fn=10  precision= 97.6% (lb 87.4%) recall= 80.0% fpr=  0.7%  -> READY to enforce: precision lower bound 0.87 >= 0.85, recall 0.80, errored 0%, over 41 flags
+
+Recommend graduating to ENFORCE: dsp. Keep in shadow/advisory: audio_llm. A human makes the call.
+```
+
+**Grade a delivery against a spec, and catch tampered content credentials** ([`demo_media.py`](https://github.com/amitpatole/verel/blob/main/examples/demo_media.py)):
+
+```text
+1. delivery as submitted: FAIL
+    error    ebu_r128.integrated_loudness: -17.4 violates between [-23.5, -22.5]: integrated loudness must be -23.0 +/- 0.5 LU
+    error    ebu_r128.true_peak: 0.8 violates lte -1.0: true peak must be <= -1.0 dBTP
+    error    ebu_r37_av_sync.av_offset: 95.0 violates between [-40.0, 60.0]: audio must be no more than 40 ms early nor 60 ms late 
+    error    tracks_match: 1800.0 violates approx 1802.5: audio.duration_s approx 1802.5
+    error    captions: ["en"] violates superset ["en", "es"]: captions.languages superset ["en", "es"]
+2. after remix, re-sync, Spanish captions: PASS
+3. credentials, untouched: PASS
+    info     manifest report is unverified input: it is not tied to any asset
+4. credentials, bytes changed after signing: FAIL
+    critical content credentials FAILED validation (tampered or corrupt): assertion.datahash.mismatch
+    info     manifest report is unverified input: it is not tied to any asset
+```
+
+See [Pilot](pilot.md), [Media](media.md), [Rollout](rollout.md) and [Connectors](connectors.md).
+
 Also see **[`demo_backend_registry.py`](https://github.com/amitpatole/verel/blob/main/examples/demo_backend_registry.py)**
 and **[`demo_hosted_registry.py`](https://github.com/amitpatole/verel/blob/main/examples/demo_hosted_registry.py)**
 for the **pluggable memory backends** (local SQLite, a shared hosted brain, or an external DB).

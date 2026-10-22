@@ -11,6 +11,7 @@ class Mode(str, Enum):
     SHADOW = "shadow"      # observe only: the pipeline always proceeds; the would-be verdict is logged
     ADVISORY = "advisory"  # surface problems but never block: FAIL is downgraded to WARN
     ENFORCE = "enforce"    # the real verdict is the enforced verdict
+    POLICY = "policy"      # per-grader modes from the tenant's promotion policy (see verel.pilot.policy)
 
 
 def parse_mode(value: str | Mode) -> Mode:
@@ -26,6 +27,8 @@ def parse_mode(value: str | Mode) -> Mode:
 
 def apply_mode(would_be: Verdict, mode: Mode) -> Verdict:
     """The verdict the pipeline should ACT on, given the real (would-be) verdict and the mode."""
+    if mode is Mode.POLICY:
+        raise ValueError("policy mode needs a policy; pass policy= to run_pilot")
     if mode is Mode.ENFORCE:
         return would_be
     if mode is Mode.ADVISORY:

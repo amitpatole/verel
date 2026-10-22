@@ -1,5 +1,9 @@
 """Score recorded pilot verdicts against human labels and say — honestly — whether a grader has
-earned enforcement. Graduation is a RECOMMENDATION from evidence; a human flips the switch."""
+earned enforcement. Graduation is a RECOMMENDATION from evidence; a human flips the switch.
+
+The FIRST decision recorded for an artifact id is the one scored. A later re-record of the same id is kept
+in the log but not scored, so nobody can re-grade a labeled artifact to manufacture (or erase) evidence; a new
+version of an asset gets a new artifact id."""
 
 from __future__ import annotations
 
@@ -7,8 +11,9 @@ import json
 import math
 from pathlib import Path
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, Field, computed_field, field_validator
 
+from .._safeio import read_regular
 from .log import ShadowRecord, valid_artifact_id
 
 MAX_LABEL_BYTES = 10_000_000
@@ -19,14 +24,16 @@ class Label(BaseModel):
     artifact_id: str
     defect: bool  # ground truth from a human reviewer: does this artifact have a real problem?
 
+    @field_validator("artifact_id")
+    @classmethod
+    def _id(cls, v: str) -> str:
+        return valid_artifact_id(v)
+
 
 def load_labels(path: str | Path) -> list[Label]:
     """JSON list or JSONL of `{"artifact_id": ..., "defect": true|false}`. Duplicate ids with
     conflicting labels are rejected — ambiguous ground truth would silently skew every metric."""
-    p = Path(path)
-    if p.stat().st_size > MAX_LABEL_BYTES:
-        raise ValueError(f"labels file exceeds {MAX_LABEL_BYTES} bytes")
-    text = p.read_text(encoding="utf-8")
+    text = read_regular(path, MAX_LABEL_BYTES).decode("utf-8")
     try:
         rows = json.loads(text)
     except json.JSONDecodeError:
@@ -117,16 +124,39 @@ class Evaluation(BaseModel):
     graders: list[GraderStats] = Field(default_factory=list)
     min_samples: int
     min_precision: float
+    min_recall: float = 0.5
+    max_errored_rate: float = 0.05
+    duplicate_content: int = 0  # decisions ignored because the same file was already scored under another id
 
 
-def _ready(stats: Stats, min_samples: int, min_precision: float) -> tuple[bool, str]:
+def _ready(
+    stats: Stats,
+    errored: int,
+    min_samples: int,
+    min_precision: float,
+    min_recall: float,
+    max_errored_rate: float,
+) -> tuple[bool, str]:
+    """Precision alone can be gamed by a grader that flags almost nothing, or that keeps crashing:
+    enforcement also needs real recall and a low outage rate."""
     flagged = stats.tp + stats.fp
     if flagged < min_samples:
         return False, f"only {flagged} flagged artifacts (need >= {min_samples})"
     lb = stats.precision_lb
     if lb < min_precision:
         return False, f"precision lower bound {lb:.2f} < {min_precision:.2f}"
-    return True, f"precision lower bound {lb:.2f} >= {min_precision:.2f} over {flagged} flags"
+    rec = stats.recall
+    if rec is None or rec < min_recall:
+        shown = "n/a" if rec is None else f"{rec:.2f}"
+        return False, f"recall {shown} < {min_recall:.2f} (it misses too many real defects)"
+    seen = stats.n + errored
+    err_rate = errored / seen if seen else 0.0
+    if err_rate > max_errored_rate:
+        return False, f"errored on {err_rate:.0%} of artifacts (> {max_errored_rate:.0%}); it is not reliable"
+    return True, (
+        f"precision lower bound {lb:.2f} >= {min_precision:.2f}, recall {rec:.2f}, "
+        f"errored {err_rate:.0%}, over {flagged} flags"
+    )
 
 
 def evaluate(
@@ -136,12 +166,23 @@ def evaluate(
     warn_is_positive: bool = False,
     min_samples: int = 30,
     min_precision: float = 0.95,
+    min_recall: float = 0.5,
+    max_errored_rate: float = 0.05,
 ) -> Evaluation:
     """Latest record per artifact is scored against its label. A grader whose report ERRORED is
     excluded from its own stats (and counted) — an outage must not read as a clean PASS."""
     truth = {lab.artifact_id: lab.defect for lab in labels}
-    latest: dict[str, ShadowRecord] = {}
+    latest: dict[str, ShadowRecord] = {}  # FIRST decision per artifact: re-recording cannot rewrite evidence
+    seen_content: set[str] = set()
+    duplicate_content = 0
     for r in records:
+        if r.artifact_id in latest:
+            continue
+        if r.content:  # the same FILE under another id is the same evidence, counted once
+            if r.content in seen_content:
+                duplicate_content += 1
+                continue
+            seen_content.add(r.content)
         latest[r.artifact_id] = r
     bad = {"fail", "warn"} if warn_is_positive else {"fail"}
 
@@ -163,11 +204,18 @@ def evaluate(
     gs = []
     for g in sorted(set(per) | set(errs)):
         st = per.get(g, Stats())
-        ok, why = _ready(st, min_samples, min_precision)
+        ok, why = _ready(st, errs.get(g, 0), min_samples, min_precision, min_recall, max_errored_rate)
         gs.append(GraderStats(grader=g, stats=st, errored=errs.get(g, 0), ready_to_enforce=ok, reason=why))
     return Evaluation(
-        labeled=overall.n, unlabeled_records=unlabeled,
+        labeled=overall.n,
+        unlabeled_records=unlabeled,
         labels_without_record=len(set(truth) - set(latest)),
         errored_gates=sum(1 for r in latest.values() if r.gate_error),
-        overall=overall, graders=gs, min_samples=min_samples, min_precision=min_precision,
+        overall=overall,
+        graders=gs,
+        min_samples=min_samples,
+        min_precision=min_precision,
+        min_recall=min_recall,
+        max_errored_rate=max_errored_rate,
+        duplicate_content=duplicate_content,
     )

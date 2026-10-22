@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "verel"
-version = "1.14.0"
+version = "1.18.0"
 description = "The agent framework where nothing is done until a grader returns a verdict — verification + grounded perception (AgentVision eyes), compounding memory, a fleet, agent-built tooling, and agent-run CI/CD."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -44,6 +44,14 @@ iac = ["pyyaml>=6"]
 # (lazy-imported; in-memory dict rules need no dep). defusedxml hardens PM-XML / NETCONF parsing
 # against XXE / entity-expansion (added with the Phase-3 classic/appliance adapters).
 telecom = ["pyyaml>=6", "defusedxml>=0.7"]
+# Media delivery specs (`verel-ci media`): YAML spec files (a .json spec needs nothing). Content
+# credentials (`verel-ci provenance`): the C2PA reader; or install the `c2patool` binary instead.
+media = ["pyyaml>=6"]
+# Enterprise: OIDC/SSO bearer-JWT verification (`verel.auth.oidc`) and OpenTelemetry export of pilot
+# decisions (`verel.telemetry`; inert unless the host configures an SDK/exporter).
+sso = ["pyjwt[crypto]>=2.8"]
+otel = ["opentelemetry-api>=1.20"]
+provenance = ["pyyaml>=6", "c2pa-python>=0.9"]
 # The NETCONF actuator's LIVE apply path opens a real NETCONF-over-SSH session via ncclient. The offline
 # planner (plan / classify / verify-desired) needs NONE of it — ncclient is lazy-imported only for a live
 # apply, so `verel[telecom]` alone still plans + dry-runs.
@@ -103,7 +111,7 @@ python_version = "3.10"
 ignore_missing_imports = true
 check_untyped_defs = false
 warn_unused_ignores = false
-exclude = ["tests/", "examples/", "media/"]
+exclude = ["^tests/", "^examples/", "^media/"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/verel"]

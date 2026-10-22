@@ -43,6 +43,7 @@ success with no evidence — can't mint green.
 |---|---|---|
 | 🧠 **Brain** | `verel.memory` | Memory that compounds — only verified facts/skills graduate (held-out, attested promotion gate); lifecycle controls keep it from becoming a junk drawer. **Pluggable backend** (`VEREL_MEMORY_BACKEND`): local SQLite, a shared hosted brain, or an external DB. |
 | 👁️ **Eyes** | `verel.senses` | **AgentVision** as a perception organ (DOM/contrast/OCR grounded, intent conformance, temporal `watch`) feeding the verdict bus and the brain. |
+| 🎞️ **Media & communications** | `verel.media`, `verel.pilot`, `verel.jobs` | **Delivery specs, content credentials, shadow-mode pilots and gated rollout** for broadcast and publishing pipelines. → **[Media](media.md)** · **[Pilot](pilot.md)** · **[Rollout](rollout.md)** · **[Enterprise](enterprise.md)** · **[Connectors](connectors.md)** · **[Scale](scale.md)** |
 | 🛡️ **Immune (ingress)** | `verel.guard` | **Document-ingress guard** — scans an untrusted document (docx/pptx/xlsx/odf/pdf/html/rtf/text) for hidden content and prompt injection *before an LLM reads it*, catching the Copilot "AI worm" class on the visible-vs-extracted mismatch. Fail-closed into memory + an anti-worm propagation check. → **[Guard](guard.md)** |
 | ⚖️ **Verdict bus** | `verel.verdict` | One schema for every sense — advisory ceiling clamp, grader attestation, strict-subset stuck/progress. |
 | 🚁 **Fleet** | `verel.fleet` | Agents managing agents — LLM manager fans out, workers in isolated git worktrees, each gated by the bus. |

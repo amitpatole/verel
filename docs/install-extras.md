@@ -23,6 +23,10 @@ pip install verel               # core: the verdict bus + graders that need no e
 | `operator` | `kopf` · `kubernetes` | The **Kubernetes operator** reconciling the Verel CRDs (`verel-operator`). |
 | `iac` | `pyyaml` | **IaC / cloud-IAM** graders (Terraform plan + RBAC). *Shells out to external binaries* — terraform/tofu, trivy, tflint, checkov, conftest, kube-score, … (not pip deps; `verel doctor` probes them). |
 | `telecom` | `pyyaml` · `defusedxml` | The **5G RAN/Core** KPI + config-invariant graders (defusedxml hardens PM-XML / NETCONF against XXE). |
+| `media` | `pyyaml` | `verel-ci media`: YAML delivery specs (a `.json` spec needs nothing). |
+| `provenance` | `pyyaml` · `c2pa-python` | `verel-ci provenance`: reads C2PA content credentials (or install the `c2patool` binary instead). |
+| `sso` | `pyjwt[crypto]` | OIDC/SSO bearer-JWT verification for `verel serve-pilot`. |
+| `otel` | `opentelemetry-api` | OpenTelemetry export of pilot decisions (inert until your app installs an SDK). |
 | `telecom-actuator` | `ncclient` | Only the **live** NETCONF apply path of `verel-ci telecom-apply`. The offline planner/dry-run needs none of it. |
 | `mem0` | `mem0ai` · `chromadb` | The Mem0 conversational-memory adapter. |
 | `postgres` | `psycopg` · `pgvector` | An external multi-machine **brain** (Postgres + pgvector ANN recall). |

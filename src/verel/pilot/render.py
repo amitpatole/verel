@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .._safeio import printable
 from .evaluate import Evaluation, Stats
 
 
@@ -24,5 +25,5 @@ def render(ev: Evaluation) -> str:
     for g in ev.graders:
         verdict = "READY to enforce" if g.ready_to_enforce else "keep in shadow/advisory"
         err = f" errored={g.errored}" if g.errored else ""
-        lines.append(_row(g.grader, g.stats, f"-> {verdict}: {g.reason}{err}"))
+        lines.append(_row(printable(g.grader, 24), g.stats, f"-> {verdict}: {g.reason}{err}"))
     return "\n".join(lines)

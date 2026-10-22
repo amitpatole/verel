@@ -1,14 +1,92 @@
 # Changelog
 
-## 1.14.0 — Pilot readiness, phase 1: shadow mode + earned enforcement
+## 1.18.0 — Pilot readiness: shadow mode, media specs, enterprise operations, scale, gated rollout
 
-- **`verel.pilot` / `verel pilot`.** Run Verel beside an existing pipeline without blocking it
-  (`shadow`), surface-only (`advisory`), or `enforce`. Every would-be verdict goes to a hash-chained,
-  tamper-evident decision log (edit, delete, reorder and insert are detected; an optional external
-  head hash also catches tail truncation). `verel pilot eval` scores the log against human labels
-  (precision, recall, false-positive rate, Wilson lower bound) and recommends which graders earned
-  enforcement. Unknown modes raise; a gate crash fails closed. Appends are file-locked: parallel
-  workers sharing a log previously forked the chain (reproduced, now pinned by a multi-process test). See [Pilot](docs/pilot.md).
+Five phases of pilot-readiness work, released together. They are one release, not five, on purpose: three
+independent red-team rounds changed code across every phase (the evidence-log format, the pilot service, the
+media graders), and the earlier intermediate builds contained issues that are now fixed. Publishing those
+intermediate builds would have shipped known-vulnerable code.
+
+### Phase 1: shadow mode and earned enforcement
+- `verel.pilot` / `verel pilot`: run Verel beside an existing pipeline in `shadow` (log only), `advisory`
+  (FAIL shown as WARN) or `enforce`. Every would-be verdict goes into a tamper-evident decision log. `verel pilot
+  eval` scores the log against human labels (precision, recall, false-positive rate, Wilson lower bound) and
+  recommends which graders earned enforcement: enough flagged samples, precision bound, **recall** and **error
+  rate** all have to pass. Unknown modes raise; a gate crash fails closed. See [Pilot](docs/pilot.md).
+
+### Phase 2: media delivery specs and content credentials
+- `verel.media`: `MEDIA` grades operator-declared delivery rules (loudness, true peak, A/V sync, track durations,
+  caption languages, any fact) over measurements the senses supply (`MediaFacts v1`), with EBU R128, ATSC A/85 and
+  EBU R37 profiles. `PROVENANCE` grades C2PA content credentials against a declared policy. Unmeasured is never a
+  pass, `--asset` binds facts to file bytes, unknown C2PA failure codes are failures, no backend fails closed.
+  See [Media](docs/media.md). New extras `media`, `provenance`.
+- **Fix:** the mypy config excluded any directory named `media/`; exclusions are now anchored to the repo root.
+
+### Phase 3: enterprise operations
+- `verel serve-pilot`: multi-tenant HTTP service with always-on authentication, roles (`viewer` / `operator` /
+  `admin`), hashed bearer tokens or OIDC SSO (`verel[sso]`), tenant taken only from the authenticated principal, and a
+  per-tenant tamper-evident audit trail. OpenTelemetry export (`verel[otel]`, inert until the host installs an SDK).
+  CycloneDX SBOM generator and a Sigstore build-provenance workflow (runs on the next tag). Retention via `verel pilot
+  archive`. See [Enterprise](docs/enterprise.md).
+- **Evidence integrity:** one shared keyed log (`verel._chainlog`) backs decision, label, policy and audit logs:
+  per-record HMAC, a keyed head ledger (truncation and deletion are detected), per-tenant MAC domains, O(1) appends,
+  no symlink following, bounded record size.
+
+### Phase 4: scale and connectors
+- `verel.jobs`: durable SQLite job queue with fenced leases, capped exponential backoff, dead-lettering and
+  idempotent enqueue; `verel worker` / `verel jobs`. `verel hotfolder`: drop-a-file integration (shadow by default,
+  rename-only, never deletes, no sidecar means no pass). Signed outbound webhooks to operator-configured sinks only.
+  `tools/bench_scale.py` and measured numbers in [Scale](docs/scale.md). See [Connectors](docs/connectors.md).
+- The benchmark found, and this release fixes, a quadratic log append and a per-operation WAL checkpoint in the queue.
+
+### Phase 5: gated rollout
+- `verel.pilot.policy`: per-grader enforcement history. Promotion to enforce recomputes the evidence from the
+  tenant's own data (shadow, then advisory, then enforce; an admin override is recorded and flagged); demotion is
+  always allowed; enforcing graders are auto-demoted when recent precision or reliability regresses; a global kill
+  switch (`VEREL_PILOT_KILL_SWITCH=1`). `verel pilot promote|demote|policy|health`. See [Rollout](docs/rollout.md) and
+  the [support and compatibility policy](docs/support.md).
+
+### Security
+Three red-team passes (two independent agents plus self-review) found and this release closes, each pinned by a
+regression test: an unkeyed log chain; a declared C2PA state overriding tamper codes; unknown C2PA failure codes
+reading as valid; `not_in` failing open; YAML alias bombs; readiness ignoring recall and outages; readiness
+thresholds chosen by the caller; facts not bindable to an asset; an unbound saved manifest; unauthenticated
+requests writing to a shared audit log; one request able to brick a tenant's logs; a check-then-append label race;
+symlink and temp-file redirection; evidence replayable across tenants; unbounded device and FIFO reads; trailing
+newlines in tenant and artifact ids. Round 3 added: one tenant's big label batch parking every other tenant's
+requests (bounded lock waits, batched writes, per-tenant write limits); a hot-folder temp-file symlink clobbering any
+file; a forged verdict sidecar suppressing grading; facts not bound to the dropped file; an operator's own labels
+demoting a grader (and fabricating promotion evidence with a single reviewer); bad flags hidden by padding passes;
+jobs bypassing the tenant's promotion policy; tenants sharing media roots and choosing their own spec; unbounded job
+queues; a torn write bricking a log; read-only tokens filling the audit log; `ne`/`not_in` failing open on `0` vs `0.0`;
+server paths in job errors. Round 4 added: a repeated facts list exhausting worker memory; re-recording a labeled
+artifact to manufacture promotion evidence or hide a regression; enforcement without an asset skipping the binding
+check; hot-folder starvation across `--once` runs, a same-size content swap under a restored mtime, and a swap between
+grading and moving; a crashed batch write bricking a log; a torn-tail repair that could delete a committed record;
+denied requests filling the audit log; actions running before their audit record; a promoter or a stray label
+satisfying the two-reviewer rule; squatting the workers' internal dedupe keys; exact integer equality and non-finite
+bounds in media rules; uninterpretable C2PA status entries reading as valid; a token-file temp symlink; per-read
+full-chain verification cost (now cached, invalidated by any change). Round 5 added: a stale ledger copy hiding up to 512
+truncated records (batch crashes are now announced in the keyed ledger instead of tolerated as lag; `verel pilot repair`);
+one operator fabricating both halves of the evidence to demote a good grader (recorders no longer score their own decisions);
+real C2PA success codes (`ocsp.notRevoked`) failing as tampering; hot-folder files stuck after a metadata-only change or a crash,
+quarantined early because the sender controlled the file's age, or aborting the whole scan on a hostile sidecar; one tenant
+exhausting the shared queue row cap; archiving silently reopening decided artifact ids; the denial budget hiding privileged
+attempts; unique-record writes costing O(n); a token file stuck after a transient bad edit. Round 6 added: a hot-folder file
+decided in shadow being released by that old PASS after switching to enforce; readers racing a writer and reporting false
+corruption (readers now take a shared lock); decisions on one bad file under many ids, or via the job queue by the same
+person, counting as independent evidence; retention reopening labels; `repair` being steerable by a stale pending marker
+(the marker now commits the exact batch hashes); touching a file flooding the evidence log; the CLI being unable to verify
+service data (`--domain`). Round 7 added: slow readers starving writers (verification now runs on a copy outside the lock); the
+ledger outgrowing its read limit after thousands of archives; the archived-id index being forgeable, deletable and written for
+failed archives; read-only copies being unverifiable; hot-folder swapped-bytes decisions going unrecorded and two names that
+sanitize alike colliding; a sender blocking a file name permanently; an old queue file failing after an upgrade; a busy tenant
+locking itself out with finished jobs; and, by design, **HTTP-reported decisions no longer count as promotion or demotion
+evidence** (an operator supplies the grader's output there), which closes forged-demotion and decoy-record attacks. Round 8 added: measured evidence now also requires the facts to name the
+file's hash (an enqueue-only operator could otherwise mint "measured" decisions); a non-UTF-8 file name stopping the hot-folder
+watcher; quadratic seen-store pruning stalling scans; eviction resetting the per-name version cap; the archived-id index being
+editable by deleting one line and duplicating another (now chained line to line); a failed archive leaving phantom ids and an
+orphan segment; a cache-eviction race; and the CLI printing a traceback when the log is busy.
 
 ## 1.13.0 — Eyes gain sight: live desktop screen capture
 

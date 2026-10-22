@@ -71,6 +71,12 @@ nav:
   - Use cases — SRE / Platform / Cloud: use-cases-infra.md
   - Use cases — Telecom RAN / 5G Core: use-cases-telecom.md
   - Guard — document-ingress defense: guard.md
+  - Media — delivery specs & content credentials: media.md
+  - Enterprise — identity, tenants, audit, supply chain: enterprise.md
+  - Connectors — hot folders, queue, webhooks: connectors.md
+  - Scale — measured throughput: scale.md
+  - Rollout — shadow to enforcement: rollout.md
+  - Support & compatibility policy: support.md
   - Pilot — shadow mode & earned enforcement: pilot.md
   - Real-world scenarios: examples.md
   - Adoption: adoption.md

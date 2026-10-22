@@ -231,6 +231,22 @@ advise. Language toolchains live in `verel.ci.LANGS`; adding a runtime is one `L
 
 ---
 
+## Pilot, media and enterprise layer (`verel.pilot`, `verel.media`, `verel.jobs`, `verel.auth`)
+
+How Verel is put into a real media pipeline, on top of the verdict bus:
+
+- **`verel.media`** adds two deterministic graders (`MEDIA` delivery-spec rules over supplied measurements, `PROVENANCE`
+  C2PA policy). The senses (Audel, AgentVision, ffprobe) measure; Verel grades. Nothing is inferred.
+- **`verel.pilot`** wraps the gate in shadow / advisory / enforce / policy modes and records every would-be verdict in a
+  keyed, tamper-evident log (`verel._chainlog`). Evaluation scores graders against human labels; `policy` promotes
+  graders one at a time on evidence recomputed from the tenant's own data and auto-demotes regressions.
+- **`verel.auth` + `verel serve-pilot`** add roles, hashed tokens or OIDC, tenant scoping from the principal only, and
+  per-tenant audit.
+- **`verel.jobs` + `verel.connectors`** add a durable fenced job queue, a hot-folder watcher and signed webhooks for scale.
+
+See [Pilot](pilot.md), [Media](media.md), [Enterprise](enterprise.md), [Connectors](connectors.md), [Scale](scale.md) and
+[Rollout](rollout.md).
+
 ## Surfaces
 
 - **Library** (`import verel`) · **CLI** (`verel doctor|loop|fleet|heal|ci`) ·

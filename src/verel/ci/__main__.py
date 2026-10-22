@@ -8,6 +8,8 @@ Subcommands (see `verel-ci <command> --help`):
   telecom-cfg   --repo PATH   grade a 5G Core+RAN config artifact (--values) against invariants, offline
   telecom-fetch --url URL     scrape Prometheus/PromQL → a metrics file (network-facing acquisition)
   telecom-apply --repo PATH   act-then-verify a config change (dry-run unless --apply), guardrail-gated
+  media         --repo PATH   grade supplied media facts (--facts) against a delivery spec (--spec), offline
+  provenance    --repo PATH   grade an asset's C2PA content credentials against a declared policy
   install       --repo PATH   install the pre-commit hook
 """
 
@@ -120,6 +122,23 @@ def main(argv=None) -> int:
     sp.add_argument("--rules", help="declared invariants (verel_telecom.yaml); default: all built-ins")
     sp.add_argument("--attest", default="hmac", choices=["hmac", "ed25519"])
 
+    sp = sub.add_parser("media", help="grade media measurement facts against a declared delivery spec")
+    sp.add_argument("--repo", required=True)
+    sp.add_argument("--facts", action="append", default=[], help="MediaFacts JSON (repeatable; merged)")
+    sp.add_argument("--spec", required=True, help="delivery spec (YAML/JSON): profiles + rules + waivers")
+    sp.add_argument("--asset", help="the media file the facts describe; its sha256 is bound into the receipt "
+                    "and must match a supplied `asset.sha256` fact")
+    sp.add_argument("--attest", default="hmac", choices=["hmac", "ed25519"])
+
+    sp = sub.add_parser("provenance", help="grade an asset's C2PA content credentials against a policy")
+    sp.add_argument("--repo", required=True)
+    sp.add_argument("--asset", help="media file in the repo (read via c2patool / c2pa-python); with "
+                    "--manifest-json it only BINDS the saved report to these bytes in the receipt")
+    sp.add_argument("--manifest-json", help="a saved c2patool report in the repo (offline; trusted input "
+                    "unless --asset binds it)")
+    sp.add_argument("--policy", help="provenance policy (YAML/JSON); default: manifest required, AI flagged")
+    sp.add_argument("--attest", default="hmac", choices=["hmac", "ed25519"])
+
     sp = sub.add_parser("telecom-fetch",  # acquisition helper: talks to the network, writes a file
                         help="scrape Prometheus/PromQL → a metrics file (network-facing; grader offline)")
     sp.add_argument("--url", required=True, help="Prometheus /metrics endpoint, or the server base URL "
@@ -218,6 +237,27 @@ def main(argv=None) -> int:
         print(f"[telecom:cfg] verdict={rep.verdict.value}")
         for i in rep.issues[:50]:
             print(f"      {i.source.value}:{i.severity.value} {i.locator or ''} {i.message[:110]}")
+        return 0 if rep.verdict != Verdict.FAIL else 1
+
+    if args.cmd in ("media", "provenance"):
+        try:
+            if args.cmd == "media":
+                from ..media import grade_media
+                rep = grade_media(args.repo, facts=args.facts, spec=args.spec, asset=args.asset,
+                                   attest=args.attest)
+            else:
+                from ..media import grade_provenance
+                rep = grade_provenance(args.repo, asset=args.asset, manifest_json=args.manifest_json,
+                                       policy=args.policy, attest=args.attest)
+        except (ValueError, FileNotFoundError, OSError, RecursionError, MemoryError, TypeError,
+                KeyError, OverflowError) as e:
+            from ..memory.view import canonical_text as _e
+            print(f"{args.cmd}: {type(e).__name__}: {_e(str(e))[:300]}", file=sys.stderr)
+            return 2
+        from ..memory.view import canonical_text as _s
+        print(f"[{args.cmd}] verdict={rep.verdict.value}")
+        for i in rep.issues[:50]:
+            print(f"      {i.severity.value:<8} {_s(i.locator or '')} {_s(i.message)[:140]}")
         return 0 if rep.verdict != Verdict.FAIL else 1
 
     stage = (precommit_stage(args.repo) if args.cmd == "precommit"

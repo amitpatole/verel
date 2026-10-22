@@ -114,21 +114,40 @@ def test_delete_middle_and_reorder_detected(tmp_path):
         log.verify()
 
 
-def test_tail_truncation_caught_only_with_anchor(tmp_path):
+def test_tail_truncation_and_deletion_caught_by_keyed_head_ledger(tmp_path):
     log = _filled(tmp_path)
-    head = log.head()
     lines = log.path.read_text().splitlines()
     log.path.write_text("\n".join(lines[:-1]) + "\n")
-    assert log.verify() == 3                       # self-contained chain can't see it...
     with pytest.raises(LogCorrupt):
-        log.verify(expect_head=head)               # ...an external anchor does
+        log.verify()                               # no external anchor needed any more
+    log.path.write_text("\n".join(lines) + "\n")
+    assert log.verify() == 4
+    log.path.unlink()
+    with pytest.raises(LogCorrupt):
+        log.verify()                               # deleting the whole log is caught too
 
 
-def test_append_refuses_corrupt_chain(tmp_path):
+def test_external_head_anchor_still_pins(tmp_path):
     log = _filled(tmp_path)
-    log.path.write_text(log.path.read_text().replace("a1", "zz", 1))
+    with pytest.raises(LogCorrupt):
+        log.verify(expect_head="f" * 64)
+
+
+def test_append_refuses_to_extend_a_corrupt_tail(tmp_path):
+    log = _filled(tmp_path)
+    lines = log.path.read_text().splitlines()
+    lines[-1] = lines[-1].replace('"a3"', '"zz"')
+    log.path.write_text("\n".join(lines) + "\n")
     with pytest.raises(LogCorrupt):
         run_pilot([_rep(False)], artifact_id="new", log=log)
+
+
+def test_midchain_tamper_is_caught_by_full_verify_even_though_append_is_o1(tmp_path):
+    log = _filled(tmp_path)
+    log.path.write_text(log.path.read_text().replace('"a1"', '"zz"', 1))
+    run_pilot([_rep(False)], artifact_id="new", log=log)      # O(1) append only checks the tail...
+    with pytest.raises(LogCorrupt):
+        log.verify()                                          # ...every read and verify walks the chain
 
 
 def test_garbage_line_is_corruption(tmp_path):
@@ -167,10 +186,10 @@ def test_confusion_matrix(tmp_path):
     assert s.precision == 0.5 and s.recall == 0.5 and s.fpr == 0.5
 
 
-def test_latest_record_wins_and_coverage_holes_counted(tmp_path):
+def test_first_record_wins_and_coverage_holes_counted(tmp_path):
     recs = _recs(tmp_path, [("a", [_rep(True)]), ("a", [_rep(False)]), ("zz", [_rep(False)])])
     ev = evaluate(recs, [Label(artifact_id="a", defect=False), Label(artifact_id="never", defect=True)])
-    assert ev.overall.tn == 1 and ev.overall.fp == 0
+    assert ev.overall.fp == 1 and ev.overall.tn == 0       # the FIRST decision is scored; a re-record changes nothing
     assert ev.unlabeled_records == 1 and ev.labels_without_record == 1
 
 

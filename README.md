@@ -8,7 +8,7 @@
   <a href="https://pypi.org/project/verel/"><img src="https://img.shields.io/pypi/v/verel?color=8b7cff&label=pip%20install%20verel&cacheSeconds=1800" alt="PyPI"></a>
   <a href="https://pepy.tech/projects/verel"><img src="https://static.pepy.tech/personalized-badge/verel?period=total&units=international_system&left_color=black&right_color=green&left_text=downloads" alt="PyPI Downloads"></a>
   <a href="https://amitpatole.github.io/verel/"><img src="https://img.shields.io/badge/docs-amitpatole.github.io-5ad1e6" alt="Docs"></a>
-  <img src="https://img.shields.io/badge/tests-1557%20passing-46d39a" alt="tests">
+  <img src="https://img.shields.io/badge/tests-1917%20passing-46d39a" alt="tests">
   <img src="https://img.shields.io/badge/ruff%20%2B%20mypy-clean-5ad1e6" alt="lint">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT">
   <img src="https://img.shields.io/badge/LLM-Ollama%20Cloud%20%C2%B7%20OpenAI-8b7cff" alt="LLM">
@@ -73,6 +73,10 @@ New here? **[5-minute tutorial →](docs/tutorial.md)**
 | ⚖️ **Verdict bus** | `verel.verdict` | One schema for every sense, with an advisory **ceiling clamp**, **grader attestation**, scrubbed fingerprints, and strict-subset **stuck/progress** detection. |
 | 🚁 **Fleet** | `verel.fleet` | Agents managing agents — an **LLM manager** fans out, a scheduler runs workers in **isolated git worktrees** under budget, each gated by the bus. **Concurrent managers** are safe via **fencing leases** (a stale leader's writes are rejected) — enforced even at the remote by a **git pre-receive fencing sink** (a stale push is refused), and across machines by a **hosted control plane** (lease authority behind an HTTP API). **Multi-repo** changes run as one cross-linked DAG and commit as an **atomic saga** (a failure compensates the repos that already landed, in reverse). |
 | 🔧 **Tool-smith** | `verel.toolsmith` | Agents build their own tools: detect → scaffold → test → register → reuse, **sandboxed** (`bwrap`), admitted only on a passing attested eval. |
+| 🔌 **Connectors & scale** | `verel.jobs`, `verel.connectors` | **Hot folders, durable job queue, signed webhooks.** Drop a file in a watched folder and get a verdict sidecar (shadow by default, never deletes). A SQLite job queue with fenced workers, retries and dead-lettering. HMAC-signed outbound webhooks to operator-configured sinks only. Measured throughput, with limits. → **[Connectors →](docs/connectors.md)** · **[Scale →](docs/scale.md)** |
+| 🚦 **Rollout** | `verel.pilot.policy` | **Shadow to enforcement, per grader.** Promotion is gated on evidence recomputed from your own data, demotion is always allowed, enforcing graders are auto-demoted on regression, and a kill switch stops everything. History is keyed and tamper-evident. → **[Rollout →](docs/rollout.md)** |
+| 🏢 **Enterprise** | `verel.auth`, `verel serve-pilot` | **Identity, tenants, audit.** Multi-tenant pilot service with roles, hashed bearer tokens or OIDC SSO, tenant scoping from the authenticated principal only, a tamper-evident audit trail, keyed evidence logs with retention, OpenTelemetry export and a signed-release SBOM workflow. → **[Enterprise →](docs/enterprise.md)** |
+| 🎞️ **Media** | `verel.media` | **Delivery specs and content credentials.** `MEDIA` grades operator-declared rules (loudness / true peak, A/V sync, track durations, caption languages) over measurements the senses supply, with built-in EBU R128, ATSC A/85 and EBU R37 profiles. `PROVENANCE` grades **C2PA content credentials** against a policy (missing, tampered, untrusted, AI-generated). Unmeasured fails; no backend fails closed; signed receipts. → **[Media →](docs/media.md)** |
 | 🧪 **Pilot** | `verel.pilot` | **Shadow mode and earned enforcement.** Attach Verel to a real pipeline without blocking it (`shadow` → `advisory` → `enforce`), log every would-be verdict to a hash-chained tamper-evident log, then score it against human labels (precision, recall, false-positive rate, Wilson lower bound) and recommend which graders earned enforcement. → **[Pilot →](docs/pilot.md)** |
 | ♻️ **Agent-run CI/CD** | `verel.ci` | Self-healing pipeline (inner-loop → pre-commit → pre-merge → canary) with a deterministic **rollback engine** that never acts on advisory evidence. Graders span **Python / JS-TS / Go** (tests · lint · types) plus **perf** (budget), **security** (SAST/audit), **test-effectiveness** (mutation — a surviving injected fault means the tests prove nothing, so it gates), and **spec/intent conformance** (does the diff satisfy the *ticket's* acceptance criteria? — the LLM proposes checks, execution verifies, a violation gates), and **IaC / cloud-IAM / Kubernetes-RBAC** (Terraform/OpenTofu validate + plan, an offline cloud-IAM blast-radius sensor across AWS/GCP/Azure/K8s that catches wildcard/privesc/public/admin grants *before apply*, a plan-bound `TerraformActuator` that gates `apply`/`destroy`, and an opt-in effective-access verifier), and **telecom** (5G RAN/Core — declared config invariants + PM-counter KPIs graded by *one* rule body over Helm, NETCONF/NRM, and bulk-CM alike, plus a guardrail-gated act-then-verify NETCONF actuator) senses — all on one bus, one gate. Reach it from anywhere: `verel mcp install` / `verel rules` (any agent), `verel serve` (REST + PR webhook). |
 
@@ -136,7 +140,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: amitpatole/verel@v1.14.0
+      - uses: amitpatole/verel@v1.18.0
         with:
           repo: .
           install: "-e .[dev]"     # your project deps so its tests import
@@ -146,7 +150,7 @@ jobs:
 
 ```yaml
 - repo: https://github.com/amitpatole/verel
-  rev: v1.14.0
+  rev: v1.18.0
   hooks: [{ id: verel-precommit }]
 ```
 

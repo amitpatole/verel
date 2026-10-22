@@ -100,6 +100,8 @@ class IssueKind(str, Enum):
     HIDDEN_CONTENT = "hidden_content"
     INJECTION = "injection"
     EXFIL_VECTOR = "exfil_vector"
+    SPEC_VIOLATION = "spec_violation"  # a declared delivery-spec rule failed (verel.media)
+    PROVENANCE_ISSUE = "provenance_issue"  # content-credentials missing/invalid/untrusted (verel.media)
     OTHER = "other"
 
 
@@ -138,6 +140,11 @@ class GraderKind(str, Enum):
     # grade supplied artifacts (a metrics file / a config artifact). See docs/use-cases-telecom.md.
     KPI = "kpi"
     TELECOM_CFG = "telecom_cfg"
+    # Media & communications (verel.media): MEDIA = operator-declared delivery-spec rules over supplied
+    # measurement facts (loudness, A/V sync, track/caption consistency — never inferred); PROVENANCE =
+    # content-credentials (C2PA) policy over a validated manifest. Both deterministic → PRECISE.
+    MEDIA = "media"
+    PROVENANCE = "provenance"
     # Document-ingress guard (verel.guard): static hidden-content / prompt-injection scanning over
     # untrusted documents BEFORE they reach an LLM context. Deterministic structural+lexical evidence
     # over supplied files (no model in the loop) → PRECISE_GRADERS (it gates).
