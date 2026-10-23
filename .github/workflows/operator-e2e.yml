@@ -59,6 +59,11 @@ jobs:
           metadata: { name: gw1, namespace: default }
           spec: { replicas: 1, insecure: true }
           EOF
+          # the operator creates the Deployment asynchronously: wait for it to EXIST first, because
+          # `kubectl rollout status` fails at once with NotFound if it runs before the operator reconciles
+          for i in $(seq 1 60); do
+            kubectl -n default get deploy/gw1 >/dev/null 2>&1 && break; sleep 2
+          done
           kubectl -n default rollout status deploy/gw1 --timeout 120s
           kubectl -n default get svc gw1
           kubectl -n default get netpol gw1-ingress
