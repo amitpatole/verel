@@ -486,3 +486,38 @@ def test_unique_appends_by_one_process_do_not_reverify_every_time(tmp_path, monk
     for i in range(1, 30):
         log.append_unique(rec(i))
     assert calls["n"] <= 1  # verified once, then carried forward from our own writes
+
+
+# ---- round 16: a duplicate request must not cost a whole-log verify while the write lock is held ----------------
+def test_a_duplicate_with_a_warm_cache_reads_one_line_not_the_whole_log(tmp_path, monkeypatch):
+    from verel.pilot.log import DuplicateArtifact
+
+    log = ShadowLog(tmp_path / "l.jsonl")
+    for i in range(20):
+        log.append_unique(rec(i))
+    calls = {"n": 0}
+    real = ChainLog._records_uncached
+
+    def counting(self, *a, **k):
+        calls["n"] += 1
+        return real(self, *a, **k)
+
+    monkeypatch.setattr(ChainLog, "_records_uncached", counting)
+    for _ in range(5):
+        with pytest.raises(DuplicateArtifact) as ei:
+            log.append_unique(rec(7))
+        assert ei.value.existing is not None and ei.value.existing.artifact_id == "a7"
+    assert calls["n"] == 0
+
+
+def test_a_cached_position_that_was_edited_is_reported(tmp_path):
+    from verel.pilot.log import DuplicateArtifact
+
+    log = _five(tmp_path)
+    log.append_unique(rec(8))  # warms the cache with this process's own write
+    p = tmp_path / "l.jsonl"
+    p.write_text(p.read_text().replace('"artifact_id":"a3"', '"artifact_id":"b3"', 1))
+    with pytest.raises((LogCorrupt, DuplicateArtifact)):
+        log.append_unique(rec(3))
+    with pytest.raises(LogCorrupt):
+        log.verify()

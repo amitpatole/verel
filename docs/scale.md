@@ -24,7 +24,7 @@ What these say:
   second no matter how many worker threads you add. The cost does **not** grow with log size while one process does the appending: it verifies the whole log once, then carries
   the verified set of decided ids forward from its own writes. If another process (or anything else) changed the files in
   between, the next unique append re-verifies the whole log, O(n). That is deliberate: a decided id is refused from verified
-  records, never from a quick scan of the file. Use one collector process per tenant for volume.
+  records, never from a quick scan of the file. Use one collector process per tenant for volume: with several processes writing one tenant log, each hand-over costs a full verify (about 4 seconds per 100,000 live records here), so keep the live log small with `verel pilot archive`. A repeated id is answered from one line, not a re-verify.
 - **Your options, in order of safety:** keep the default; set `VEREL_LOG_FSYNC=record` (sync only the record, about three times
   faster; after a power loss the ledger or its pending marker may lag, and verification reports it, failing closed, and
   `verel pilot repair` resolves it); or `none` for throwaway pilots. A process crash loses nothing in any mode; only a power loss can

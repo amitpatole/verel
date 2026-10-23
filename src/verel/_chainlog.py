@@ -70,7 +70,7 @@ CACHE_SETTLE_NS = 100_000_000  # 100 ms
 _VERIFIED: dict[tuple, tuple[tuple, list]] = {}  # (path, domain) -> (file fingerprint, verified records)
 _VERIFIED_MAX = 32
 _IDS_CACHE: dict[str, tuple] = {}
-_LIVE_IDS: dict[tuple, tuple[tuple, set]] = {}  # (path, domain) -> (fingerprint after our write, ids)
+_LIVE_IDS: dict[tuple, tuple[tuple, dict]] = {}  # (path, domain) -> (fingerprint after our write, id->offset)
 _CACHE_LOCK = threading.Lock()  # guards both module-level caches (eviction is a read-modify-write)
 
 
@@ -815,23 +815,57 @@ class ChainLog(Generic[R]):
         finally:
             os.close(fd)
 
-    def _live_ids(self) -> set[str]:
-        """The id field of every live record, from a FULLY VERIFIED read (hash, MAC, chain, ledger). Cached
-        against the file fingerprint taken right after our own previous write, so a run of appends by one
-        process verifies once; any change made by anyone else invalidates it and forces a re-verify."""
+    def _live_ids(self) -> dict[str, int]:
+        """id -> byte offset of its line, for every live record, from a FULLY VERIFIED read (hash, MAC, chain,
+        ledger). Cached against the file fingerprint taken right after our own previous write, so a run of
+        appends by one process verifies once; any change made by anyone else invalidates it and forces a
+        re-verify. The offsets let a duplicate be answered by re-reading ONE line, not the whole log."""
         key = (str(self.path), self._domain)
         fp = self._fingerprint()
         with _CACHE_LOCK:
             hit = _LIVE_IDS.get(key)
         if hit is not None and hit[0] == fp:
             return hit[1]
-        ids = {str(getattr(r, self._id_field or "")) for r in self._records_uncached(held=True)}
+        recs = self._records_uncached(held=True)
+        field = self._id_field or ""
+        offsets: dict[str, int] = {}
+        pos, i = 0, 0
+        raw = b""
+        if self.path.exists():
+            with open(self.path, "rb") as fh:
+                raw = fh.read(MAX_FILE + 1)
+        for ln in raw.split(b"\n"):
+            if ln.strip() and not ln.startswith(b'{"_anchor"'):
+                if i < len(recs):
+                    offsets[str(getattr(recs[i], field))] = pos
+                i += 1
+            pos += len(ln) + 1
+        if i != len(recs):  # the file changed under us or the layout is not what we expect: do not cache
+            return {str(getattr(r, field)): -1 for r in recs}
         if self._fingerprint() == fp:
             with _CACHE_LOCK:
                 if len(_LIVE_IDS) >= _VERIFIED_MAX * 4:
                     _LIVE_IDS.pop(next(iter(_LIVE_IDS)), None)
-                _LIVE_IDS[key] = (fp, ids)
-        return ids
+                _LIVE_IDS[key] = (fp, offsets)
+        return offsets
+
+    def _line_at(self, offset: int, value: str) -> R:
+        """Re-read ONE line the cache says holds `value` and check it on its own (hash, MAC, id)."""
+        fd = os.open(self.path, os.O_RDONLY | _NOFOLLOW)
+        try:
+            buf = os.pread(fd, MAX_LINE + 1, offset)
+        finally:
+            os.close(fd)
+        line = buf.split(b"\n", 1)[0]
+        try:
+            r = self._model.model_validate_json(line)
+        except Exception:  # noqa: BLE001
+            raise LogCorrupt("cached record position no longer holds a record") from None
+        if r.hash != r.compute_hash() or not _eq(self._m(r.hash), r.mac):
+            raise LogCorrupt("record failed verification")
+        if str(getattr(r, self._id_field or "")) != value:
+            raise LogCorrupt("cached record position no longer holds this id")
+        return r
 
     def append_if_absent(
         self,
@@ -850,14 +884,19 @@ class ChainLog(Generic[R]):
         try:
             self._repair_torn_tail()
             prev, total, segs = self._tail()
-            ids: set[str] | None = None
+            ids: dict[str, int] | None = None
             if self._id_field:
                 ids = self._live_ids()
                 value = str(getattr(rec, self._id_field))
                 if value in ids:  # hand back the real record (idempotent retries need it)
-                    for existing in self._records_uncached(held=True):
+                    if ids[value] >= 0:
+                        existing = self._line_at(ids[value], value)
                         if confirm(existing):
                             raise duplicate(existing)
+                    else:
+                        for existing in self._records_uncached(held=True):
+                            if confirm(existing):
+                                raise duplicate(existing)
                     raise duplicate(rec)
             else:
                 for existing in self._records_uncached(held=True):
@@ -865,9 +904,10 @@ class ChainLog(Generic[R]):
                         raise duplicate(existing)
             if extra_seen is not None and extra_seen():
                 raise duplicate(rec)
+            offset = self.path.stat().st_size if self.path.exists() else 0
             self._write_records([rec], prev, total, segs)
             if ids is not None:
-                ids.add(str(getattr(rec, self._id_field or "")))
+                ids[str(getattr(rec, self._id_field or ""))] = offset
                 with _CACHE_LOCK:
                     _LIVE_IDS[(str(self.path), self._domain)] = (self._fingerprint(), ids)
             return rec
