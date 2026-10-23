@@ -447,3 +447,42 @@ def test_deleting_the_live_anchor_does_not_reopen_ids(tmp_path):
         log.append_unique(rec(1))
     with pytest.raises(LogCorrupt):
         log.append_unique(rec(20))
+
+
+# ---- round 15: duplicates are decided from VERIFIED, parsed records, never from a byte scan -----------------------
+def test_a_reserialized_line_cannot_hide_a_decided_id(tmp_path):
+    from verel.pilot.log import DuplicateArtifact
+
+    log = _five(tmp_path)
+    p = tmp_path / "l.jsonl"
+    p.write_text(p.read_text().replace('"artifact_id":"a1"', '"artifact_id":"\\u0061\\u0031"', 1))  # same value
+    with pytest.raises(DuplicateArtifact):
+        log.append_unique(rec(1))
+    assert len([r for r in log.records() if r.artifact_id == "a1"]) == 1
+
+
+def test_deleting_a_middle_line_before_an_append_is_reported(tmp_path):
+    log = _five(tmp_path)
+    p = tmp_path / "l.jsonl"
+    lines = p.read_text().splitlines()
+    p.write_text("\n".join(lines[:1] + lines[2:]) + "\n")  # drop a1, keep the tail the ledger expects
+    with pytest.raises(LogCorrupt):
+        log.append_unique(rec(1))
+    p.write_text("\n".join(lines) + "\n")  # restoring it must not have let a duplicate in
+    assert log.verify() == 5
+
+
+def test_unique_appends_by_one_process_do_not_reverify_every_time(tmp_path, monkeypatch):
+    log = ShadowLog(tmp_path / "l.jsonl")
+    log.append_unique(rec(0))
+    calls = {"n": 0}
+    real = ChainLog._records_uncached
+
+    def counting(self, *a, **k):
+        calls["n"] += 1
+        return real(self, *a, **k)
+
+    monkeypatch.setattr(ChainLog, "_records_uncached", counting)
+    for i in range(1, 30):
+        log.append_unique(rec(i))
+    assert calls["n"] <= 1  # verified once, then carried forward from our own writes

@@ -70,6 +70,7 @@ CACHE_SETTLE_NS = 100_000_000  # 100 ms
 _VERIFIED: dict[tuple, tuple[tuple, list]] = {}  # (path, domain) -> (file fingerprint, verified records)
 _VERIFIED_MAX = 32
 _IDS_CACHE: dict[str, tuple] = {}
+_LIVE_IDS: dict[tuple, tuple[tuple, set]] = {}  # (path, domain) -> (fingerprint after our write, ids)
 _CACHE_LOCK = threading.Lock()  # guards both module-level caches (eviction is a read-modify-write)
 
 
@@ -814,6 +815,24 @@ class ChainLog(Generic[R]):
         finally:
             os.close(fd)
 
+    def _live_ids(self) -> set[str]:
+        """The id field of every live record, from a FULLY VERIFIED read (hash, MAC, chain, ledger). Cached
+        against the file fingerprint taken right after our own previous write, so a run of appends by one
+        process verifies once; any change made by anyone else invalidates it and forces a re-verify."""
+        key = (str(self.path), self._domain)
+        fp = self._fingerprint()
+        with _CACHE_LOCK:
+            hit = _LIVE_IDS.get(key)
+        if hit is not None and hit[0] == fp:
+            return hit[1]
+        ids = {str(getattr(r, self._id_field or "")) for r in self._records_uncached(held=True)}
+        if self._fingerprint() == fp:
+            with _CACHE_LOCK:
+                if len(_LIVE_IDS) >= _VERIFIED_MAX * 4:
+                    _LIVE_IDS.pop(next(iter(_LIVE_IDS)), None)
+                _LIVE_IDS[key] = (fp, ids)
+        return ids
+
     def append_if_absent(
         self,
         rec: R,
@@ -822,27 +841,35 @@ class ChainLog(Generic[R]):
         duplicate: Callable[[R], Exception],
         extra_seen: Callable[[], bool] | None = None,
     ) -> R:
-        """Append `rec` unless an existing record is a duplicate. `needle` is a byte string present in the
-        serialized line of any duplicate (a cheap substring scan, no per-record verification: append safety
-        comes from the keyed tail check, full verification from reads); `confirm` parses a candidate line
-        to be sure. `extra_seen` lets a subclass also consult data no longer in the live log."""
+        """Append `rec` unless an existing record is a duplicate. Duplicates are decided from the VERIFIED,
+        parsed records (never a byte scan: a re-serialized line has the same hash but different bytes), with
+        the verified id set cached between this process's own appends. `confirm` picks the duplicate out of
+        the records; `needle` is unused and kept for callers' compatibility. `extra_seen` lets a subclass also
+        consult data no longer in the live log."""
         fd = self._lock()
         try:
             self._repair_torn_tail()
             prev, total, segs = self._tail()
-            if self.path.exists():  # a LIVE record wins: the caller gets the real one back
-                with open(self.path, "rb") as fh:
-                    for line in fh:
-                        if needle in line:
-                            try:
-                                existing = self._model.model_validate_json(line)
-                            except Exception:  # noqa: BLE001
-                                continue
-                            if confirm(existing):
-                                raise duplicate(existing)
+            ids: set[str] | None = None
+            if self._id_field:
+                ids = self._live_ids()
+                value = str(getattr(rec, self._id_field))
+                if value in ids:  # hand back the real record (idempotent retries need it)
+                    for existing in self._records_uncached(held=True):
+                        if confirm(existing):
+                            raise duplicate(existing)
+                    raise duplicate(rec)
+            else:
+                for existing in self._records_uncached(held=True):
+                    if confirm(existing):
+                        raise duplicate(existing)
             if extra_seen is not None and extra_seen():
                 raise duplicate(rec)
             self._write_records([rec], prev, total, segs)
+            if ids is not None:
+                ids.add(str(getattr(rec, self._id_field or "")))
+                with _CACHE_LOCK:
+                    _LIVE_IDS[(str(self.path), self._domain)] = (self._fingerprint(), ids)
             return rec
         finally:
             os.close(fd)

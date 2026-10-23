@@ -21,8 +21,10 @@ What these say:
 - **Grading is cheap.** A delivery-spec check is around half a millisecond. It is not the bottleneck.
 - **The durable evidence log is disk-sync bound.** Each decision is protected by a keyed ledger that announces the write, the record,
   and the final ledger: three syncs by default (about 18 ms each here), which caps one tenant's log near 15 to 20 decisions per
-  second no matter how many worker threads you add. The cost does **not** grow with log size: appends are O(1). (An earlier design
-  verified the whole chain on every append; the benchmark exposed that and it was fixed.)
+  second no matter how many worker threads you add. The cost does **not** grow with log size while one process does the appending: it verifies the whole log once, then carries
+  the verified set of decided ids forward from its own writes. If another process (or anything else) changed the files in
+  between, the next unique append re-verifies the whole log, O(n). That is deliberate: a decided id is refused from verified
+  records, never from a quick scan of the file. Use one collector process per tenant for volume.
 - **Your options, in order of safety:** keep the default; set `VEREL_LOG_FSYNC=record` (sync only the record, about three times
   faster; after a power loss the ledger or its pending marker may lag, and verification reports it, failing closed, and
   `verel pilot repair` resolves it); or `none` for throwaway pilots. A process crash loses nothing in any mode; only a power loss can

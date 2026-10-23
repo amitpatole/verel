@@ -88,7 +88,8 @@ Recommend graduating to ENFORCE: dsp. Keep in shadow/advisory: audio_llm. A huma
 - Restoring an **older but consistent** copy of both the log and its ledger is not detectable without an external copy of the
   head (`verify --expect-head`). A stale ledger paired with a different log is detected.
 - Appends take an exclusive lock and check the log's tail against the keyed ledger, so parallel workers share one log safely
-  on one host. That costs O(n) per append, fine for pilot volumes. Multi-host pilots need a shared
+  on one host. A process that appends repeatedly verifies the log once and then carries the verified state forward; after another writer
+  touches the files the next unique append re-verifies it in full (O(n)), fine for pilot volumes. Multi-host pilots need a shared
   filesystem with working `flock`, or one collector process.
 - Metrics are only as good as the labels. Label a sample that matches production, including clean
   artifacts, or precision and false-positive rate are meaningless.

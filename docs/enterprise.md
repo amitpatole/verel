@@ -114,4 +114,4 @@ torn final line is dropped on the next write, so a log is never left unusable.
   is infeasible, but put a WAF or gateway in front for abuse control.
 - A single process serves all tenants of one service.
 - No SCIM provisioning and no UI for token management (CLI only).
-- Log verification is O(n) per append, which is fine for pilot volumes and not for millions of records.
+- Unique appends re-verify the whole log (O(n)) whenever another writer changed it since this process last wrote, which is fine for pilot volumes and not for millions of records.
