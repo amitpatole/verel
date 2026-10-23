@@ -387,3 +387,33 @@ def test_enospc_during_the_index_write_rolls_back_the_whole_archive(tmp_path, mo
     assert not log.archived_has("a0")
     log.append_unique(rec(9))
     assert log.archive_first(3, tmp_path / "s.archive") == 3 and log.archived_has("a0")
+
+
+# ---- round 13: the archived-id index belongs to ONE log; the rollback only removes what it created ----------------
+def test_another_logs_id_index_cannot_be_swapped_in(tmp_path):
+    from verel.pilot.log import DuplicateArtifact
+
+    a_dir, b_dir = tmp_path / "a", tmp_path / "b"
+    a_dir.mkdir()
+    b_dir.mkdir()
+    a, b = ShadowLog(a_dir / "l.jsonl"), ShadowLog(b_dir / "l.jsonl")  # same (empty) MAC domain
+    for i in range(4):
+        a.append_unique(rec(i))
+        b.append_unique(ShadowRecord(artifact_id=f"other{i}", ts="t", mode="shadow", would_be="pass", enforced="pass"))
+    a.archive_first(3, a_dir / "s.archive")
+    b.archive_first(3, b_dir / "s.archive")
+    assert a.archived_has("a0")
+    (a_dir / "l.jsonl.ids").write_bytes((b_dir / "l.jsonl.ids").read_bytes())  # B's index, chains fine on its own
+    with pytest.raises(LogCorrupt):
+        a.archived_has("a0")
+    with pytest.raises(LogCorrupt):
+        a.append_unique(rec(0))  # a decided id is NOT silently reopened
+    assert DuplicateArtifact
+
+
+def test_archive_failure_does_not_delete_a_file_it_did_not_create(tmp_path):
+    log = _five(tmp_path)
+    (tmp_path / "seg").symlink_to(tmp_path / "nowhere")  # dangling: exists() is False, O_EXCL still refuses it
+    with pytest.raises(OSError):
+        log.archive_first(2, tmp_path / "seg")
+    assert (tmp_path / "seg").is_symlink() and log.verify() == 5

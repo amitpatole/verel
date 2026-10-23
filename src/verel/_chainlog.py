@@ -193,6 +193,22 @@ class ChainLog(Generic[R]):
             raise LogCorrupt("archived-id index is missing entries (deleted or truncated)")
         return frozenset(good), count, counted, off
 
+    def _check_ids_bound(self, counted_mac: str, count: int) -> None:
+        """The index must be THIS log's. Its chain MAC after `count` lines is recorded in the keyed ledger
+        when the lines are archived; otherwise another log's index (same MAC domain) could be copied over
+        this one and every id archived out of this log would read as never decided."""
+        if not count:
+            return
+        led = self._read_ledger()
+        cum, want = 0, None
+        for e in led[2] if led else []:
+            cum += int(e["count"])
+            if cum == count:
+                want = e.get("ids")
+                break
+        if want is None or not _eq(str(want), counted_mac):
+            raise LogCorrupt("archived-id index does not belong to this log (replaced or edited)")
+
     def archived_has(self, value: str) -> bool:
         """Was `value` (the id field of some record) archived out of the live log? Retention must not let a
         decided id be decided again, so archived ids are remembered as short digests: keyed, chained line to
@@ -227,6 +243,7 @@ class ChainLog(Generic[R]):
                 if len(_IDS_CACHE) >= _VERIFIED_MAX * 8:
                     _IDS_CACHE.pop(next(iter(_IDS_CACHE)), None)
                 _IDS_CACHE[str(self._ids)] = hit
+        self._check_ids_bound(hit[3], hit[2])
         return self._id_digest(value) in hit[1]
 
     def _open_lines(self):
@@ -873,9 +890,12 @@ class ChainLog(Generic[R]):
             lines += [r.model_dump_json() for r in recs[:n]]
             old_led = None
             ids_size = None
+            ids_last: str | None = None
+            seg_made = False
             new_count = a_count + n
             try:
                 sfd = os.open(seg, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW, 0o600)
+                seg_made = True  # only a segment THIS call created may be removed by the rollback
                 with os.fdopen(sfd, "w", encoding="utf-8") as fh:
                     fh.write("\n".join(lines) + "\n")
                     fh.flush()
@@ -885,6 +905,7 @@ class ChainLog(Generic[R]):
                         if self._ids.exists():
                             # Trust only the lines the anchor commits to; trim a torn or orphaned tail first.
                             _d, _c, prev_mac, end = self._ids_state(a_count)
+                            self._check_ids_bound(prev_mac, a_count)
                         elif a_count:
                             raise LogCorrupt("archived-id index is missing (records were archived)")
                         else:
@@ -894,7 +915,7 @@ class ChainLog(Generic[R]):
                     except OSError:
                         raise LogCorrupt("archived-id index unreadable") from None
                     moving = [str(getattr(r, self._id_field)) for r in recs[:n]]
-                    payload, _last = self._id_lines(moving, prev_mac)
+                    payload, ids_last = self._id_lines(moving, prev_mac)
                     ids_size = end
                     ifd = os.open(self._ids, os.O_WRONLY | os.O_APPEND | os.O_CREAT | _NOFOLLOW, 0o600)
                     try:
@@ -918,13 +939,17 @@ class ChainLog(Generic[R]):
                     )
                 ]
                 body += [r.model_dump_json() for r in recs[n:]]
-                segs = (old_led[2] if old_led else []) + [{"name": seg.name, "head": new_head, "count": n}]
+                entry: dict = {"name": seg.name, "head": new_head, "count": n}
+                if ids_last is not None:
+                    entry["ids"] = ids_last  # the index chain end after these lines: binds .ids to this log
+                segs = (old_led[2] if old_led else []) + [entry]
                 if len(segs) > MAX_SEGMENT_ENTRIES:  # fold the oldest entries: the ledger stays small
                     keep = MAX_SEGMENT_ENTRIES // 2
                     old, segs = segs[:-keep], segs[-keep:]
-                    segs = [
-                        {"name": "", "head": old[-1]["head"], "count": sum(int(x["count"]) for x in old)}
-                    ] + segs
+                    folded = {"name": "", "head": old[-1]["head"], "count": sum(int(x["count"]) for x in old)}
+                    if "ids" in old[-1]:
+                        folded["ids"] = old[-1]["ids"]
+                    segs = [folded] + segs
                 tip = recs[-1].hash
                 # Ledger FIRST (head and total unchanged, so it stays valid for the old log), live log last:
                 # the single remaining step is the atomic replace, so there is no window in which the archived
@@ -951,10 +976,11 @@ class ChainLog(Generic[R]):
                                 os.truncate(self._ids, ids_size)
                             except OSError:
                                 pass
-                        try:
-                            seg.unlink()
-                        except OSError:
-                            pass
+                        if seg_made:
+                            try:
+                                seg.unlink()
+                            except OSError:
+                                pass
                 raise
             return n
         finally:
