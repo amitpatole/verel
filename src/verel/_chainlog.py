@@ -21,6 +21,7 @@ What it protects, and what it does not:
 
 from __future__ import annotations
 
+import copy
 import fcntl
 import hashlib
 import hmac
@@ -437,7 +438,10 @@ class ChainLog(Generic[R]):
             if a_count != seg_total or (a_count and a_head != _segs[-1]["head"]):
                 # The live anchor must be exactly the end of the recorded archive segments: splicing one back
                 # in front of the live records (or dropping the anchor) would resurrect retired evidence.
-                raise LogCorrupt("live anchor does not match the ledger's archive segments")
+                raise LogCorrupt(
+                    "live anchor does not match the ledger's archive segments "
+                    "(an interrupted archive? run `verel pilot repair`)"
+                )
             # Exactly the committed state, or exactly the announced pending state (a write that finished but
             # did not get to update the ledger). No other lag is tolerated: a stale ledger must not pass.
             if not ((l_head == prev and l_total == total) or (pending and pending[:2] == (prev, total))):
@@ -562,8 +566,11 @@ class ChainLog(Generic[R]):
         fd = self._lock()
         try:
             self._repair_torn_tail()
+            finished = self._finish_archive()
             led = self._read_ledger()
             if led is None or led[3] is None:
+                if finished is not None:
+                    return 0
                 raise LogCorrupt("nothing to repair: the ledger has no interrupted write")
             l_head, l_total, segs, pend = led
             assert pend is not None
@@ -587,6 +594,50 @@ class ChainLog(Generic[R]):
             return k
         finally:
             os.close(fd)
+
+    def _finish_archive(self) -> int | None:
+        """Roll an interrupted archive FORWARD: the ledger already names the new segment but the live log was
+        not yet replaced (a crash between the two writes, or a spliced-back segment). Only done when the
+        segment verifies (chain, MACs), starts at the live anchor, and the live log's first records are
+        exactly the segment's records. Returns the number of records moved, or None if nothing to finish."""
+        led = self._read_ledger()
+        if led is None or not led[2]:
+            return None
+        segs = led[2]
+        last = segs[-1]
+        n = int(last["count"])
+        a_head, a_count, recs = self._parse()
+        if not last["name"] or sum(int(x["count"]) for x in segs) != a_count + n:
+            return None
+        seg = copy.copy(self)
+        seg.path = self.path.parent / last["name"]
+        seg._ledger = Path(str(seg.path) + ".head")
+        seg._tl = threading.local()
+        try:
+            srecs = seg.records(check_ledger=False)
+            s_anchor = seg._parse()[:2]
+        except (OSError, LogCorrupt):
+            raise LogCorrupt("interrupted archive: segment missing or invalid; refusing to repair") from None
+        if (
+            len(srecs) != n
+            or srecs[-1].hash != last["head"]
+            or s_anchor != (a_head, a_count)
+            or [r.hash for r in recs[:n]] != [r.hash for r in srecs]
+        ):
+            raise LogCorrupt("interrupted archive does not match its segment; refusing to repair")
+        body = [
+            json.dumps(
+                {
+                    "_anchor": {
+                        "head": last["head"],
+                        "count": a_count + n,
+                        "mac": self._m(f"anchor:{last['head']}:{a_count + n}"),
+                    }
+                }
+            )
+        ] + [r.model_dump_json() for r in recs[n:]]
+        _write_atomic(self.path, "\n".join(body) + "\n")
+        return n
 
     def _records_after(self, ledger_head: str, anchor_head: str) -> list[R] | None:
         """The records that follow `ledger_head` at the end of the log (an interrupted BATCH), verifying each
@@ -826,7 +877,7 @@ class ChainLog(Generic[R]):
                     os.fsync(ifd)
                 finally:
                     os.close(ifd)
-            replaced = False
+            old_led = self._read_ledger()
             try:
                 new_head, new_count = recs[n - 1].hash, a_count + n
                 body = [
@@ -841,8 +892,7 @@ class ChainLog(Generic[R]):
                     )
                 ]
                 body += [r.model_dump_json() for r in recs[n:]]
-                led = self._read_ledger()
-                segs = (led[2] if led else []) + [{"name": seg.name, "head": new_head, "count": n}]
+                segs = (old_led[2] if old_led else []) + [{"name": seg.name, "head": new_head, "count": n}]
                 if len(segs) > MAX_SEGMENT_ENTRIES:  # fold the oldest entries: the ledger stays small
                     keep = MAX_SEGMENT_ENTRIES // 2
                     old, segs = segs[:-keep], segs[-keep:]
@@ -850,32 +900,35 @@ class ChainLog(Generic[R]):
                         {"name": "", "head": old[-1]["head"], "count": sum(int(x["count"]) for x in old)}
                     ] + segs
                 tip = recs[-1].hash
-                _write_atomic(self.path, "\n".join(body) + "\n")
-                replaced = True
+                # Ledger FIRST (head and total unchanged, so it stays valid for the old log), live log last:
+                # the single remaining step is the atomic replace, so there is no window in which the archived
+                # records exist nowhere. A crash between the two is finished by `repair()` (_finish_archive).
                 self._write_ledger(tip, a_count + len(recs), segs)
+                _write_atomic(self.path, "\n".join(body) + "\n")
             except BaseException:
-                if replaced:
-                    # The live log already left the archived records behind: the segment and the id index are
-                    # now the ONLY copy, so never delete them. The old ledger still matches (same head and
-                    # total); retry to record the segment, otherwise leave the state for the operator.
-                    for _ in range(3):
-                        try:
-                            self._write_ledger(tip, a_count + len(recs), segs)
-                            break
-                        except BaseException:
-                            continue
-                    raise
-                # The live log was NOT replaced: undo what we added so a failed archive leaves no phantom ids
-                # and no orphan segment.
-                if ids_size is not None:
-                    try:
-                        os.truncate(self._ids, ids_size)
-                    except OSError:
-                        pass
                 try:
-                    seg.unlink()
-                except OSError:
-                    pass
+                    replaced = self._parse()[1] == new_count
+                except Exception:  # noqa: BLE001
+                    replaced = False
+                if not replaced:
+                    # The live log still holds the records: put the ledger back and drop what we added. If the
+                    # ledger cannot be restored, keep the segment and ids so `repair()` can finish it.
+                    try:
+                        if old_led is not None:
+                            self._write_ledger(old_led[0], old_led[1], old_led[2])
+                        restored = True
+                    except BaseException:  # noqa: BLE001
+                        restored = False
+                    if restored:
+                        if ids_size is not None:
+                            try:
+                                os.truncate(self._ids, ids_size)
+                            except OSError:
+                                pass
+                        try:
+                            seg.unlink()
+                        except OSError:
+                            pass
                 raise
             return n
         finally:

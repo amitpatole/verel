@@ -221,7 +221,8 @@ def _make_handler(root: Path, auth: Authenticator, queue: JobQueue, stats: dict[
                 return recs
             # ...and only when the facts named THIS file's hash: otherwise an enqueue-only operator could
             # point jobs at any facts file and mint "measured" decisions for assets never examined.
-            return [r for r in recs if r.bound]  # `bound` is only ever set by a trusted in-process grader
+            # `bound` is only set by a trusted in-process grader; the ref check also covers older records.
+            return [r for r in recs if (r.ref.startswith("job:") or r.ref == "hotfolder") and r.bound]
 
         def _labels(self, p: Principal) -> list[Label]:
             """Labels usable as EVIDENCE: a person who recorded a decision cannot also be the one whose label

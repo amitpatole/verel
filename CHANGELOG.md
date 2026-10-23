@@ -10,7 +10,9 @@ intermediate builds would have shipped known-vulnerable code.
 Release-candidate review (round 9): a failed archive after the live log was replaced no longer deletes the
 archived records, a segment spliced back into the live log is detected, the two-reviewer rule counts only labels that
 score evidence, every facts file must name the asset, `bound` is only believed from an in-process grader (not HTTP
-reports), `verel pilot verify|repair|archive` take `--kind labels|policy|audit`, and job bodies with wrong types get a 400.
+reports), `verel pilot verify|repair|archive` take `--kind labels|policy|audit`, and job bodies with wrong types get a 400. Round 10 followed: the archive writes its ledger before replacing the live log, so a crash
+between the two is finished by `verel pilot repair` (verified against the segment) instead of leaving the log unverifiable, and
+`verel pilot archive` refuses the policy log.
 
 ### Phase 1: shadow mode and earned enforcement
 - `verel.pilot` / `verel pilot`: run Verel beside an existing pipeline in `shadow` (log only), `advisory`

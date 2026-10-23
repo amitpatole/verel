@@ -36,44 +36,119 @@ def rep(grader=GraderKind.DSP, bad=False):
     )
 
 
-# ---- F1: a ledger failure AFTER the live log was replaced must never delete the archived records -------------------
-def test_archive_ledger_failure_keeps_segment_and_ids_and_recovers(tmp_path, monkeypatch):
+# ---- F1: an archive interrupted at ANY point loses nothing and is either rolled back or finished by repair -----------
+def _five(tmp_path):
     log = ShadowLog(tmp_path / "l.jsonl")
     for i in range(5):
         log.append_unique(rec(i))
+    return log
+
+
+def test_archive_ledger_failure_rolls_back_cleanly(tmp_path, monkeypatch):
+    log = _five(tmp_path)
     real, calls = ChainLog._write_ledger, {"n": 0}
 
     def flaky(self, *a, **k):
         calls["n"] += 1
-        if calls["n"] == 1:  # ENOSPC once, on the ledger write that follows the live-log replace
+        if calls["n"] == 1:  # ENOSPC once, on the ledger write that now PRECEDES the live-log replace
             raise OSError(28, "No space left on device")
         return real(self, *a, **k)
 
     monkeypatch.setattr(ChainLog, "_write_ledger", flaky)
     with pytest.raises(OSError):
         log.archive_first(3, tmp_path / "s.archive")
-    assert (tmp_path / "s.archive").exists()  # the only copy of the archived records survives
-    assert log.verify() == 2 and log.archived_count() == 3 and log.missing_segments() == []
-    assert log.archived_has("a0")
-    with pytest.raises(Exception):  # the retired id is still retired
-        log.append_unique(rec(0))
-    log.append_unique(rec(9))  # and the log keeps working
+    monkeypatch.undo()
+    assert not (tmp_path / "s.archive").exists() and log.verify() == 5 and not log.archived_has("a0")
+    assert log.archive_first(3, tmp_path / "s2.archive") == 3  # and the archive can simply be retried
+    assert log.verify() == 2 and log.archived_has("a0")
 
 
-def test_archive_that_fails_before_the_replace_still_rolls_back(tmp_path, monkeypatch):
-    log = ShadowLog(tmp_path / "l.jsonl")
-    for i in range(5):
-        log.append_unique(rec(i))
+def test_archive_replace_failure_rolls_back_cleanly(tmp_path, monkeypatch):
     import verel._chainlog as cl
 
-    def boom(*a, **k):
-        raise OSError(28, "No space left on device")
+    log = _five(tmp_path)
+    real = cl._write_atomic
+
+    def boom(path, *a, **k):
+        if str(path) == str(log.path):
+            raise OSError(28, "No space left on device")
+        return real(path, *a, **k)
 
     monkeypatch.setattr(cl, "_write_atomic", boom)
     with pytest.raises(OSError):
         log.archive_first(3, tmp_path / "s.archive")
     monkeypatch.undo()
     assert not (tmp_path / "s.archive").exists() and log.verify() == 5 and not log.archived_has("a0")
+
+
+def test_a_crash_between_the_ledger_and_the_replace_is_finished_by_repair(tmp_path, monkeypatch):
+    import verel._chainlog as cl
+
+    log = _five(tmp_path)
+    real_atomic, real_ledger, calls = cl._write_atomic, ChainLog._write_ledger, {"n": 0}
+
+    def die_at_replace(path, *a, **k):
+        if str(path) == str(log.path):
+            raise KeyboardInterrupt  # the process dies before the live log is replaced...
+        return real_atomic(path, *a, **k)
+
+    def ledger_then_stuck(self, *a, **k):
+        calls["n"] += 1
+        if calls["n"] > 1:  # ...and the ledger can not be put back either (power loss)
+            raise OSError(5, "I/O error")
+        return real_ledger(self, *a, **k)
+
+    monkeypatch.setattr(cl, "_write_atomic", die_at_replace)
+    monkeypatch.setattr(ChainLog, "_write_ledger", ledger_then_stuck)
+    with pytest.raises(KeyboardInterrupt):
+        log.archive_first(3, tmp_path / "s.archive")
+    monkeypatch.undo()
+    assert (tmp_path / "s.archive").exists()  # the archived records exist
+    with pytest.raises(LogCorrupt, match="repair"):
+        log.verify()  # the half-done state is reported, with the way out
+    log.repair()
+    assert log.verify() == 2 and log.archived_count() == 3 and log.archived_has("a0")
+    with pytest.raises(Exception):
+        log.append_unique(rec(0))  # the retired id stays retired
+    log.append_unique(rec(9))
+
+
+def test_repair_refuses_an_interrupted_archive_whose_segment_does_not_match(tmp_path, monkeypatch):
+    import verel._chainlog as cl
+
+    log = _five(tmp_path)
+    real_atomic, real_ledger, calls = cl._write_atomic, ChainLog._write_ledger, {"n": 0}
+
+    def die(path, *a, **k):
+        if str(path) == str(log.path):
+            raise KeyboardInterrupt
+        return real_atomic(path, *a, **k)
+
+    def stuck(self, *a, **k):
+        calls["n"] += 1
+        if calls["n"] > 1:
+            raise OSError(5, "I/O error")
+        return real_ledger(self, *a, **k)
+
+    monkeypatch.setattr(cl, "_write_atomic", die)
+    monkeypatch.setattr(ChainLog, "_write_ledger", stuck)
+    with pytest.raises(KeyboardInterrupt):
+        log.archive_first(3, tmp_path / "s.archive")
+    monkeypatch.undo()
+    seg = tmp_path / "s.archive"
+    seg.write_text(seg.read_text().replace("a1", "zz", 1))  # the segment was edited
+    with pytest.raises(LogCorrupt):
+        log.repair()
+
+
+def test_cli_refuses_to_archive_the_policy_log(tmp_path):
+    from verel.pilot.policy import PolicyStore
+
+    store = PolicyStore(tmp_path / "policy.jsonl")
+    store.promote("dsp", "advisory", "a")
+    store.promote("dsp", "enforce", "a", None, override_reason="bootstrap with sign-off from the QC lead")
+    rc = main(["pilot", "archive", "--log", str(tmp_path / "policy.jsonl"), "--kind", "policy", "--keep-last", "0"])
+    assert rc == 2 and store.current().mode_for("dsp").value == "enforce"
 
 
 # ---- F6: splicing a segment back in front of the live records is detected -----------------------------------------

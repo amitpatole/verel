@@ -194,6 +194,10 @@ def _pilot(args) -> int:
                   f"head={log.head()}")
             return 0
         if args.pilot_cmd == "archive":
+            if kind == "policy":  # the policy is folded from the LIVE records; archiving would reset it
+                print("error: the policy log cannot be archived (it would silently change what is enforced)",
+                      file=sys.stderr)
+                return 2
             from datetime import datetime, timezone
             total = log.verify()
             seg = args.segment or f"{args.log}.{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}.archive"
