@@ -842,7 +842,8 @@ class ChainLog(Generic[R]):
             end = n if nl < 0 else nl
             line = raw[pos:end]
             if line.strip() and not line.startswith(b'{"_anchor"'):
-                # every offset must land on the line that carries THAT record's hash
+                # a cheap sanity check (not a proof: `_line_at` re-checks hash, MAC and id before anything is
+                # trusted): the offset should land on a line that mentions THAT record's hash
                 if i >= len(recs) or recs[i].hash.encode() not in line:
                     ok = False
                     break
@@ -854,6 +855,7 @@ class ChainLog(Generic[R]):
         if self._fingerprint() != fp:
             return offsets, False
         with _CACHE_LOCK:
+            _LIVE_IDS.pop(key, None)  # re-insert at the end: eviction is least-recently-stored
             if len(_LIVE_IDS) >= _VERIFIED_MAX * 4:
                 _LIVE_IDS.pop(next(iter(_LIVE_IDS)), None)
             _LIVE_IDS[key] = (fp, offsets)
