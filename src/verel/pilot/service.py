@@ -178,9 +178,18 @@ def _make_handler(root: Path, auth: Authenticator, queue: JobQueue, stats: dict[
                 raise _HTTPError(403, "forbidden")
 
         def _reviewers(self, p: Principal, *, exclude: str = "") -> int:
-            """Distinct people who ORIGINALLY labeled a meaningful share of the evidence. Amendments, the
-            promoter, and a reviewer who labeled one stray artifact do not count."""
-            originals = [r for r in label_log(root, p.tenant).records() if not r.amend]
+            """Distinct people who ORIGINALLY labeled a meaningful share of the evidence that actually scores.
+            Only labels that count count: the artifact must be in the evidence set and the label must not come
+            from the one who recorded it. Amendments, the promoter, and a reviewer who labeled one stray
+            artifact do not count."""
+            recorder: dict[str, str] = {}
+            for r in self._evidence_records(p):
+                recorder.setdefault(r.artifact_id, r.recorded_by)
+            originals = [
+                r
+                for r in label_log(root, p.tenant).records()
+                if not r.amend and r.artifact_id in recorder and recorder[r.artifact_id] != r.by
+            ]
             if not originals:
                 return 0
             per: dict[str, int] = defaultdict(int)
@@ -212,7 +221,7 @@ def _make_handler(root: Path, auth: Authenticator, queue: JobQueue, stats: dict[
                 return recs
             # ...and only when the facts named THIS file's hash: otherwise an enqueue-only operator could
             # point jobs at any facts file and mint "measured" decisions for assets never examined.
-            return [r for r in recs if (r.ref.startswith("job:") or r.ref == "hotfolder") and r.bound]
+            return [r for r in recs if r.bound]  # `bound` is only ever set by a trusted in-process grader
 
         def _labels(self, p: Principal) -> list[Label]:
             """Labels usable as EVIDENCE: a person who recorded a decision cannot also be the one whose label
@@ -455,14 +464,19 @@ def _make_handler(root: Path, auth: Authenticator, queue: JobQueue, stats: dict[
                         )
                 elif str(asked).strip().lower() == "enforce":
                     self._need(p, "pilot:promote", action + " mode=enforce")
+                dedupe, attempts = b.get("dedupe_key"), b.get("max_attempts", 3)
+                if dedupe is not None and not isinstance(dedupe, str):
+                    raise _HTTPError(400, "dedupe_key must be a string")
+                if isinstance(attempts, bool) or not isinstance(attempts, int):
+                    raise _HTTPError(400, "max_attempts must be an integer")
                 self._audit(p, action, True, str(kind))
                 try:
                     jid = queue.enqueue(
                         p.tenant,
                         str(kind),
                         payload,
-                        dedupe_key=b.get("dedupe_key"),
-                        max_attempts=int(b.get("max_attempts", 3)),
+                        dedupe_key=dedupe,
+                        max_attempts=attempts,
                         by=p.id,
                     )
                 except QuotaExceeded as e:

@@ -121,6 +121,7 @@ def _finish(job: Job, ctx: WorkerContext, report: Any) -> dict[str, Any]:
             unique=True,
             ref=f"job:{job.id}",
             recorded_by=job.by,
+            trusted=True,
         )
     except DuplicateArtifact as dup:
         prior = dup.existing

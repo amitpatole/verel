@@ -284,6 +284,7 @@ def scan_once(hf: HotFolder, *, now: float | None = None) -> list[Outcome]:
                 unique=True,
                 ref="hotfolder",
                 recorded_by="hotfolder",
+                trusted=True,
             )
             seen[vkey] = versions + 1
         except DuplicateArtifact as dup:

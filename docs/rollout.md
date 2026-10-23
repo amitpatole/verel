@@ -85,10 +85,11 @@ was enforcing, or wasn't.
 
 The evidence is only as honest as the labels, so the service enforces some structure:
 
-- Promotion to enforce needs **two reviewers**, meaning two different people who each labeled a meaningful share
-  (at least 5 labels and 10% of the evidence) of the original labels. An admin's amendment, the promoter's own
-  labels and a stray label on one artifact do not count (`reviewers` in the evaluation). With fewer, an admin needs
-  an override reason, which is recorded.
+- Promotion to enforce needs **two reviewers**, meaning two different people who each originally labeled a
+  meaningful share (at least 5 labels and 10%) of the evidence that actually scores. Labels on a decision the
+  labeler recorded themselves, or on excluded self-reported decisions, do not count, and neither do an admin's
+  amendment, the promoter's own labels or a stray label on one artifact (`reviewers` in the evaluation). With fewer,
+  an admin needs an override reason, which is recorded.
 - A label can only describe an artifact that already has a recorded decision, so nobody can pre-label future assets.
 - **The person who recorded a decision cannot be the one whose label scores it.** Self-labeled decisions are left out of
   every evaluation, promotion and health check, so a single operator cannot fabricate both halves of the evidence, either to

@@ -433,6 +433,11 @@ class ChainLog(Generic[R]):
                 raise LogCorrupt("head ledger missing for a non-empty log (deleted or replaced)")
         else:
             l_head, l_total, _segs, pending = led
+            seg_total = sum(int(x["count"]) for x in _segs)
+            if a_count != seg_total or (a_count and a_head != _segs[-1]["head"]):
+                # The live anchor must be exactly the end of the recorded archive segments: splicing one back
+                # in front of the live records (or dropping the anchor) would resurrect retired evidence.
+                raise LogCorrupt("live anchor does not match the ledger's archive segments")
             # Exactly the committed state, or exactly the announced pending state (a write that finished but
             # did not get to update the ledger). No other lag is tolerated: a stale ledger must not pass.
             if not ((l_head == prev and l_total == total) or (pending and pending[:2] == (prev, total))):
@@ -815,10 +820,13 @@ class ChainLog(Generic[R]):
                 ids_size = self._ids.stat().st_size if self._ids.exists() else 0
                 ifd = os.open(self._ids, os.O_WRONLY | os.O_APPEND | os.O_CREAT | _NOFOLLOW, 0o600)
                 try:
-                    os.write(ifd, payload)
+                    view = memoryview(payload)
+                    while view:  # a short write must not leave a torn index line
+                        view = view[os.write(ifd, view) :]
                     os.fsync(ifd)
                 finally:
                     os.close(ifd)
+            replaced = False
             try:
                 new_head, new_count = recs[n - 1].hash, a_count + n
                 body = [
@@ -843,10 +851,22 @@ class ChainLog(Generic[R]):
                     ] + segs
                 tip = recs[-1].hash
                 _write_atomic(self.path, "\n".join(body) + "\n")
+                replaced = True
                 self._write_ledger(tip, a_count + len(recs), segs)
             except BaseException:
-                # The live log was NOT replaced (or the ledger write failed after it): undo what we added so a
-                # failed archive leaves no phantom archived ids and no orphan segment.
+                if replaced:
+                    # The live log already left the archived records behind: the segment and the id index are
+                    # now the ONLY copy, so never delete them. The old ledger still matches (same head and
+                    # total); retry to record the segment, otherwise leave the state for the operator.
+                    for _ in range(3):
+                        try:
+                            self._write_ledger(tip, a_count + len(recs), segs)
+                            break
+                        except BaseException:
+                            continue
+                    raise
+                # The live log was NOT replaced: undo what we added so a failed archive leaves no phantom ids
+                # and no orphan segment.
                 if ids_size is not None:
                     try:
                         os.truncate(self._ids, ids_size)

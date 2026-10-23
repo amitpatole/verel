@@ -63,6 +63,12 @@ def merge(docs: list[dict[str, Any]]) -> dict[str, Any]:
 
 def load_facts(repo: str, rels: list[str]) -> tuple[dict[str, Any], str]:
     """Load + merge repo-confined facts files. Returns (facts, concatenated raw text for hashing)."""
+    merged, raw, _docs = load_fact_docs(repo, rels)
+    return merged, raw
+
+
+def load_fact_docs(repo: str, rels: list[str]) -> tuple[dict[str, Any], str, list[dict[str, Any]]]:
+    """As `load_facts`, plus each file's own document (so a caller can check EVERY file)."""
     if len(rels) > MAX_FACT_FILES:
         raise ValueError(f"at most {MAX_FACT_FILES} facts files")
     seen: set[str] = set()
@@ -84,4 +90,4 @@ def load_facts(repo: str, rels: list[str]) -> tuple[dict[str, Any], str]:
             raise ValueError(f"{rel}: facts must be a JSON object")
         docs.append(data)
         raws.append(raw)
-    return merge(docs), "\n".join(raws)
+    return merge(docs), "\n".join(raws), docs

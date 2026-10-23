@@ -154,6 +154,7 @@ verel auth add --file tokens.json --id alice --role operator --tenant acme   # t
 verel auth list|revoke|verify-audit ...
 verel serve-pilot --data-dir ./pilot-data --tokens tokens.json               # POST /v1/pilot/record|labels|archive, GET /v1/pilot/evaluation|verify
 verel pilot archive --log pilot.jsonl --keep-last 10000                      # retention
+# verify / repair / archive take --kind pilot|labels|policy|audit (serve-pilot keeps all four logs per tenant)
 ```
 
 ### Run a pilot (`verel pilot`) — shadow mode and earned enforcement

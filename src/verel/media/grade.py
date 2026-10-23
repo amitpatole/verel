@@ -11,7 +11,7 @@ from ..ci.graders import GraderSpec, _receipt
 from ..verdict.fingerprint import assign
 from ..verdict.models import Confidence, GraderKind, Issue, IssueKind, Report, Severity, Verdict
 from ._io import clean, load_json, read_text, sha256_file
-from .facts import MISSING, get_path, load_facts
+from .facts import MISSING, get_path, load_fact_docs
 from .rules import Outcome, Rule, Spec, evaluate, parse_spec
 
 
@@ -111,7 +111,7 @@ def grade_media(repo: str, *, facts: list[str], spec: str, today: dt.date | None
     `asset.sha256` fact a CRITICAL finding: facts that never say which file they measured prove nothing."""
     if not facts:
         raise ValueError("provide at least one --facts file")
-    merged, raw_facts = load_facts(repo, facts)
+    merged, raw_facts, fact_docs = load_fact_docs(repo, facts)
     sp, raw_spec = load_spec(repo, spec)
     issues = grade_spec(merged, sp, today=today)
     asset_digest = ""
@@ -119,6 +119,11 @@ def grade_media(repo: str, *, facts: list[str], spec: str, today: dt.date | None
     if asset is not None:
         asset_digest = sha256_file(repo, asset)
         claimed = get_path(merged, "asset.sha256")
+        # Every facts file must say which file it measured: a file that only names the hash, merged with
+        # measurements that name nothing, would otherwise bind facts nobody tied to this asset.
+        per_file = [get_path(d, "asset.sha256") for d in fact_docs]
+        if require_asset_binding and claimed is not MISSING and any(c is MISSING for c in per_file):
+            claimed = MISSING
         if claimed is MISSING and require_asset_binding:
             issues.append(Issue(
                 kind=IssueKind.SPEC_VIOLATION, severity=Severity.CRITICAL, source=GraderKind.MEDIA,
@@ -126,7 +131,7 @@ def grade_media(repo: str, *, facts: list[str], spec: str, today: dt.date | None
                 message="facts do not say which file they measured (asset.sha256 missing); cannot bind them",
                 detail_json=json.dumps({"rule_id": "_asset_binding_missing"})))
         elif claimed is not MISSING and str(claimed).lower() == asset_digest:
-            bound_ok = True
+            bound_ok = all(c is not MISSING and str(c).lower() == asset_digest for c in per_file)
         elif claimed is not MISSING and str(claimed).lower() != asset_digest:
             issues.append(Issue(
                 kind=IssueKind.SPEC_VIOLATION, severity=Severity.CRITICAL, source=GraderKind.MEDIA,

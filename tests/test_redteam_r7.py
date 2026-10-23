@@ -268,6 +268,6 @@ def test_a_decoy_record_cannot_suppress_a_real_decision(env):
     call(srv, "POST", "/v1/pilot/record", t["op"], {"artifact_id": "decoy",
                                                     "reports": [rep(False, sha).model_dump(mode="json")]})
     log = pilot_log(tmp / "data", "acme")
-    run_pilot([rep(True, sha, bound=True)], artifact_id="real", log=log, ref="hotfolder", recorded_by="hotfolder")
+    run_pilot([rep(True, sha, bound=True)], artifact_id="real", log=log, ref="hotfolder", recorded_by="hotfolder", trusted=True)
     st, ev = call(srv, "GET", "/v1/pilot/evaluation?min_samples=1", t["view"])
     assert ev["self_reported_excluded"] == 1 and ev["duplicate_content"] == 0   # the decoy never reaches the dedupe

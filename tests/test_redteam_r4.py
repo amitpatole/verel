@@ -312,7 +312,8 @@ def test_a_promoter_or_a_stray_label_does_not_make_a_second_reviewer(env):
         call(srv, "POST", "/v1/pilot/record", t["op"], {"artifact_id": f"a{i}", "reports": [rep(False).model_dump(mode="json")]})
     call(srv, "POST", "/v1/pilot/labels", t["op2"], {"labels": [{"artifact_id": "a40", "defect": False}]})
     st, d = call(srv, "GET", "/v1/pilot/evaluation", t["view"])
-    assert d["reviewers"] == 1 and d["label_authors"] == 2
+    # op labeled only decisions op recorded (dropped from scoring) and op2 labeled one stray artifact: nobody scores
+    assert d["reviewers"] == 0 and d["label_authors"] == 2
 
 
 def test_requesters_cannot_squat_internal_dedupe_keys(tmp_path):

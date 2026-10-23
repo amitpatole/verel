@@ -7,6 +7,11 @@ independent red-team rounds changed code across every phase (the evidence-log fo
 media graders), and the earlier intermediate builds contained issues that are now fixed. Publishing those
 intermediate builds would have shipped known-vulnerable code.
 
+Release-candidate review (round 9): a failed archive after the live log was replaced no longer deletes the
+archived records, a segment spliced back into the live log is detected, the two-reviewer rule counts only labels that
+score evidence, every facts file must name the asset, `bound` is only believed from an in-process grader (not HTTP
+reports), `verel pilot verify|repair|archive` take `--kind labels|policy|audit`, and job bodies with wrong types get a 400.
+
 ### Phase 1: shadow mode and earned enforcement
 - `verel.pilot` / `verel pilot`: run Verel beside an existing pipeline in `shadow` (log only), `advisory`
   (FAIL shown as WARN) or `enforce`. Every would-be verdict goes into a tamper-evident decision log. `verel pilot

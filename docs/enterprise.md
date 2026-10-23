@@ -104,7 +104,7 @@ lines are ignored, a deleted or truncated index is reported.
 Denials are audited with a per-principal budget (20 a minute, and a separate 200 a minute for privileged actions such as archive
 and promote, so cheap noise cannot hide an attempt on a sensitive route). Per tenant: at most 8 concurrent write requests (the rest get 429), 500 labels per request, 5,000 pending jobs. Waiting for a
 log's lock is bounded (10 s, then 503 with `Retry-After`). A write that fails midway (a full disk) is rolled back, a multi-record write announces itself in the keyed ledger first (so a crash is recovered, and a
-half-persisted batch after a power loss is fixed explicitly with `verel pilot repair`, never silently), and a
+half-persisted batch after a power loss is fixed explicitly with `verel pilot repair`, never silently; add `--kind labels|policy|audit` for the tenant's other logs), and a
 torn final line is dropped on the next write, so a log is never left unusable.
 
 ## Known gaps

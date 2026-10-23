@@ -65,6 +65,7 @@ def run_pilot(
     unique: bool = False,
     ref: str = "",
     recorded_by: str = "",
+    trusted: bool = False,
     **gate_kwargs: Any,
 ) -> PilotDecision:
     """Gate `reports`, log the would-be verdict, return the mode-adjusted one.
@@ -117,7 +118,9 @@ def run_pilot(
                 ref=ref[:128],
                 recorded_by=recorded_by[:128],
                 content=_content(reports),
-                bound=any(r.artifacts.get("facts_bound") == "1" for r in reports),
+                # `facts_bound` is only believed from a caller that graded the file itself (worker, hot
+                # folder): over HTTP the reports are the client's own claim.
+                bound=trusted and any(r.artifacts.get("facts_bound") == "1" for r in reports),
                 graders=graders,
                 # fingerprints come from caller-supplied reports: keep only well-formed short tokens, bounded
                 fingerprints=sorted(

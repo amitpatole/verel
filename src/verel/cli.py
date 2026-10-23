@@ -158,6 +158,8 @@ def _heal(args) -> int:
 def _pilot(args) -> int:
     """Shadow-mode pilot: `record` gates + logs a would-be verdict, `eval` scores the log against human
     labels and recommends which graders earned enforcement, `verify` checks the log's hash chain."""
+    from typing import Any
+
     from ._chainlog import LogBusy
     from .pilot import LogCorrupt, ShadowLog, evaluate, load_labels, parse_mode, run_pilot
     from .pilot.render import render
@@ -165,7 +167,20 @@ def _pilot(args) -> int:
         from .pilot.demo import run_demo
         return run_demo()
     # --domain: the log's MAC domain (empty for CLI logs, "<tenant>/pilot" for service data)
-    log = ShadowLog(getattr(args, "log", None) or os.devnull, domain=getattr(args, "domain", "") or "")
+    log_path, dom = getattr(args, "log", None) or os.devnull, getattr(args, "domain", "") or ""
+    kind = getattr(args, "kind", "pilot") or "pilot"
+    if kind == "labels":  # the label log of a serve-pilot tenant: its own record model
+        from ._chainlog import ChainLog
+        from .pilot.tenancy import LabelRecord
+        log: Any = ChainLog(_Path(log_path), LabelRecord, domain=dom, id_field="artifact_id")
+    elif kind == "policy":
+        from .pilot.policy import PolicyStore
+        log = PolicyStore(log_path, domain=dom)
+    elif kind == "audit":
+        from .auth.audit import AuditLog
+        log = AuditLog(log_path, domain=dom)
+    else:
+        log = ShadowLog(log_path, domain=dom)
     try:
         if args.pilot_cmd == "verify":
             n = log.verify(args.expect_head, segment=args.segment)
@@ -966,6 +981,8 @@ def main(argv=None) -> int:
     pla.add_argument("--log", required=True)
     pla.add_argument("--domain", default="", help="MAC domain of the evidence (empty for CLI-made logs; "
                       "'<tenant>/pilot' (or '/policy') for data written by `verel serve-pilot`)")
+    pla.add_argument("--kind", choices=["pilot", "labels", "policy", "audit"], default="pilot",
+                     help="which log: serve-pilot keeps decisions (pilot), labels, policy and audit logs")
     pla.add_argument("--keep-last", type=int, required=True)
     pla.add_argument("--segment", help="archive file to create (default: <log>.<UTC stamp>.archive)")
     plx = plsub.add_parser("repair", help="resolve an interrupted multi-record write left half-persisted by "
@@ -973,10 +990,14 @@ def main(argv=None) -> int:
     plx.add_argument("--log", required=True)
     plx.add_argument("--domain", default="", help="MAC domain of the evidence (empty for CLI-made logs; "
                       "'<tenant>/pilot' (or '/policy') for data written by `verel serve-pilot`)")
+    plx.add_argument("--kind", choices=["pilot", "labels", "policy", "audit"], default="pilot",
+                     help="which log: serve-pilot keeps decisions (pilot), labels, policy and audit logs")
     plv = plsub.add_parser("verify", help="verify the decision log's hash chain (exit 2 if tampered)")
     plv.add_argument("--log", required=True)
     plv.add_argument("--domain", default="", help="MAC domain of the evidence (empty for CLI-made logs; "
                       "'<tenant>/pilot' (or '/policy') for data written by `verel serve-pilot`)")
+    plv.add_argument("--kind", choices=["pilot", "labels", "policy", "audit"], default="pilot",
+                     help="which log: serve-pilot keeps decisions (pilot), labels, policy and audit logs")
     plv.add_argument("--segment", action="store_true", help="verify an archive segment (no head ledger)")
     plv.add_argument("--expect-head", default=None,
                      help="head hash recorded elsewhere; also detects tail truncation")
