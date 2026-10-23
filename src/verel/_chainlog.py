@@ -611,6 +611,9 @@ class ChainLog(Generic[R]):
             return None
         seg = copy.copy(self)
         seg.path = self.path.parent / last["name"]
+        if not seg.path.exists():
+            name = last["name"]
+            raise LogCorrupt(f"interrupted archive: segment {name!r} is not beside the log; restore, repair")
         seg._ledger = Path(str(seg.path) + ".head")
         seg._tl = threading.local()
         try:
@@ -839,6 +842,10 @@ class ChainLog(Generic[R]):
             if n == 0:
                 return 0
             seg = Path(segment)
+            if seg.resolve().parent != self.path.resolve().parent:
+                # The ledger records only the segment's NAME and `repair` looks next to the log: a segment
+                # elsewhere could not be found to finish an interrupted archive. Move it afterwards.
+                raise ValueError("the archive segment must be created next to the log (move it afterwards)")
             if seg.exists():
                 raise ValueError(f"archive segment already exists: {seg}")
             seg.parent.mkdir(parents=True, exist_ok=True)
@@ -915,7 +922,7 @@ class ChainLog(Generic[R]):
                     # ledger cannot be restored, keep the segment and ids so `repair()` can finish it.
                     try:
                         if old_led is not None:
-                            self._write_ledger(old_led[0], old_led[1], old_led[2])
+                            self._write_ledger(old_led[0], old_led[1], old_led[2], old_led[3])
                         restored = True
                     except BaseException:  # noqa: BLE001
                         restored = False

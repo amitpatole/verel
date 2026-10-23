@@ -53,7 +53,8 @@ Keep an external copy of `head` for that case.
 
 **Retention.** `verel pilot archive --log pilot.jsonl --keep-last N` moves older decisions into a verifiable
 archive segment and re-anchors the live log. That is an *authorized deletion*: delete a segment when your
-retention period ends and the live log still verifies. `verel pilot verify --segment` checks a segment.
+retention period ends and the live log still verifies. `verel pilot verify --segment` checks a segment. The segment is created next to the log (so an interrupted
+archive can be finished by `verel pilot repair`); move it to cold storage afterwards, and put it back before repairing.
 
 ## Telemetry
 

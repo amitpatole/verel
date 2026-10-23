@@ -260,3 +260,81 @@ def test_reviewer_count_ignores_labels_that_score_nothing(tmp_path, monkeypatch)
         assert st == 409 and "reviewer" in json.dumps(body)
     finally:
         srv.stop()
+
+
+# ---- round 11: a failed archive restores the EXACT old ledger (pending marker included); segment stays beside the log
+def test_failed_archive_keeps_a_pending_marker_so_repair_still_works(tmp_path):
+    log = ShadowLog(tmp_path / "l.jsonl")
+    for i in range(4):
+        log.append_unique(rec(i))
+    pid = os.fork()  # a crash after the record reached disk but before the committing ledger update
+    if pid == 0:
+        real = ChainLog._write_ledger
+
+        def die_on_commit(self, h, t, s, pending=None):
+            if pending is None:
+                os._exit(0)
+            return real(self, h, t, s, pending)
+
+        ChainLog._write_ledger = die_on_commit  # type: ignore[method-assign]
+        try:
+            log.append_unique(rec(4))
+        finally:
+            os._exit(1)
+    os.waitpid(pid, 0)
+    led = log._read_ledger()
+    assert led is not None and led[3] is not None and log.verify() == 5  # the documented pending state
+    real = ChainLog._write_ledger
+    calls = {"n": 0}
+
+    def flaky(self, *a, **k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise OSError(28, "No space left on device")
+        return real(self, *a, **k)
+
+    ChainLog._write_ledger = flaky  # type: ignore[method-assign]
+    try:
+        with pytest.raises(OSError):
+            log.archive_first(2, tmp_path / "s.archive")
+    finally:
+        ChainLog._write_ledger = real  # type: ignore[method-assign]
+    assert log.verify() == 5 and log._read_ledger()[3] is not None  # exactly the old ledger, marker included
+    assert log.repair() == 0 and log.verify() == 5
+    log.append_unique(rec(9))
+
+
+def test_archive_segment_must_sit_next_to_the_log(tmp_path):
+    log = _five(tmp_path)
+    other = tmp_path / "cold"
+    other.mkdir()
+    with pytest.raises(ValueError, match="next to the log"):
+        log.archive_first(2, other / "s.archive")
+    assert log.verify() == 5 and not (other / "s.archive").exists()
+
+
+def test_repair_says_the_segment_is_missing_when_it_is_not_beside_the_log(tmp_path, monkeypatch):
+    import verel._chainlog as cl
+
+    log = _five(tmp_path)
+    real_atomic, real_ledger, calls = cl._write_atomic, ChainLog._write_ledger, {"n": 0}
+
+    def die(path, *a, **k):
+        if str(path) == str(log.path):
+            raise KeyboardInterrupt
+        return real_atomic(path, *a, **k)
+
+    def stuck(self, *a, **k):
+        calls["n"] += 1
+        if calls["n"] > 1:
+            raise OSError(5, "I/O error")
+        return real_ledger(self, *a, **k)
+
+    monkeypatch.setattr(cl, "_write_atomic", die)
+    monkeypatch.setattr(ChainLog, "_write_ledger", stuck)
+    with pytest.raises(KeyboardInterrupt):
+        log.archive_first(3, tmp_path / "s.archive")
+    monkeypatch.undo()
+    (tmp_path / "s.archive").rename(tmp_path / "moved.archive")
+    with pytest.raises(LogCorrupt, match="not beside the log"):
+        log.repair()
