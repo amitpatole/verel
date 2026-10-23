@@ -194,18 +194,19 @@ class ChainLog(Generic[R]):
         return frozenset(good), count, counted, off
 
     def _check_ids_bound(self, counted_mac: str, count: int) -> None:
-        """The index must be THIS log's. Its chain MAC after `count` lines is recorded in the keyed ledger
-        when the lines are archived; otherwise another log's index (same MAC domain) could be copied over
-        this one and every id archived out of this log would read as never decided."""
-        if not count:
-            return
+        """The index must be THIS log's, and current. The anchor count (a MAC-valid but possibly OLD anchor
+        taken from a segment's first line) must equal the ledger's archived total, and the index chain MAC
+        after that many lines must equal the one the keyed ledger recorded when they were archived. Otherwise
+        another log's index, or an older anchor, would make archived ids read as never decided. Callers hold
+        the log's lock or have verified it, so no archive is in flight."""
         led = self._read_ledger()
-        cum, want = 0, None
-        for e in led[2] if led else []:
-            cum += int(e["count"])
-            if cum == count:
-                want = e.get("ids")
-                break
+        segs = led[2] if led else []
+        total = sum(int(e["count"]) for e in segs)
+        if count != total:
+            raise LogCorrupt("live anchor does not match the ledger's archive segments")
+        if not total:
+            return
+        want = segs[-1].get("ids")
         if want is None or not _eq(str(want), counted_mac):
             raise LogCorrupt("archived-id index does not belong to this log (replaced or edited)")
 
@@ -571,6 +572,13 @@ class ChainLog(Generic[R]):
                 raise LogCorrupt("head ledger missing for a non-empty log (deleted or replaced)")
             return GENESIS, 0, []
         l_head, l_total, segs, pending = led
+        if a_count != sum(int(e["count"]) for e in segs):
+            # O(1): the (MAC-valid) anchor must be the CURRENT one. An old anchor copied from a segment would
+            # otherwise make archived ids look undecided to an append that only checks the tail.
+            raise LogCorrupt(
+                "live anchor does not match the ledger's archive segments "
+                "(an interrupted archive? run `verel pilot repair`)"
+            )
         if last is None:
             if l_head != a_head or l_total != a_count:
                 raise LogCorrupt("log does not match its head ledger (truncated, deleted or replaced)")

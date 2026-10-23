@@ -417,3 +417,33 @@ def test_archive_failure_does_not_delete_a_file_it_did_not_create(tmp_path):
     with pytest.raises(OSError):
         log.archive_first(2, tmp_path / "seg")
     assert (tmp_path / "seg").is_symlink() and log.verify() == 5
+
+
+# ---- round 14: the live anchor must be the CURRENT one, or archived ids look undecided to a tail-only append ------
+def test_replacing_the_live_anchor_with_an_older_genuine_one_does_not_reopen_ids(tmp_path):
+    log = ShadowLog(tmp_path / "l.jsonl")
+    for i in range(5):
+        log.append_unique(rec(i))
+    log.archive_first(2, tmp_path / "s1.archive")
+    for i in range(5, 8):
+        log.append_unique(rec(i))
+    log.archive_first(2, tmp_path / "s2.archive")  # a0..a3 archived; the live log has a fresh anchor (count 4)
+    old_anchor = (tmp_path / "s2.archive").read_text().splitlines()[0]  # genuine anchor with count 2
+    lines = (tmp_path / "l.jsonl").read_text().splitlines()
+    (tmp_path / "l.jsonl").write_text("\n".join([old_anchor, *lines[1:]]) + "\n")
+    with pytest.raises(LogCorrupt):
+        log.append_unique(rec(3))  # a3 was decided and archived: it must not be decided again
+    assert len(log._read_ledger()[2]) == 2
+
+
+def test_deleting_the_live_anchor_does_not_reopen_ids(tmp_path):
+    log = ShadowLog(tmp_path / "l.jsonl")
+    for i in range(5):
+        log.append_unique(rec(i))
+    log.archive_first(3, tmp_path / "s.archive")
+    lines = (tmp_path / "l.jsonl").read_text().splitlines()
+    (tmp_path / "l.jsonl").write_text("\n".join(lines[1:]) + "\n")  # drop the anchor line
+    with pytest.raises(LogCorrupt):
+        log.append_unique(rec(1))
+    with pytest.raises(LogCorrupt):
+        log.append_unique(rec(20))

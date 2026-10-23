@@ -16,7 +16,8 @@ between the two is finished by `verel pilot repair` (verified against the segmen
 marker), and the archive segment must sit next to the log. Round 12: the archived-id index is trusted only up to the count the anchor
 commits to, so a torn or orphaned tail can neither block the log nor mark live ids as retired, and a live record always
 wins over the archived-id check. Round 13: the archived-id index is bound to its log through the keyed ledger (another log's index on the
-same MAC domain can no longer be swapped in), and a failed archive only removes a segment file it created.
+same MAC domain can no longer be swapped in), and a failed archive only removes a segment file it created. Round 14: appends verify that the live anchor is the current one (an older genuine anchor, or no anchor, can no
+longer make archived ids look undecided).
 
 ### Phase 1: shadow mode and earned enforcement
 - `verel.pilot` / `verel pilot`: run Verel beside an existing pipeline in `shadow` (log only), `advisory`
