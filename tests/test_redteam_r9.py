@@ -521,3 +521,72 @@ def test_a_cached_position_that_was_edited_is_reported(tmp_path):
         log.append_unique(rec(3))
     with pytest.raises(LogCorrupt):
         log.verify()
+
+
+# ---- round 17: the offset map is tied to the verified records and never carried forward unless trusted ------------
+def test_the_first_record_for_an_id_answers_a_duplicate(tmp_path):
+    from verel.pilot.log import DuplicateArtifact
+
+    log = ShadowLog(tmp_path / "l.jsonl")
+    first = rec(5)
+    first.ref = "job:A"
+    log.append_unique(first)
+    second = rec(5)
+    second.ref = ""
+    log.append(second)  # the plain append does no uniqueness check, so an id can appear twice
+    with pytest.raises(DuplicateArtifact) as ei:
+        log.append_unique(rec(5))
+    assert ei.value.existing.ref == "job:A"
+
+
+def test_a_misaligned_layout_still_answers_duplicates_from_a_full_read(tmp_path):
+    import verel._chainlog as cl
+    from verel.pilot.log import DuplicateArtifact
+
+    log = _five(tmp_path)
+    cl._LIVE_IDS.clear()
+    p = tmp_path / "l.jsonl"
+    raw = p.read_bytes()
+    ln = raw.rstrip(b"\n").split(b"\n")
+    # a CR joins two lines for a raw split but not for the text parser; an FS line is blank to the parser but
+    # not to a raw split: the two line counts cancel out and every offset after the first is misaligned
+    p.write_bytes(b"\n".join([ln[0] + b"\r" + ln[1], ln[2], ln[3], b"\x1c", ln[4]]) + b"\n")
+    for i in (1, 2, 3):
+        with pytest.raises(DuplicateArtifact) as ei:
+            log.append_unique(rec(i))
+        assert ei.value.existing is not None and ei.value.existing.artifact_id == f"a{i}"
+
+
+def test_a_map_built_while_the_file_moved_is_not_carried_forward(tmp_path, monkeypatch):
+    import verel._chainlog as cl
+    from verel.pilot.log import DuplicateArtifact
+
+    log = _five(tmp_path)
+    cl._LIVE_IDS.clear()  # start cold so the verified read really happens inside the append
+    p = tmp_path / "l.jsonl"
+    original = p.read_bytes()
+    real_write = ChainLog._write_records
+    state = {"armed": True}
+
+    def shifted_then_restored(self, *a, **k):
+        if state["armed"]:
+            state["armed"] = False
+            p.write_bytes(original)  # the attacker puts the bytes back before our write
+        return real_write(self, *a, **k)
+
+    real_records = ChainLog._records_uncached
+
+    def verified_then_shifted(self, *a, **k):
+        out = real_records(self, *a, **k)
+        if state["armed"]:
+            p.write_bytes(b"\n" + original)  # a blank line is slipped in right after the verified read
+        return out
+
+    monkeypatch.setattr(ChainLog, "_records_uncached", verified_then_shifted)
+    monkeypatch.setattr(ChainLog, "_write_records", shifted_then_restored)
+    log.append_unique(rec(9))
+    monkeypatch.undo()
+    for i in (0, 3, 9):  # every legitimate retry must still get the real record back
+        with pytest.raises(DuplicateArtifact) as ei:
+            log.append_unique(rec(i))
+        assert ei.value.existing is not None and ei.value.existing.artifact_id == f"a{i}"

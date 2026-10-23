@@ -19,7 +19,8 @@ wins over the archived-id check. Round 13: the archived-id index is bound to its
 same MAC domain can no longer be swapped in), and a failed archive only removes a segment file it created. Round 14: appends verify that the live anchor is the current one (an older genuine anchor, or no anchor, can no
 longer make archived ids look undecided). Round 15: a decided id is refused from verified, parsed records, never from a byte scan (a re-serialized or
 deleted-then-restored line could hide it), with the verified id set carried forward between one process's own appends. Round 16: a repeated id is answered by re-reading one cached line, so a flood of duplicates cannot hold the
-write lock for a whole-log verify.
+write lock for a whole-log verify. Round 17: each cached offset must land on the line carrying that record's hash, a map built while the file moved
+is never carried forward, the new record's offset comes from the write itself, and the first record for an id answers.
 
 ### Phase 1: shadow mode and earned enforcement
 - `verel.pilot` / `verel pilot`: run Verel beside an existing pipeline in `shadow` (log only), `advisory`
