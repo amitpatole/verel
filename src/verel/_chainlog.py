@@ -156,8 +156,12 @@ class ChainLog(Generic[R]):
             out.append(f"{d} {prev_mac}\n".encode())
         return b"".join(out), prev_mac
 
-    def _ids_state(self) -> tuple[frozenset, int, str]:
-        """(digests, line count, last chain MAC), verified: a line that does not chain is corruption."""
+    def _ids_state(self, limit: int) -> tuple[frozenset, int, str, int]:
+        """(digests, line count, last chain MAC, byte offset after the last counted line). Only the first
+        `limit` lines count: that is how many the anchor commits to. Lines after them are an orphan tail from
+        an archive that never completed: they must still chain (a forged line is reported) but they retire
+        nothing. An unterminated final write (a torn tail) is ignored. Fewer than `limit` lines, or any line
+        that does not chain, is corruption."""
         fd = os.open(self._ids, os.O_RDONLY | _NOFOLLOW)
         try:
             st = os.fstat(fd)
@@ -168,9 +172,11 @@ class ChainLog(Generic[R]):
         finally:
             os.close(fd)
         good: set[bytes] = set()
-        prev, count = "0" * 16, 0
-        for ln in raw.split(b"\n"):
+        prev = counted = "0" * 16
+        count = off = 0
+        for ln in raw.split(b"\n")[:-1]:  # the last piece is "" or an unfinished write
             if not ln:
+                off += 1 if count < limit else 0
                 continue
             parts = ln.split(b" ")
             if len(parts) != 2:
@@ -179,9 +185,13 @@ class ChainLog(Generic[R]):
             want = self._m(f"ids:{prev}:{d}")[:16]
             if not _eq(want, parts[1].decode("ascii", "replace")):
                 raise LogCorrupt("archived-id index was tampered with")
-            good.add(parts[0])
-            prev, count = want, count + 1
-        return frozenset(good), count, prev
+            if count < limit:
+                good.add(parts[0])
+                count, off, counted = count + 1, off + len(ln) + 1, want
+            prev = want
+        if count < limit:
+            raise LogCorrupt("archived-id index is missing entries (deleted or truncated)")
+        return frozenset(good), count, counted, off
 
     def archived_has(self, value: str) -> bool:
         """Was `value` (the id field of some record) archived out of the live log? Retention must not let a
@@ -204,12 +214,12 @@ class ChainLog(Generic[R]):
             st = self._ids.stat()
         except OSError:
             raise LogCorrupt("archived-id index unreadable") from None
-        key = (str(self._ids), st.st_mtime_ns, st.st_size, st.st_ino, self._m("ids"))
+        key = (str(self._ids), st.st_mtime_ns, st.st_size, st.st_ino, self._m("ids"), archived_total)
         with _CACHE_LOCK:
             hit = _IDS_CACHE.get(str(self._ids))
         if hit is None or hit[0] != key:
             try:
-                digests, lines, last = self._ids_state()
+                digests, lines, last, _end = self._ids_state(archived_total)
             except OSError:
                 raise LogCorrupt("archived-id index unreadable") from None
             hit = (key, digests, lines, last)
@@ -217,8 +227,6 @@ class ChainLog(Generic[R]):
                 if len(_IDS_CACHE) >= _VERIFIED_MAX * 8:
                     _IDS_CACHE.pop(next(iter(_IDS_CACHE)), None)
                 _IDS_CACHE[str(self._ids)] = hit
-        if hit[2] < archived_total:
-            raise LogCorrupt("archived-id index is missing entries (deleted or truncated)")
         return self._id_digest(value) in hit[1]
 
     def _open_lines(self):
@@ -797,9 +805,7 @@ class ChainLog(Generic[R]):
         try:
             self._repair_torn_tail()
             prev, total, segs = self._tail()
-            if extra_seen is not None and extra_seen():
-                raise duplicate(rec)
-            if self.path.exists():
+            if self.path.exists():  # a LIVE record wins: the caller gets the real one back
                 with open(self.path, "rb") as fh:
                     for line in fh:
                         if needle in line:
@@ -809,6 +815,8 @@ class ChainLog(Generic[R]):
                                 continue
                             if confirm(existing):
                                 raise duplicate(existing)
+            if extra_seen is not None and extra_seen():
+                raise duplicate(rec)
             self._write_records([rec], prev, total, segs)
             return rec
         finally:
@@ -863,29 +871,40 @@ class ChainLog(Generic[R]):
                     )
                 )
             lines += [r.model_dump_json() for r in recs[:n]]
-            sfd = os.open(seg, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW, 0o600)
-            with os.fdopen(sfd, "w", encoding="utf-8") as fh:
-                fh.write("\n".join(lines) + "\n")
-                fh.flush()
-                os.fsync(fh.fileno())
+            old_led = None
             ids_size = None
-            if self._id_field:  # remember the ids about to leave the live log (the segment already exists)
-                try:
-                    prev_mac = self._ids_state()[2] if self._ids.exists() else "0" * 16
-                except OSError:
-                    raise LogCorrupt("archived-id index unreadable") from None
-                payload, _last = self._id_lines([str(getattr(r, self._id_field)) for r in recs[:n]], prev_mac)
-                ids_size = self._ids.stat().st_size if self._ids.exists() else 0
-                ifd = os.open(self._ids, os.O_WRONLY | os.O_APPEND | os.O_CREAT | _NOFOLLOW, 0o600)
-                try:
-                    view = memoryview(payload)
-                    while view:  # a short write must not leave a torn index line
-                        view = view[os.write(ifd, view) :]
-                    os.fsync(ifd)
-                finally:
-                    os.close(ifd)
-            old_led = self._read_ledger()
+            new_count = a_count + n
             try:
+                sfd = os.open(seg, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW, 0o600)
+                with os.fdopen(sfd, "w", encoding="utf-8") as fh:
+                    fh.write("\n".join(lines) + "\n")
+                    fh.flush()
+                    os.fsync(fh.fileno())
+                if self._id_field:  # remember the ids about to leave the live log
+                    try:
+                        if self._ids.exists():
+                            # Trust only the lines the anchor commits to; trim a torn or orphaned tail first.
+                            _d, _c, prev_mac, end = self._ids_state(a_count)
+                        elif a_count:
+                            raise LogCorrupt("archived-id index is missing (records were archived)")
+                        else:
+                            prev_mac, end = "0" * 16, 0
+                        if self._ids.exists() and self._ids.stat().st_size != end:
+                            os.truncate(self._ids, end)
+                    except OSError:
+                        raise LogCorrupt("archived-id index unreadable") from None
+                    moving = [str(getattr(r, self._id_field)) for r in recs[:n]]
+                    payload, _last = self._id_lines(moving, prev_mac)
+                    ids_size = end
+                    ifd = os.open(self._ids, os.O_WRONLY | os.O_APPEND | os.O_CREAT | _NOFOLLOW, 0o600)
+                    try:
+                        view = memoryview(payload)
+                        while view:  # a short write must not leave a torn index line
+                            view = view[os.write(ifd, view) :]
+                        os.fsync(ifd)
+                    finally:
+                        os.close(ifd)
+                old_led = self._read_ledger()
                 new_head, new_count = recs[n - 1].hash, a_count + n
                 body = [
                     json.dumps(

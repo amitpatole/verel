@@ -338,3 +338,52 @@ def test_repair_says_the_segment_is_missing_when_it_is_not_beside_the_log(tmp_pa
     (tmp_path / "s.archive").rename(tmp_path / "moved.archive")
     with pytest.raises(LogCorrupt, match="not beside the log"):
         log.repair()
+
+
+# ---- round 12: the archived-id index is trusted only up to the count the anchor commits to ------------------------
+def test_a_torn_ids_tail_does_not_brick_the_log_and_is_trimmed_by_the_next_archive(tmp_path):
+    log = _five(tmp_path)
+    log.archive_first(2, tmp_path / "s1.archive")
+    with open(tmp_path / "l.jsonl.ids", "ab") as fh:  # ENOSPC part-way through an index write
+        fh.write(b"2c3")
+    assert log.archived_has("a0") and not log.archived_has("a4")
+    log.append_unique(rec(9))
+    assert log.archive_first(2, tmp_path / "s2.archive") == 2
+    assert log.archived_has("a0") and log.archived_has("a3") and not log.archived_has("a4")
+    assert log.verify() == 2
+
+
+def test_ids_from_an_archive_that_never_completed_do_not_retire_live_ids(tmp_path):
+    from verel.pilot.log import DuplicateArtifact
+
+    log = _five(tmp_path)
+    log.archive_first(2, tmp_path / "s1.archive")
+    _d, count, last, _end = log._ids_state(2)
+    payload, _ = log._id_lines(["a2", "a3"], last)  # a crash after the index append, before the ledger write
+    with open(tmp_path / "l.jsonl.ids", "ab") as fh:
+        fh.write(payload)
+    assert not log.archived_has("a2")  # a2 is LIVE
+    with pytest.raises(DuplicateArtifact) as ei:
+        log.append_unique(rec(2))
+    assert ei.value.existing is not None and ei.value.existing.artifact_id == "a2"  # the real record comes back
+    assert log.archive_first(2, tmp_path / "s2.archive") == 2 and log.archived_has("a3")
+
+
+def test_enospc_during_the_index_write_rolls_back_the_whole_archive(tmp_path, monkeypatch):
+    log = _five(tmp_path)
+    real_write = os.write
+
+    def torn(fd, data):
+        if os.readlink(f"/proc/self/fd/{fd}").endswith(".ids"):
+            real_write(fd, bytes(data)[:5])
+            raise OSError(28, "No space left on device")
+        return real_write(fd, data)
+
+    monkeypatch.setattr(os, "write", torn)
+    with pytest.raises(OSError):
+        log.archive_first(3, tmp_path / "s.archive")
+    monkeypatch.undo()
+    assert not (tmp_path / "s.archive").exists() and log.verify() == 5
+    assert not log.archived_has("a0")
+    log.append_unique(rec(9))
+    assert log.archive_first(3, tmp_path / "s.archive") == 3 and log.archived_has("a0")

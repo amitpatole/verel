@@ -13,7 +13,9 @@ score evidence, every facts file must name the asset, `bound` is only believed f
 reports), `verel pilot verify|repair|archive` take `--kind labels|policy|audit`, and job bodies with wrong types get a 400. Round 10 followed: the archive writes its ledger before replacing the live log, so a crash
 between the two is finished by `verel pilot repair` (verified against the segment) instead of leaving the log unverifiable, and
 `verel pilot archive` refuses the policy log. Round 11: a failed archive restores the exact old ledger (including a pending
-marker), and the archive segment must sit next to the log.
+marker), and the archive segment must sit next to the log. Round 12: the archived-id index is trusted only up to the count the anchor
+commits to, so a torn or orphaned tail can neither block the log nor mark live ids as retired, and a live record always
+wins over the archived-id check.
 
 ### Phase 1: shadow mode and earned enforcement
 - `verel.pilot` / `verel pilot`: run Verel beside an existing pipeline in `shadow` (log only), `advisory`
