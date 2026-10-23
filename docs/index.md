@@ -16,6 +16,10 @@ verel doctor                 # check your environment
 verel heal --repo .          # self-healing CI: failing tests → agent fixes → green
 ```
 
+Verel's memory design is catalogued in the third-party **[Agent Memory Atlas](https://neoneye.github.io/agent-memory-atlas/systems/verel/)**.
+Its review scored an early snapshot (3 of 7); what changed since, and how Verel re-runs the atlas's own rubric on itself, is in
+[Memory self-assessment](memory-atlas-self-assessment.md).
+
 One **verdict bus** unifies vision + tests + lint + types into a single `pass / warn / fail`,
 so *progress*, *"done"*, and *what compounds* are all decided in one place — with grader
 attestation (a signed receipt of what actually ran) so a *hollow check* — a grader that claims

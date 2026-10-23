@@ -1,5 +1,7 @@
 # Memory self-assessment (agent-memory-atlas method)
 
+Verel's own page in the atlas: **[agent-memory-atlas / systems / verel](https://neoneye.github.io/agent-memory-atlas/systems/verel/)**.
+
 The [agent-memory-atlas](https://neoneye.github.io/agent-memory-atlas/) grades agent-memory systems on
 **seven binary dimensions** by inspecting code at a pinned commit and *tracing* behaviour — capture →
 storage → retrieval → correction → deletion. It scored an early snapshot of Verel **3/7**. Rather than
